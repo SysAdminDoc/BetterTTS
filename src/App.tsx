@@ -610,11 +610,17 @@ function App() {
       return
     }
 
+    if (overLimit) {
+      showToast({
+        tone: 'warn',
+        message: `Text exceeds ${MAX_TEXT_CHARS} characters — the last ${text.length - MAX_TEXT_CHARS} characters will be dropped.`,
+      })
+    }
+
     if (isSpeaking && 'speechSynthesis' in window) window.speechSynthesis.cancel()
     setIsSpeaking(false)
     clearOutputs()
     setIsGenerating(true)
-    setToast(null)
 
     try {
       if (engine === 'kokoro') {
@@ -667,8 +673,14 @@ function App() {
 
     const reader = new FileReader()
     reader.onload = () => {
-      setText(String(reader.result ?? '').slice(0, MAX_TEXT_CHARS))
-      showToast({ tone: 'ok', message: `${file.name} imported.` })
+      const raw = String(reader.result ?? '')
+      const truncated = raw.length > MAX_TEXT_CHARS
+      setText(raw.slice(0, MAX_TEXT_CHARS))
+      showToast(
+        truncated
+          ? { tone: 'warn', message: `${file.name} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters.` }
+          : { tone: 'ok', message: `${file.name} imported.` },
+      )
     }
     reader.onerror = () => showToast({ tone: 'error', message: 'File import failed.' })
     reader.readAsText(file)
@@ -709,7 +721,8 @@ function App() {
             <div className="section-heading">
               <span>Text</span>
               <span className={overLimit ? 'danger-text' : ''}>
-                {usableText.length} / {MAX_TEXT_CHARS}
+                {text.length} / {MAX_TEXT_CHARS}
+                {overLimit ? ` (${text.length - MAX_TEXT_CHARS} over)` : ''}
               </span>
             </div>
             <div className="editor-frame">
