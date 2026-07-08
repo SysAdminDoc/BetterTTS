@@ -1,6 +1,6 @@
+import { installKokoroAssetFallback, kokoroRemoteAssetUrl } from './kokoro-assets.ts'
 import type { VoiceId } from './voices.ts'
 
-const VOICE_BIN_URL = 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices'
 const CACHE_NAME = 'kokoro-voices'
 const STYLE_FLOATS = 510 * 256
 
@@ -8,7 +8,8 @@ const binCache = new Map<string, Float32Array>()
 
 export async function fetchVoiceBin(voiceId: string): Promise<Float32Array> {
   if (binCache.has(voiceId)) return binCache.get(voiceId)!
-  const url = `${VOICE_BIN_URL}/${voiceId}.bin`
+  installKokoroAssetFallback()
+  const url = kokoroRemoteAssetUrl(`voices/${voiceId}.bin`)
 
   let cache: Cache | undefined
   try {

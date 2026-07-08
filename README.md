@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-91%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-95%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M runs entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, or Opus — keep everything private.
 
@@ -36,6 +36,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
 - **28 English voices** — 12 US female, 9 US male, 4 British female, 4 British male, each with quality grades
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
+- **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
@@ -107,9 +108,9 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-2.1, browser LAME) |
 | Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
-| ZIP Packaging | `jszip` |
+| ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (39 assertions across 3 suites) |
+| Testing | Vitest (95 assertions across 9 suites) |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -123,6 +124,7 @@ src/
 ├── main.tsx                 # React entry point + SW registration
 ├── lib/
 │   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
+│   ├── kokoro-assets.ts     # Pages-hosted q8 asset routing + HF fallback
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── wav.ts               # Raw PCM → WAV encoder
@@ -137,7 +139,7 @@ src/
 ```
 
 **Key design decisions:**
-- Model files (~92 MB q8) download from HuggingFace CDN on first use and cache in the browser's Cache API
+- WASM q8 model files (~107 MB including tokenizer and 28 voice bins) load from the GitHub Pages site first, then fall back to Hugging Face with 429-aware retry
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
 - Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages
@@ -150,7 +152,7 @@ This project does not use GitHub Actions. Build and publish locally:
 npm run deploy
 ```
 
-The deploy script builds `dist/` and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Then in repository settings: **Pages** → Source: `gh-pages` branch, folder: `/`.
+The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Then in repository settings: **Pages** → Source: `gh-pages` branch, folder: `/`.
 
 ## Voice Catalog
 
@@ -178,7 +180,7 @@ The deploy script builds `dist/` and force-pushes it to the `gh-pages` branch fr
 | ONNX source | `onnx-community/Kokoro-82M-v1.0-ONNX` |
 | Sample rate | 24,000 Hz |
 | WebGPU dtype | fp32 (~326 MB) |
-| WASM dtype | q8 (~92 MB) |
+| WASM dtype | q8 (~92 MB, Pages-hosted) |
 | Languages | English (US + British) |
 | License | Apache-2.0 |
 
@@ -186,12 +188,11 @@ The deploy script builds `dist/` and force-pushes it to the `gh-pages` branch fr
 
 Planned features (see [ROADMAP.md](ROADMAP.md) for details):
 
-- Multilingual support (31 languages via Supertonic 3)
-- Voice mixing formulas (`af_heart(2)+bm_george(1)`)
-- EPUB/PDF audiobook import with chapter-aware batch generation
+- Multilingual Kokoro pack (es/fr/it/pt/hi)
 - Word-level timestamps and karaoke highlighting
-- Additional engine support (KittenTTS, Piper)
+- Additional engine support (Supertonic, KittenTTS, Piper)
 - Transformers.js v4 migration for WebGPU speedups
+- M4B chaptered audiobook export
 
 ## Contributing
 

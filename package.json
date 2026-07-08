@@ -11,7 +11,8 @@
     "test": "vitest run",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "node scripts/deploy.mjs"
+    "deploy": "node scripts/deploy.mjs",
+    "sync:kokoro": "node scripts/sync-kokoro-assets.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

@@ -1,5 +1,6 @@
-export const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-export const KOKORO_SAMPLE_RATE = 24000
+import { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE, installKokoroAssetFallback } from './kokoro-assets.ts'
+
+export { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE }
 
 type KokoroModule = typeof import('kokoro-js')
 export type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
@@ -33,6 +34,8 @@ export async function probeWebGpu(): Promise<boolean> {
 
 export async function loadKokoro(onProgress: (info: ProgressInfo) => void): Promise<KokoroInstance> {
   if (kokoroPromise) return kokoroPromise
+
+  installKokoroAssetFallback()
 
   const [{ KokoroTTS }, hasWebGpu] = await Promise.all([
     import('kokoro-js'),

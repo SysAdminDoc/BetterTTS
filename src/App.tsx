@@ -1498,7 +1498,7 @@ function App() {
                   <span>{engine === 'kokoro' ? <Check size={17} aria-hidden="true" /> : null}</span>
                   <strong>Kokoro local</strong>
                   <small>
-                    {runtimeLabel}. WAV export.{modelCached ? ' Model cached.' : ''}
+                    {runtimeLabel}. WAV export.{runtimeLabel === 'WebAssembly q8' ? ' Pages-hosted model.' : ' HF model.'}{modelCached ? ' Model cached.' : ''}
                     {storageEstimate ? ` ${storageEstimate}.` : ''}
                   </small>
                 </button>
@@ -1972,7 +1972,7 @@ function App() {
         <section className="technical-note" id="docs">
           <span>How it works</span>
           <p>
-            Kokoro 82M runs locally in your browser via Transformers.js. The model downloads once (~92 MB) and caches for instant reuse. No server involved.
+            Kokoro 82M runs locally in your browser via Transformers.js. WASM q8 loads from this site first, then falls back to Hugging Face with rate-limit backoff; WebGPU fp32 remains HF-hosted. No server involved.
           </p>
           <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank" rel="noreferrer">
             Model card <ExternalLink size={15} aria-hidden="true" />

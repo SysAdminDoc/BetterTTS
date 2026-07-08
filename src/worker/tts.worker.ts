@@ -1,4 +1,5 @@
-import { KOKORO_MODEL_ID, type ProgressInfo } from '../lib/kokoro.ts'
+import { KOKORO_MODEL_ID, installKokoroAssetFallback } from '../lib/kokoro-assets.ts'
+import type { ProgressInfo } from '../lib/kokoro.ts'
 
 type KokoroModule = typeof import('kokoro-js')
 type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
@@ -27,6 +28,7 @@ self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
       return
     }
     try {
+      installKokoroAssetFallback()
       const { KokoroTTS } = await import('kokoro-js')
       tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
         device: msg.device,

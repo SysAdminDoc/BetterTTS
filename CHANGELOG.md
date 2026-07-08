@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Added same-origin-first Kokoro q8 model and voice asset loading for GitHub Pages, with Hugging Face fallback and 429-aware retry; deploy now syncs the 92 MB q8 ONNX, tokenizer/config, and 28 English voice bins into `dist/models` (TF-68).
 - Replaced the SoundTouch.js pitch-shift path with Signalsmith Stretch AudioWorklet/WASM offline rendering; +/-4 semitone exports keep exact length and a non-zero tail in Chromium browser QA (TF-70).
 
 ## v0.10.0 - 2026-07-08
