@@ -1,5 +1,10 @@
 const CACHE_NAME = 'bettertts-shell-__BUILD_ID__'
 
+// credentialless keeps SharedArrayBuffer available even if a model CDN stops
+// sending CORP/CORS headers; engines without it (Safari, older Firefox) keep
+// require-corp, which HuggingFace's CORS headers satisfy today.
+const COEP_VALUE = /Chrome\//.test(self.navigator.userAgent) ? 'credentialless' : 'require-corp'
+
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
 })
@@ -24,7 +29,7 @@ self.addEventListener('fetch', (event) => {
         if (!response.ok || response.type === 'opaque') return response
 
         const headers = new Headers(response.headers)
-        headers.set('Cross-Origin-Embedder-Policy', 'require-corp')
+        headers.set('Cross-Origin-Embedder-Policy', COEP_VALUE)
         headers.set('Cross-Origin-Opener-Policy', 'same-origin')
         headers.set('Cross-Origin-Resource-Policy', 'cross-origin')
 

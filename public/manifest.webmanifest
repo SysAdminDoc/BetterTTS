@@ -2,6 +2,8 @@
   "name": "BetterTTS",
   "short_name": "BetterTTS",
   "description": "Static GitHub Pages text-to-speech studio with in-browser Kokoro generation.",
+  "id": "/BetterTTS/",
+  "scope": "/BetterTTS/",
   "start_url": "./",
   "display": "standalone",
   "theme_color": "#05080d",

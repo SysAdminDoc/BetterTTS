@@ -19,7 +19,31 @@ function swBuildId(): Plugin {
   }
 }
 
+// Build-only: the dev server needs Vite's inline preamble scripts, which a
+// strict CSP would block. Production output has no inline scripts.
+function cspInjector(): Plugin {
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' blob: 'wasm-unsafe-eval'",
+    "connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' blob: data:",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join('; ')
+  return {
+    name: 'csp-inject',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`)
+    },
+  }
+}
+
 export default defineConfig({
   base: '/BetterTTS/',
-  plugins: [react(), swBuildId()],
+  plugins: [react(), swBuildId(), cspInjector()],
 })

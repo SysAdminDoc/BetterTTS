@@ -58,7 +58,7 @@ type Toast = {
 
 const STARTER_TEXT = `Welcome to BetterTTS — free text-to-speech that runs entirely in your browser.
 
-No server, no signup, no character limits. Your text never leaves this device.
+No server, no signup, unlimited use — up to 5,000 characters per run. Your text never leaves this device.
 
 Pick a voice from the panel on the right, then click Generate audio. The Kokoro 82M neural model will synthesize your text into natural-sounding speech.
 
@@ -906,7 +906,7 @@ function App() {
             <section className="output-panel" aria-label="Generated audio">
               <div className="section-heading">
                 <span>Output</span>
-                <span>{status}</span>
+                <span aria-live="polite">{status}</span>
               </div>
               {results.length === 0 ? (
                 <div className="empty-output">
@@ -1017,7 +1017,8 @@ function App() {
                               a.href = url
                               a.download = clip.filename
                               a.click()
-                              URL.revokeObjectURL(url)
+                              // Immediate revocation can abort the save in Safari.
+                              setTimeout(() => URL.revokeObjectURL(url), 1000)
                             }
                           }}
                         >
@@ -1243,7 +1244,7 @@ function App() {
                       <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
                       <span>
                         Stream playback
-                        <small>Play audio as each sentence is generated.</small>
+                        <small>Play audio as it generates. Pitch and music apply to the exported file.</small>
                       </span>
                     </label>
                     <label className="toggle-row">
@@ -1313,6 +1314,7 @@ function App() {
                       type="button"
                       className="heading-action pron-toggle"
                       onClick={() => setShowPronunciations(!showPronunciations)}
+                      aria-expanded={showPronunciations}
                     >
                       Pronunciations ({Object.keys(pronunciations).length})
                     </button>
