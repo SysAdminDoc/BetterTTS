@@ -807,7 +807,9 @@ function App() {
                         <span>{result.duration}</span>
                         <span>{result.size}</span>
                       </div>
-                      {result.url ? <audio controls src={result.url} /> : null}
+                      {result.url ? (
+                        <audio controls src={result.url} aria-label={result.filename} />
+                      ) : null}
                       <div className="result-actions">
                         {result.replayText ? (
                           <button type="button" onClick={() => replayBrowser(result.replayText!)} disabled={isSpeaking}>
@@ -924,7 +926,14 @@ function App() {
             </label>
 
             {progress !== null ? (
-              <div className="progress-wrap" aria-label={`Generation progress ${progress}%`}>
+              <div
+                className="progress-wrap"
+                role="progressbar"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Generation progress"
+              >
                 <span style={{ width: `${progress}%` }} />
               </div>
             ) : null}
@@ -1031,7 +1040,7 @@ git subtree push --prefix dist origin gh-pages
         </footer>
 
         {toast ? (
-          <div className={`toast ${toast.tone}`} role="status">
+          <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>
             {toast.tone === 'error' ? <AlertCircle size={17} aria-hidden="true" /> : <Info size={17} aria-hidden="true" />}
             <span>{toast.message}</span>
           </div>
