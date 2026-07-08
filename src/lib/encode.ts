@@ -71,10 +71,6 @@ export async function mixBgm(speech: Float32Array, bgmFile: File, bgmGain: numbe
   return { mixed, bgmEmpty: false }
 }
 
-// Trailing silence fed through SoundTouch so its WSOLA pipeline latency is
-// flushed; without it the last ~50-100 ms of speech never leaves the filter.
-const FLUSH_PAD_SAMPLES = 8192
-
 export async function shiftPitch(samples: Float32Array, semitones: number): Promise<Float32Array> {
   if (semitones === 0) return samples
   const { SoundTouch, SimpleFilter } = await import('soundtouchjs')
@@ -82,48 +78,47 @@ export async function shiftPitch(samples: Float32Array, semitones: number): Prom
   const st = new SoundTouch()
   st.pitchSemitones = semitones
 
-  const paddedLength = samples.length + FLUSH_PAD_SAMPLES
-  const interleaved = new Float32Array(paddedLength * 2)
+  const interleaved = new Float32Array(samples.length * 2)
   for (let i = 0; i < samples.length; i++) {
     interleaved[i * 2] = samples[i]
     interleaved[i * 2 + 1] = samples[i]
   }
 
+  // After the real samples run out, keep feeding silence so SoundTouch's
+  // pipeline latency is flushed — otherwise the final ~100 ms never leaves the
+  // filter. The output loop stops once the original length is reached.
   const source = {
     extract(target: Float32Array, numFrames: number, position: number): number {
       const start = position * 2
-      const end = Math.min(start + numFrames * 2, interleaved.length)
-      const available = Math.floor((end - start) / 2)
-      if (available <= 0) return 0
-      target.set(interleaved.subarray(start, start + available * 2))
-      return available
+      if (start < interleaved.length) {
+        const end = Math.min(start + numFrames * 2, interleaved.length)
+        const available = Math.floor((end - start) / 2)
+        target.set(interleaved.subarray(start, start + available * 2))
+        target.fill(0, available * 2, numFrames * 2)
+        return available
+      }
+      target.fill(0, 0, numFrames * 2)
+      return numFrames
     },
   }
 
   const filter = new SimpleFilter(source, st)
-  const outChunks: Float32Array[] = []
+  const mono = new Float32Array(samples.length)
   const chunkSize = 4096
   const buf = new Float32Array(chunkSize * 2)
 
-  let extracted: number
-  do {
-    extracted = filter.extract(buf, chunkSize)
-    if (extracted > 0) {
-      outChunks.push(new Float32Array(buf.subarray(0, extracted * 2)))
+  let produced = 0
+  // Hard cap keeps a misbehaving filter from looping forever on silence.
+  let remainingIterations = Math.ceil(samples.length / chunkSize) * 4 + 64
+  while (produced < samples.length && remainingIterations-- > 0) {
+    const extracted = filter.extract(buf, chunkSize)
+    if (extracted <= 0) break
+    const usable = Math.min(extracted, samples.length - produced)
+    for (let i = 0; i < usable; i++) {
+      mono[produced + i] = buf[i * 2]
     }
-  } while (extracted > 0)
-
-  let totalLen = 0
-  for (const c of outChunks) totalLen += c.length / 2
-  const mono = new Float32Array(totalLen)
-  let offset = 0
-  for (const c of outChunks) {
-    for (let i = 0; i < c.length; i += 2) {
-      mono[offset++] = c[i]
-    }
+    produced += usable
   }
 
-  // Pitch-only shifting preserves tempo, so output length matches input; trim
-  // whatever portion of the flush padding made it through.
-  return mono.length > samples.length ? mono.slice(0, samples.length) : mono
+  return mono
 }
