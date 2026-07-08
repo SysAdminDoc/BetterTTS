@@ -147,7 +147,7 @@ function App() {
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
   const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav')
-  const [mp3Bitrate, setMp3Bitrate] = useState(192)
+  const [mp3Bitrate, setMp3Bitrate] = useState(160)
   const [useWorker, setUseWorker] = useState(true)
   const [pitchSemitones, setPitchSemitones] = useState(0)
   const [bgmFile, setBgmFile] = useState<File | null>(null)
@@ -368,6 +368,7 @@ function App() {
     const generated: AudioResult[] = []
     const zipFiles: Record<string, Blob> = {}
     let clearedPrevious = false
+    let warnedBgmEmpty = false
 
     let audioCtx: AudioContext | null = null
     let nextPlayTime = 0
@@ -442,7 +443,14 @@ function App() {
 
       const raw = concatFloat32Arrays(audioParts)
       let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
-      if (bgmFile) processed = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
+      if (bgmFile) {
+        const { mixed, bgmEmpty } = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
+        processed = mixed
+        if (bgmEmpty && !warnedBgmEmpty) {
+          warnedBgmEmpty = true
+          showToast({ tone: 'warn', message: 'Background music file contained no audio — exported speech only.' })
+        }
+      }
       const ext = formatExtension(audioFormat)
       const blob = await encodeAudio(processed, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
@@ -1101,9 +1109,9 @@ function App() {
                     </select>
                     {audioFormat === 'mp3' ? (
                       <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
+                        <option value={96}>96 kbps</option>
                         <option value={128}>128 kbps</option>
-                        <option value={192}>192 kbps</option>
-                        <option value={320}>320 kbps</option>
+                        <option value={160}>160 kbps (max at 24 kHz)</option>
                       </select>
                     ) : null}
                   </div>
