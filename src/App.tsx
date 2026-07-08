@@ -862,7 +862,11 @@ function App() {
                         <span>{result.size}</span>
                       </div>
                       {result.url ? (
-                        <audio controls src={result.url} aria-label={result.filename} />
+                        <audio controls src={result.url} aria-label={result.filename}>
+                          {result.vttUrl ? (
+                            <track kind="captions" src={result.vttUrl} srcLang="en" label="English" />
+                          ) : null}
+                        </audio>
                       ) : null}
                       <div className="result-actions">
                         {result.replayText ? (
@@ -1138,7 +1142,7 @@ function App() {
 
                 {engine === 'kokoro' ? (
                   <div className="bgm-row">
-                    <label className="control-label">Background music</label>
+                    <span className="control-label">Background music</span>
                     <div className="bgm-controls">
                       <button type="button" onClick={() => bgmInputRef.current?.click()}>
                         <Upload size={14} aria-hidden="true" />
