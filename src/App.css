@@ -465,6 +465,30 @@ select {
   accent-color: var(--accent);
 }
 
+.bgm-row {
+  margin-bottom: 16px;
+}
+
+.bgm-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bgm-controls button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: 600 13px/1 var(--sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .format-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

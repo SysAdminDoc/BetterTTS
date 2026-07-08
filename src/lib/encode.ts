@@ -37,6 +37,24 @@ export function formatMime(format: AudioFormat): string {
   return format === 'mp3' ? 'audio/mpeg' : 'audio/wav'
 }
 
+export async function mixBgm(speech: Float32Array, bgmFile: File, bgmGain: number, sampleRate: number): Promise<Float32Array> {
+  const arrayBuf = await bgmFile.arrayBuffer()
+  const audioCtx = new OfflineAudioContext(1, speech.length, sampleRate)
+  const bgmBuffer = await audioCtx.decodeAudioData(arrayBuf)
+
+  const bgmMono = bgmBuffer.getChannelData(0)
+  const looped = new Float32Array(speech.length)
+  for (let i = 0; i < speech.length; i++) {
+    looped[i] = bgmMono[i % bgmMono.length] * bgmGain
+  }
+
+  const mixed = new Float32Array(speech.length)
+  for (let i = 0; i < speech.length; i++) {
+    mixed[i] = Math.max(-1, Math.min(1, speech[i] + looped[i]))
+  }
+  return mixed
+}
+
 export async function shiftPitch(samples: Float32Array, semitones: number): Promise<Float32Array> {
   if (semitones === 0) return samples
   const { SoundTouch, SimpleFilter } = await import('soundtouchjs')

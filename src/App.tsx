@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { Component, type ChangeEvent, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { type AudioFormat, encodeAudio, formatExtension, shiftPitch } from './lib/encode.ts'
+import { type AudioFormat, encodeAudio, formatExtension, mixBgm, shiftPitch } from './lib/encode.ts'
 import { KOKORO_SAMPLE_RATE, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { type ClipRecord, clearLibrary, deleteClip, getClipBlob, listClips, saveClip } from './lib/library.ts'
@@ -148,6 +148,8 @@ function App() {
   const [mp3Bitrate, setMp3Bitrate] = useState(192)
   const [useWorker, setUseWorker] = useState(true)
   const [pitchSemitones, setPitchSemitones] = useState(0)
+  const [bgmFile, setBgmFile] = useState<File | null>(null)
+  const [bgmVolume, setBgmVolume] = useState(0.15)
   const [dialogMode, setDialogMode] = useState(false)
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
   const [pronunciations, setPronunciations] = useState<Record<string, string>>(() => {
@@ -179,6 +181,7 @@ function App() {
   const [newPronunciation, setNewPronunciation] = useState('')
   const [library, setLibrary] = useState<ClipRecord[]>([])
   const previewCacheRef = useRef<Map<string, string>>(new Map())
+  const bgmInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlsRef = useRef<string[]>([])
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
@@ -420,9 +423,10 @@ function App() {
       }
 
       const raw = concatFloat32Arrays(audioParts)
-      const combined = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
+      let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
+      if (bgmFile) processed = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
       const ext = formatExtension(audioFormat)
-      const blob = await encodeAudio(combined, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
+      const blob = await encodeAudio(processed, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
       const baseName =
         chunks.length === 1 ? slugify(chunks[index]) : `${String(index + 1).padStart(3, '0')}-${slugify(chunks[index])}`
       const filename = `${baseName}-${timestamp()}${ext}`
@@ -547,9 +551,10 @@ function App() {
       if (!clearedPrevious) { clearOutputs(); clearedPrevious = true }
 
       const raw = concatFloat32Arrays(audioParts)
-      const combined = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
+      let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
+      if (bgmFile) processed = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
       const ext = formatExtension(audioFormat)
-      const blob = await encodeAudio(combined, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
+      const blob = await encodeAudio(processed, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
       const prefix = speaker ? slugify(speaker) : String(i + 1).padStart(3, '0')
       const filename = `${prefix}-${slugify(lineText)}-${timestamp()}${ext}`
       const result = await buildResult(blob, `${speaker ? `[${speaker}] ` : ''}${lineText.slice(0, 50)}`, filename)
@@ -1098,6 +1103,31 @@ function App() {
                   value={pitchSemitones}
                   onChange={(event) => setPitchSemitones(Number(event.target.value))}
                 />
+              </div>
+            ) : null}
+
+            {engine === 'kokoro' ? (
+              <div className="bgm-row">
+                <label className="control-label">Background music</label>
+                <div className="bgm-controls">
+                  <button type="button" onClick={() => bgmInputRef.current?.click()}>
+                    <Upload size={14} aria-hidden="true" />
+                    {bgmFile ? bgmFile.name.slice(0, 20) : 'Upload BGM'}
+                  </button>
+                  {bgmFile ? (
+                    <button type="button" onClick={() => setBgmFile(null)}>
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  <input ref={bgmInputRef} type="file" accept="audio/*" onChange={(e) => { setBgmFile(e.target.files?.[0] ?? null); e.target.value = '' }} hidden />
+                </div>
+                {bgmFile ? (
+                  <div className="range-row" style={{ marginBottom: 0 }}>
+                    <label htmlFor="bgm-vol">BGM volume</label>
+                    <span>{Math.round(bgmVolume * 100)}%</span>
+                    <input id="bgm-vol" type="range" min="0" max="0.5" step="0.01" value={bgmVolume} onChange={(e) => setBgmVolume(Number(e.target.value))} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
