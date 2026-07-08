@@ -22,6 +22,7 @@ import { Component, type ChangeEvent, type ErrorInfo, type ReactNode, useEffect,
 import './App.css'
 import { type AudioFormat, encodeAudio, formatExtension } from './lib/encode.ts'
 import { KOKORO_SAMPLE_RATE, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
+import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { type ClipRecord, clearLibrary, deleteClip, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { PAUSE_TAG, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
 import { VOICES } from './lib/voices.ts'
@@ -145,6 +146,7 @@ function App() {
   const [streamPlay, setStreamPlay] = useState(true)
   const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav')
   const [mp3Bitrate, setMp3Bitrate] = useState(192)
+  const [useWorker, setUseWorker] = useState(true)
   const [dialogMode, setDialogMode] = useState(false)
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
   const [pronunciations, setPronunciations] = useState<Record<string, string>>(() => {
@@ -304,7 +306,7 @@ function App() {
     setProgress(3)
 
     const fileTotals = new Map<string, { loaded: number; total: number }>()
-    const tts = await loadKokoro((info) => {
+    const onProgress = (info: { status?: string; file?: string; loaded?: number; total?: number }) => {
       if (info.status === 'progress' && info.file && typeof info.loaded === 'number' && typeof info.total === 'number') {
         fileTotals.set(info.file, { loaded: info.loaded, total: info.total })
         let sumLoaded = 0
@@ -320,7 +322,23 @@ function App() {
         setStatus('Model ready')
         setProgress(35)
       }
-    })
+    }
+
+    let ttsInline: Awaited<ReturnType<typeof loadKokoro>> | null = null
+    if (useWorker) {
+      const hasGpu = await probeWebGpu()
+      await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', hasGpu ? 'fp32' : 'q8', onProgress)
+    } else {
+      ttsInline = await loadKokoro(onProgress)
+    }
+
+    const synthesize = async (text: string, voice: string, spd: number): Promise<Float32Array | null> => {
+      if (useWorker) {
+        return generateWorker(text, voice, spd)
+      }
+      const audio = (await ttsInline!.generate(text, { voice: voice as never, speed: spd })) as RawAudioLike
+      return audio.audio ?? null
+    }
 
     if (abortRef.current) return
 
@@ -369,11 +387,7 @@ function App() {
         }
         for (const sentence of seg.sentences) {
           if (abortRef.current) break
-          const audio = (await tts.generate(applyPronunciations(sentence), {
-            voice: selectedVoice.id,
-            speed,
-          })) as RawAudioLike
-          const samples = audio.audio
+          const samples = await synthesize(applyPronunciations(sentence), selectedVoice.id, speed)
           if (samples) {
             audioParts.push(samples)
             totalSamples += samples.length
@@ -472,7 +486,21 @@ function App() {
 
     setStatus('Loading Kokoro model')
     setProgress(3)
-    const tts = await loadKokoro(() => {})
+
+    let ttsInline: Awaited<ReturnType<typeof loadKokoro>> | null = null
+    if (useWorker) {
+      const hasGpu = await probeWebGpu()
+      await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', hasGpu ? 'fp32' : 'q8', () => {})
+    } else {
+      ttsInline = await loadKokoro(() => {})
+    }
+
+    const synthesize = async (text: string, voice: string, spd: number): Promise<Float32Array | null> => {
+      if (useWorker) return generateWorker(text, voice, spd)
+      const audio = (await ttsInline!.generate(text, { voice: voice as never, speed: spd })) as RawAudioLike
+      return audio.audio ?? null
+    }
+
     if (abortRef.current) return
 
     const generated: AudioResult[] = []
@@ -503,11 +531,11 @@ function App() {
         }
         for (const sentence of splitIntoSentences(seg.content)) {
           if (abortRef.current) break
-          const audio = (await tts.generate(applyPronunciations(sentence), { voice: voiceForLine, speed })) as RawAudioLike
-          if (audio.audio) {
-            audioParts.push(audio.audio)
+          const samples = await synthesize(applyPronunciations(sentence), voiceForLine, speed)
+          if (samples) {
+            audioParts.push(samples)
             const startSec = sampleOffset / KOKORO_SAMPLE_RATE
-            sampleOffset += audio.audio.length
+            sampleOffset += samples.length
             cues.push({ index: cueIndex++, startSec, endSec: sampleOffset / KOKORO_SAMPLE_RATE, text: sentence })
           }
         }
@@ -609,10 +637,18 @@ function App() {
         setPreviewingVoice(null)
         return
       }
-      const tts = await loadKokoro(() => {})
-      const result = (await tts.generate('This is how I sound.', { voice: id as typeof selectedVoice.id, speed: 1 })) as RawAudioLike
-      if (result.audio) {
-        const blob = new Blob([encodeWav(result.audio, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
+      let samples: Float32Array | null = null
+      if (useWorker) {
+        const hasGpu = await probeWebGpu()
+        await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', hasGpu ? 'fp32' : 'q8', () => {})
+        samples = await generateWorker('This is how I sound.', id, 1)
+      } else {
+        const tts = await loadKokoro(() => {})
+        const result = (await tts.generate('This is how I sound.', { voice: id as typeof selectedVoice.id, speed: 1 })) as RawAudioLike
+        samples = result.audio ?? null
+      }
+      if (samples) {
+        const blob = new Blob([encodeWav(samples, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
         const url = URL.createObjectURL(blob)
         previewCacheRef.current.set(id, url)
         const audio = new Audio(url)
@@ -1072,13 +1108,22 @@ function App() {
             </label>
 
             {engine === 'kokoro' ? (
-              <label className="toggle-row">
-                <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
-                <span>
-                  Stream playback
-                  <small>Play audio as each sentence is generated.</small>
-                </span>
-              </label>
+              <>
+                <label className="toggle-row">
+                  <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
+                  <span>
+                    Stream playback
+                    <small>Play audio as each sentence is generated.</small>
+                  </span>
+                </label>
+                <label className="toggle-row">
+                  <input type="checkbox" checked={useWorker} onChange={(event) => setUseWorker(event.target.checked)} />
+                  <span>
+                    Background worker
+                    <small>Run inference off main thread for smoother UI.</small>
+                  </span>
+                </label>
+              </>
             ) : null}
 
             {engine === 'kokoro' ? (
@@ -1290,6 +1335,7 @@ git subtree push --prefix dist origin gh-pages
             type="button"
             onClick={() => {
               resetKokoroSession()
+              resetWorker()
               showToast({ tone: 'ok', message: 'Model cache handle reset for this page session.' })
             }}
           >
