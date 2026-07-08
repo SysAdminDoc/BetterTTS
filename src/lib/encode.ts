@@ -5,6 +5,8 @@ export type AudioFormat = 'wav' | 'mp3' | 'opus'
 // Kokoro output is 24 kHz → MPEG-2 LSF, whose bitrate table tops out at 160 kbps.
 // lamejs silently clamps higher requests, so the UI must not offer them.
 export const MAX_MP3_KBPS_24K = 160
+const DEFAULT_PITCH_SAMPLE_RATE = 24000
+const SIGNALSMITH_RENDER_GUARD_SECONDS = 0.25
 
 export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128): Promise<Blob> {
   if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate)
@@ -296,54 +298,61 @@ export async function mixBgm(speech: Float32Array, bgmFile: File, bgmGain: numbe
   return { mixed, bgmEmpty: false }
 }
 
-export async function shiftPitch(samples: Float32Array, semitones: number): Promise<Float32Array> {
+export async function shiftPitch(samples: Float32Array, semitones: number, sampleRate = DEFAULT_PITCH_SAMPLE_RATE): Promise<Float32Array> {
   if (semitones === 0) return samples
-  const { SoundTouch, SimpleFilter } = await import('soundtouchjs')
-
-  const st = new SoundTouch()
-  st.pitchSemitones = semitones
-
-  const interleaved = new Float32Array(samples.length * 2)
-  for (let i = 0; i < samples.length; i++) {
-    interleaved[i * 2] = samples[i]
-    interleaved[i * 2 + 1] = samples[i]
-  }
-
-  // After the real samples run out, keep feeding silence so SoundTouch's
-  // pipeline latency is flushed — otherwise the final ~100 ms never leaves the
-  // filter. The output loop stops once the original length is reached.
-  const source = {
-    extract(target: Float32Array, numFrames: number, position: number): number {
-      const start = position * 2
-      if (start < interleaved.length) {
-        const end = Math.min(start + numFrames * 2, interleaved.length)
-        const available = Math.floor((end - start) / 2)
-        target.set(interleaved.subarray(start, start + available * 2))
-        target.fill(0, available * 2, numFrames * 2)
-        return available
-      }
-      target.fill(0, 0, numFrames * 2)
-      return numFrames
-    },
-  }
-
-  const filter = new SimpleFilter(source, st)
-  const mono = new Float32Array(samples.length)
-  const chunkSize = 4096
-  const buf = new Float32Array(chunkSize * 2)
-
-  let produced = 0
-  // Hard cap keeps a misbehaving filter from looping forever on silence.
-  let remainingIterations = Math.ceil(samples.length / chunkSize) * 4 + 64
-  while (produced < samples.length && remainingIterations-- > 0) {
-    const extracted = filter.extract(buf, chunkSize)
-    if (extracted <= 0) break
-    const usable = Math.min(extracted, samples.length - produced)
-    for (let i = 0; i < usable; i++) {
-      mono[produced + i] = buf[i * 2]
+  if (canRenderSignalsmithOffline()) {
+    try {
+      return await shiftPitchWithSignalsmith(samples, semitones, sampleRate)
+    } catch (err) {
+      if (typeof window !== 'undefined') throw err
     }
-    produced += usable
   }
 
-  return mono
+  return shiftPitchFallback(samples, semitones)
+}
+
+function canRenderSignalsmithOffline(): boolean {
+  return typeof OfflineAudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined'
+}
+
+async function shiftPitchWithSignalsmith(samples: Float32Array, semitones: number, sampleRate: number): Promise<Float32Array> {
+  const guardSamples = Math.ceil(sampleRate * SIGNALSMITH_RENDER_GUARD_SECONDS)
+  const audioCtx = new OfflineAudioContext(1, samples.length + guardSamples, sampleRate)
+  if (!audioCtx.audioWorklet) throw new Error('Signalsmith Stretch requires OfflineAudioContext.audioWorklet')
+
+  const { default: SignalsmithStretch } = await import('signalsmith-stretch')
+  const stretch = await SignalsmithStretch(audioCtx, {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  })
+
+  await stretch.addBuffers([new Float32Array(samples)])
+  stretch.connect(audioCtx.destination)
+  await stretch.start(0, 0, undefined, 1, semitones)
+
+  const rendered = await audioCtx.startRendering()
+  stretch.disconnect()
+  return copyExactLength(rendered.getChannelData(0), samples.length)
+}
+
+function copyExactLength(samples: Float32Array, length: number): Float32Array {
+  const out = new Float32Array(length)
+  out.set(samples.subarray(0, length))
+  return out
+}
+
+function shiftPitchFallback(samples: Float32Array, semitones: number): Float32Array {
+  const out = new Float32Array(samples.length)
+  if (samples.length === 0) return out
+
+  const factor = Math.pow(2, semitones / 12)
+  for (let i = 0; i < out.length; i++) {
+    const src = Math.min(i * factor, samples.length - 1)
+    const lo = Math.floor(src)
+    const hi = Math.min(lo + 1, samples.length - 1)
+    const frac = src - lo
+    out[i] = samples[lo] * (1 - frac) + samples[hi] * frac
+  }
+  return out
 }

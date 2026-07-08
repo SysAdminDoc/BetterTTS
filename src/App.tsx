@@ -690,7 +690,7 @@ function App() {
       }
 
       const raw = concatFloat32Arrays(audioParts)
-      let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
+      let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones, KOKORO_SAMPLE_RATE) : raw
       if (bgmFile) {
         const { mixed, bgmEmpty } = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
         processed = mixed

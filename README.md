@@ -49,7 +49,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Native save dialog** via `showSaveFilePicker` on Chromium, with `<a download>` fallback
 
 ### Audio Processing
-- **Pitch control** — ±4 semitones via SoundTouch.js, without tempo change
+- **Pitch control** - +/-4 semitones via Signalsmith Stretch AudioWorklet/WASM rendering, without tempo change
 - **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume
 - **Silence insertion** — `[pause 2s]` tags splice real silence into the output
 - **Speed control** — 0.5x to 1.5x playback rate
@@ -106,7 +106,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 | Build | Vite 8 |
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-2.1, browser LAME) |
-| Pitch Shifting | `soundtouchjs` (LGPL-2.1, 11 kB gzipped) |
+| Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
 | ZIP Packaging | `jszip` |
 | Icons | `lucide-react` |
 | Testing | Vitest (39 assertions across 3 suites) |
@@ -133,7 +133,7 @@ src/
 │   └── library.ts           # IndexedDB clip storage
 ├── worker/
 │   └── tts.worker.ts        # Off-thread Kokoro inference
-└── soundtouchjs.d.ts        # Type declarations
+└── signalsmith-stretch.d.ts        # Type declarations
 ```
 
 **Key design decisions:**
