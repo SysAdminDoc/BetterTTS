@@ -843,8 +843,9 @@ function App() {
               </div>
               {results.length === 0 ? (
                 <div className="empty-output">
-                  <Volume2 size={22} aria-hidden="true" />
-                  <span>Generated audio will appear here.</span>
+                  <Volume2 size={28} aria-hidden="true" />
+                  <span>Generated audio will appear here</span>
+                  <small style={{ color: 'var(--muted)', fontSize: 12 }}>Choose a voice and click Generate audio to start</small>
                 </div>
               ) : (
                 <div className="result-list">
@@ -1076,6 +1077,8 @@ function App() {
               </>
             )}
 
+            <hr className="settings-divider" />
+
             <div className="range-row">
               <label htmlFor="speed">Speed</label>
               <span>{speed.toFixed(2)}x</span>
@@ -1148,6 +1151,8 @@ function App() {
               </div>
             ) : null}
 
+            <hr className="settings-divider" />
+
             <label className="toggle-row">
               <input type="checkbox" checked={separateLines} onChange={(event) => setSeparateLines(event.target.checked)} />
               <span>
@@ -1210,8 +1215,7 @@ function App() {
               <>
                 <button
                   type="button"
-                  className="heading-action"
-                  style={{ marginBottom: 10, display: 'block' }}
+                  className="heading-action pron-toggle"
                   onClick={() => setShowPronunciations(!showPronunciations)}
                 >
                   Pronunciations ({Object.keys(pronunciations).length})
@@ -1221,7 +1225,7 @@ function App() {
                     {Object.entries(pronunciations).map(([word, pron]) => (
                       <div className="speaker-row" key={word}>
                         <span>{word}</span>
-                        <span style={{ color: 'var(--text)' }}>{pron}</span>
+                        <span className="pron-replacement">{pron}</span>
                         <button
                           type="button"
                           className="heading-action"
@@ -1238,17 +1242,19 @@ function App() {
                     <div className="speaker-row">
                       <input
                         type="text"
+                        className="pron-input"
                         placeholder="Word"
                         value={newWord}
                         onChange={(e) => setNewWord(e.target.value)}
-                        style={{ height: 32, padding: '0 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-1)', color: 'var(--heading)', font: '13px var(--sans)' }}
+                        aria-label="Pronunciation word"
                       />
                       <input
                         type="text"
+                        className="pron-input"
                         placeholder="Says as"
                         value={newPronunciation}
                         onChange={(e) => setNewPronunciation(e.target.value)}
-                        style={{ height: 32, padding: '0 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-1)', color: 'var(--heading)', font: '13px var(--sans)' }}
+                        aria-label="Pronunciation replacement"
                       />
                       <button
                         type="button"

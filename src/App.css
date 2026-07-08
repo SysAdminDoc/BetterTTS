@@ -169,11 +169,19 @@ footer button {
   min-height: 355px;
   resize: vertical;
   border: 0;
-  outline: 0;
   padding: 20px;
   background: transparent;
   color: var(--heading);
   font: 15px/1.65 var(--mono);
+}
+
+.editor-frame textarea:focus {
+  outline: none;
+}
+
+.editor-frame:has(textarea:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
 }
 
 .editor-actions {
@@ -219,6 +227,10 @@ footer button:hover {
   background: var(--surface-2);
 }
 
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
@@ -238,11 +250,19 @@ button:disabled {
 
 .empty-output {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 0 18px;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 24px 18px;
   color: var(--muted);
+  text-align: center;
+  font-size: 14px;
+}
+
+.empty-output svg {
+  opacity: 0.4;
 }
 
 .result-list {
@@ -388,6 +408,11 @@ button:disabled {
   line-height: 1.45;
 }
 
+.engine-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border-strong));
+  background: var(--surface-2);
+}
+
 .engine-card.selected,
 .voice-buttons button.selected {
   border-color: var(--accent);
@@ -405,6 +430,17 @@ select {
   color: var(--heading);
   font: 500 14px/1 var(--sans);
   padding: 0 12px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+  cursor: pointer;
+}
+
+select:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
 }
 
 .voice-buttons {
@@ -500,6 +536,13 @@ select {
   grid-column: 1 / -1;
 }
 
+.settings-divider {
+  height: 1px;
+  margin: 4px 0 18px;
+  border: 0;
+  background: var(--border);
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -543,9 +586,39 @@ select {
   white-space: nowrap;
 }
 
+.pron-replacement {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .speaker-row select {
   margin-bottom: 0;
   height: 36px;
+}
+
+.pron-toggle {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.pron-input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--heading);
+  font: 13px var(--sans);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.pron-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.pron-input::placeholder {
+  color: var(--muted);
 }
 
 .progress-wrap {
@@ -583,14 +656,37 @@ select {
   border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
   border-radius: 8px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: white;
+  color: #fff;
   font: 760 15px/1 var(--sans);
   cursor: pointer;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.generate-button:hover {
+  filter: brightness(1.08);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+}
+
+.generate-button:active {
+  filter: brightness(0.95);
+  transform: scale(0.99);
 }
 
 .generate-button.cancel {
   background: linear-gradient(135deg, var(--danger), color-mix(in srgb, var(--danger) 70%, var(--warning)));
   border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+  color: #fff;
+}
+
+.generate-button.cancel:hover {
+  filter: brightness(1.08);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+  background: linear-gradient(135deg, var(--danger), color-mix(in srgb, var(--danger) 70%, var(--warning)));
+  color: #fff;
 }
 
 .secondary-action {
@@ -715,6 +811,7 @@ footer {
   justify-content: space-between;
   gap: 16px;
   padding: 22px 30px 28px;
+  border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 13px;
 }
@@ -734,6 +831,14 @@ footer {
   background: var(--surface-2);
   color: var(--heading);
   box-shadow: var(--shadow);
+  animation: toast-in 220ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
 }
 
 .toast.ok {
