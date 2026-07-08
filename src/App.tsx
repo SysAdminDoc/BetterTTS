@@ -441,6 +441,7 @@ function App() {
   const objectUrlsRef = useRef<string[]>([])
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const abortRef = useRef(false)
 
   const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
   const selectedVoice = VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]
@@ -520,9 +521,12 @@ function App() {
       }
     })
 
+    if (abortRef.current) return
+
     setStatus('Generating local audio')
     const generated: AudioResult[] = []
     const zipFiles: Record<string, Blob> = {}
+    let clearedPrevious = false
 
     const chunkPlans = chunks.map((chunk) => {
       const segments = parsePauseTags(chunk)
@@ -537,15 +541,18 @@ function App() {
     let done = 0
 
     for (let index = 0; index < chunks.length; index += 1) {
+      if (abortRef.current) break
       const plan = chunkPlans[index]
       const audioParts: Float32Array[] = []
 
       for (const seg of plan) {
+        if (abortRef.current) break
         if (seg.type === 'pause') {
           audioParts.push(new Float32Array(Math.round(seg.duration * KOKORO_SAMPLE_RATE)))
           continue
         }
         for (const sentence of seg.sentences) {
+          if (abortRef.current) break
           const audio = (await tts.generate(sentence, {
             voice: selectedVoice.id,
             speed,
@@ -555,6 +562,13 @@ function App() {
           setProgress(35 + Math.round((done / totalSentences) * 55))
           setStatus(`Generated ${done} / ${totalSentences}`)
         }
+      }
+
+      if (abortRef.current && audioParts.length === 0) break
+
+      if (!clearedPrevious) {
+        clearOutputs()
+        clearedPrevious = true
       }
 
       const combined = concatFloat32Arrays(audioParts)
@@ -581,8 +595,13 @@ function App() {
     }
 
     setProgress(100)
-    setStatus('Local audio ready')
-    showToast({ tone: 'ok', message: 'Audio generated locally in your browser.' })
+    if (abortRef.current) {
+      setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
+      showToast({ tone: 'warn', message: 'Generation cancelled.' })
+    } else {
+      setStatus('Local audio ready')
+      showToast({ tone: 'ok', message: 'Audio generated locally in your browser.' })
+    }
   }
 
   async function generateBrowser(chunks: string[]) {
@@ -619,7 +638,7 @@ function App() {
 
     if (isSpeaking && 'speechSynthesis' in window) window.speechSynthesis.cancel()
     setIsSpeaking(false)
-    clearOutputs()
+    abortRef.current = false
     setIsGenerating(true)
 
     try {
@@ -910,10 +929,23 @@ function App() {
               </div>
             ) : null}
 
-            <button type="button" className="generate-button" onClick={handleGenerate} disabled={isGenerating}>
-              {isGenerating ? <Loader2 size={18} aria-hidden="true" /> : <Waves size={18} aria-hidden="true" />}
-              Generate audio
-            </button>
+            {isGenerating ? (
+              <button
+                type="button"
+                className="generate-button cancel"
+                onClick={() => {
+                  abortRef.current = true
+                }}
+              >
+                <X size={18} aria-hidden="true" />
+                Cancel
+              </button>
+            ) : (
+              <button type="button" className="generate-button" onClick={handleGenerate}>
+                <Waves size={18} aria-hidden="true" />
+                Generate audio
+              </button>
+            )}
 
             <button type="button" className="secondary-action" onClick={clearOutputs}>
               <Trash2 size={16} aria-hidden="true" />

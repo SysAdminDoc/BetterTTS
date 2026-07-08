@@ -475,6 +475,11 @@ select {
   cursor: pointer;
 }
 
+.generate-button.cancel {
+  background: linear-gradient(135deg, var(--danger), color-mix(in srgb, var(--danger) 70%, var(--warning)));
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
 .secondary-action {
   width: 100%;
   margin-top: 10px;
