@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Component, type ChangeEvent, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { type AudioFormat, encodeAudio, formatExtension } from './lib/encode.ts'
 import { KOKORO_SAMPLE_RATE, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { type ClipRecord, clearLibrary, deleteClip, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { PAUSE_TAG, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
@@ -142,6 +143,8 @@ function App() {
   const [speed, setSpeed] = useState(1)
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
+  const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav')
+  const [mp3Bitrate, setMp3Bitrate] = useState(192)
   const [dialogMode, setDialogMode] = useState(false)
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
   const [text, setText] = useState(STARTER_TEXT)
@@ -380,10 +383,11 @@ function App() {
       }
 
       const combined = concatFloat32Arrays(audioParts)
-      const blob = new Blob([encodeWav(combined, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
+      const ext = formatExtension(audioFormat)
+      const blob = await encodeAudio(combined, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
       const baseName =
         chunks.length === 1 ? slugify(chunks[index]) : `${String(index + 1).padStart(3, '0')}-${slugify(chunks[index])}`
-      const filename = `${baseName}-${timestamp()}.wav`
+      const filename = `${baseName}-${timestamp()}${ext}`
       const result = await buildResult(blob, chunks[index].slice(0, 64), filename)
       result.cues = cues
 
@@ -491,9 +495,10 @@ function App() {
       if (!clearedPrevious) { clearOutputs(); clearedPrevious = true }
 
       const combined = concatFloat32Arrays(audioParts)
-      const blob = new Blob([encodeWav(combined, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
+      const ext = formatExtension(audioFormat)
+      const blob = await encodeAudio(combined, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
       const prefix = speaker ? slugify(speaker) : String(i + 1).padStart(3, '0')
-      const filename = `${prefix}-${slugify(lineText)}-${timestamp()}.wav`
+      const filename = `${prefix}-${slugify(lineText)}-${timestamp()}${ext}`
       const result = await buildResult(blob, `${speaker ? `[${speaker}] ` : ''}${lineText.slice(0, 50)}`, filename)
       result.cues = cues
 
@@ -634,9 +639,13 @@ function App() {
   async function saveWithPicker(result: AudioResult) {
     if (!result.url) return
     try {
+      const isMp3 = result.filename.endsWith('.mp3')
       const handle = await (window as Record<string, unknown>['showSaveFilePicker'] as (opts: unknown) => Promise<FileSystemFileHandle>)({
         suggestedName: result.filename,
-        types: [{ description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } }],
+        types: [isMp3
+          ? { description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }
+          : { description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } }
+        ],
       })
       const writable = await handle.createWritable()
       const res = await fetch(result.url)
@@ -794,12 +803,12 @@ function App() {
                         {result.url && 'showSaveFilePicker' in window ? (
                           <button type="button" onClick={() => saveWithPicker(result)}>
                             <Download size={16} aria-hidden="true" />
-                            WAV
+                            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
                           </button>
                         ) : result.url ? (
                           <a href={result.url} download={result.filename}>
                             <Download size={16} aria-hidden="true" />
-                            WAV
+                            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
                           </a>
                         ) : null}
                         {result.url && typeof navigator !== 'undefined' && 'canShare' in navigator ? (
@@ -1014,6 +1023,23 @@ function App() {
                 onChange={(event) => setSpeed(Number(event.target.value))}
               />
             </div>
+
+            {engine === 'kokoro' ? (
+              <div className="format-row">
+                <label className="control-label" htmlFor="format">Format</label>
+                <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
+                  <option value="wav">WAV (lossless)</option>
+                  <option value="mp3">MP3</option>
+                </select>
+                {audioFormat === 'mp3' ? (
+                  <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
+                    <option value={128}>128 kbps</option>
+                    <option value={192}>192 kbps</option>
+                    <option value={320}>320 kbps</option>
+                  </select>
+                ) : null}
+              </div>
+            ) : null}
 
             <label className="toggle-row">
               <input type="checkbox" checked={separateLines} onChange={(event) => setSeparateLines(event.target.checked)} />

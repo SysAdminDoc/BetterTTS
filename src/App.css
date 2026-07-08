@@ -465,6 +465,17 @@ select {
   accent-color: var(--accent);
 }
 
+.format-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.format-row .control-label {
+  grid-column: 1 / -1;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;

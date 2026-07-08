@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "jszip": "^3.10.1",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^1.23.0",
