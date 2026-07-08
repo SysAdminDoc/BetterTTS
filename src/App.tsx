@@ -27,8 +27,15 @@ const MAX_TEXT_CHARS = 5000
 type Engine = 'kokoro' | 'browser'
 type Theme = 'dark' | 'light'
 
+type VoiceId =
+  | 'am_adam' | 'am_puck' | 'am_liam' | 'af_heart' | 'af_bella' | 'af_nova'
+  | 'af_alloy' | 'af_jessica' | 'af_kore' | 'af_nicole' | 'af_river' | 'af_sarah'
+  | 'am_echo' | 'am_eric' | 'am_fenrir' | 'am_michael' | 'am_onyx' | 'am_santa'
+  | 'bf_alice' | 'bf_emma' | 'bf_isabella' | 'bf_lily'
+  | 'bm_daniel' | 'bm_fable' | 'bm_george' | 'bm_lewis'
+
 type Voice = {
-  id: string
+  id: VoiceId
   name: string
   locale: 'en-us' | 'en-gb'
   gender: 'Female' | 'Male'
@@ -113,35 +120,64 @@ const MODEL_ROWS = [
 let kokoroPromise: Promise<KokoroInstance> | null = null
 
 function getInitialTheme(): Theme {
-  if (typeof window === 'undefined') {
-    return 'dark'
-  }
-
-  const saved = window.localStorage.getItem('tts4free-theme')
-  return saved === 'light' ? 'light' : 'dark'
+  if (typeof window === 'undefined') return 'dark'
+  try {
+    const saved = window.localStorage.getItem('tts4free-theme')
+    if (saved === 'light' || saved === 'dark') return saved
+  } catch { /* storage blocked */ }
+  if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light'
+  return 'dark'
 }
 
-function chooseKokoroRuntime() {
-  const hasWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
-  return {
-    device: hasWebGpu ? 'webgpu' : 'wasm',
-    dtype: hasWebGpu ? 'fp32' : 'q8',
-    label: hasWebGpu ? 'WebGPU fp32' : 'WebAssembly q8',
-  } as const
+async function probeWebGpu(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !('gpu' in navigator)) return false
+  try {
+    const gpu = navigator.gpu as { requestAdapter(): Promise<unknown | null> }
+    const adapter = await gpu.requestAdapter()
+    return adapter != null
+  } catch {
+    return false
+  }
 }
 
 async function loadKokoro(onProgress: (info: ProgressInfo) => void) {
-  if (!kokoroPromise) {
-    const { KokoroTTS } = await import('kokoro-js')
-    const runtime = chooseKokoroRuntime()
-    kokoroPromise = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-      device: runtime.device,
-      dtype: runtime.dtype,
-      progress_callback: (info) => onProgress(info as ProgressInfo),
-    })
-  }
+  if (kokoroPromise) return kokoroPromise
 
-  return kokoroPromise
+  const [{ KokoroTTS }, hasWebGpu] = await Promise.all([
+    import('kokoro-js'),
+    probeWebGpu(),
+  ])
+
+  const device = hasWebGpu ? ('webgpu' as const) : ('wasm' as const)
+  const dtype = hasWebGpu ? ('fp32' as const) : ('q8' as const)
+
+  const promise = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+    device,
+    dtype,
+    progress_callback: (info) => onProgress(info as ProgressInfo),
+  })
+  kokoroPromise = promise
+
+  try {
+    return await promise
+  } catch (err) {
+    kokoroPromise = null
+    if (hasWebGpu) {
+      const fallback = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+        device: 'wasm',
+        dtype: 'q8',
+        progress_callback: (info) => onProgress(info as ProgressInfo),
+      })
+      kokoroPromise = fallback
+      try {
+        return await fallback
+      } catch {
+        kokoroPromise = null
+        throw err
+      }
+    }
+    throw err
+  }
 }
 
 function slugify(value: string) {
@@ -273,7 +309,7 @@ function speakBrowser(text: string, speed: number) {
   })
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: { children: ReactNode }) {
     super(props)
     this.state = { error: null }
@@ -311,7 +347,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [engine, setEngine] = useState<Engine>('kokoro')
   const [locale, setLocale] = useState<'en-us' | 'en-gb'>('en-us')
-  const [voiceId, setVoiceId] = useState('am_adam')
+  const [voiceId, setVoiceId] = useState('af_heart')
   const [speed, setSpeed] = useState(1)
   const [separateLines, setSeparateLines] = useState(false)
   const [text, setText] = useState(STARTER_TEXT)
@@ -323,10 +359,14 @@ function App() {
   const [status, setStatus] = useState('Ready')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [runtimeLabel, setRuntimeLabel] = useState(
+    typeof navigator !== 'undefined' && 'gpu' in navigator ? 'WebGPU fp32' : 'WebAssembly q8',
+  )
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlsRef = useRef<string[]>([])
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
 
-  const runtime = useMemo(chooseKokoroRuntime, [])
   const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
   const selectedVoice = VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]
   const lineNumbers = useMemo(() => text.split(/\r?\n/).map((_, index) => index + 1), [text])
@@ -335,12 +375,16 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    window.localStorage.setItem('tts4free-theme', theme)
+    try { window.localStorage.setItem('tts4free-theme', theme) } catch { /* storage blocked */ }
   }, [theme])
 
   useEffect(() => {
+    probeWebGpu().then((hasGpu) => setRuntimeLabel(hasGpu ? 'WebGPU fp32' : 'WebAssembly q8'))
+  }, [])
+
+  useEffect(() => {
     if (!availableVoices.some((voice) => voice.id === voiceId)) {
-      setVoiceId(availableVoices[0]?.id ?? 'am_adam')
+      setVoiceId(availableVoices[0]?.id ?? 'af_heart')
     }
   }, [availableVoices, voiceId])
 
@@ -368,8 +412,10 @@ function App() {
 
   function showToast(nextToast: Toast) {
     setToast(nextToast)
-    window.setTimeout(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = setTimeout(() => {
       setToast((current) => (current?.message === nextToast.message ? null : current))
+      toastTimerRef.current = null
     }, 5500)
   }
 
@@ -406,7 +452,7 @@ function App() {
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index]
       const audio = (await tts.generate(chunk, {
-        voice: selectedVoice.id as never,
+        voice: selectedVoice.id,
         speed,
       })) as RawAudioLike
       const blob = rawAudioToBlob(audio)
@@ -478,7 +524,11 @@ function App() {
       showToast({ tone: 'error', message })
       console.error(error)
     } finally {
-      window.setTimeout(() => setProgress(null), 700)
+      if (progressTimerRef.current) clearTimeout(progressTimerRef.current)
+      progressTimerRef.current = setTimeout(() => {
+        setProgress(null)
+        progressTimerRef.current = null
+      }, 700)
       setIsGenerating(false)
     }
   }
@@ -520,7 +570,6 @@ function App() {
   }
 
   return (
-    <ErrorBoundary>
       <main className="app-shell">
         <header className="topbar">
           <a className="brand" href="#studio" aria-label="TTS4FREE home">
@@ -655,7 +704,7 @@ function App() {
                 >
                   <span>{engine === 'kokoro' ? <Check size={17} aria-hidden="true" /> : null}</span>
                   <strong>Kokoro local</strong>
-                  <small>{runtime.label}. WAV export enabled.</small>
+                  <small>{runtimeLabel}. WAV export enabled.</small>
                 </button>
                 <button
                   type="button"
@@ -824,7 +873,6 @@ git subtree push --prefix dist origin gh-pages
           </div>
         ) : null}
       </main>
-    </ErrorBoundary>
   )
 }
 

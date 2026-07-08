@@ -654,7 +654,8 @@ footer {
   flex: 0 0 auto;
 }
 
-.app-shell .lucide-loader-2 {
+.app-shell .lucide-loader-2,
+.app-shell .lucide-loader-circle {
   animation: spin 800ms linear infinite;
 }
 
