@@ -116,7 +116,27 @@ footer button {
   border-right: 1px solid var(--border);
 }
 
-.settings-panel,
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 64px);
+  position: sticky;
+  top: 64px;
+}
+
+.settings-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 28px 30px 12px;
+}
+
+.settings-actions {
+  flex: 0 0 auto;
+  padding: 12px 30px 20px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface-1), var(--surface-0));
+}
+
 .editor-column {
   padding: 28px 30px;
 }
@@ -560,6 +580,41 @@ select:focus-visible {
   grid-column: 1 / -1;
 }
 
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  margin-bottom: 12px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--muted);
+  font: 600 13px/1 var(--sans);
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.advanced-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--heading);
+}
+
+.advanced-toggle .chevron-open {
+  transform: rotate(180deg);
+}
+
+.advanced-toggle svg:last-child {
+  margin-left: auto;
+  transition: transform 200ms ease;
+}
+
+.advanced-section {
+  padding-top: 4px;
+}
+
 .settings-divider {
   height: 1px;
   margin: 4px 0 18px;
@@ -970,7 +1025,13 @@ footer {
   }
 
   .settings-panel {
+    max-height: none;
+    position: static;
     border-bottom: 1px solid var(--border);
+  }
+
+  .settings-scroll {
+    overflow-y: visible;
   }
 
   .result-row {
@@ -1005,11 +1066,15 @@ footer {
     margin-right: 14px;
   }
 
-  .settings-panel,
   .editor-column,
   .model-panel,
   .hosting-panel {
     padding: 20px 16px;
+  }
+
+  .settings-scroll,
+  .settings-actions {
+    padding-inline: 16px;
   }
 
   .editor-frame {

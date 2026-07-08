@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   Download,
   ExternalLink,
   FileText,
@@ -9,6 +10,7 @@ import {
   Moon,
   Play,
   RefreshCw,
+  Settings2,
   Share2,
   SquareCode,
   Sun,
@@ -174,6 +176,7 @@ function App() {
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
   const [genStats, setGenStats] = useState<{ elapsed: number; chars: number; audioDuration: number } | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [showPronunciations, setShowPronunciations] = useState(false)
   const [newWord, setNewWord] = useState('')
   const [newPronunciation, setNewPronunciation] = useState('')
@@ -976,6 +979,7 @@ function App() {
           </div>
 
           <aside className="settings-panel" aria-label="Voice settings">
+            <div className="settings-scroll">
             <div className="section-heading">
               <span>Voice settings</span>
               <span>v{APP_VERSION}</span>
@@ -1075,8 +1079,6 @@ function App() {
               </>
             )}
 
-            <hr className="settings-divider" />
-
             <div className="range-row">
               <label htmlFor="speed">Speed</label>
               <span>{speed.toFixed(2)}x</span>
@@ -1091,232 +1093,248 @@ function App() {
               />
             </div>
 
-            {engine === 'kokoro' ? (
-              <div className="range-row">
-                <label htmlFor="pitch">Pitch</label>
-                <span>{pitchSemitones > 0 ? `+${pitchSemitones}` : pitchSemitones} st</span>
-                <input
-                  id="pitch"
-                  type="range"
-                  min="-4"
-                  max="4"
-                  step="1"
-                  value={pitchSemitones}
-                  onChange={(event) => setPitchSemitones(Number(event.target.value))}
-                />
-              </div>
-            ) : null}
+            <button
+              type="button"
+              className="advanced-toggle"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              aria-expanded={showAdvanced}
+            >
+              <Settings2 size={15} aria-hidden="true" />
+              Advanced options
+              <ChevronDown size={15} aria-hidden="true" className={showAdvanced ? 'chevron-open' : ''} />
+            </button>
 
-            {engine === 'kokoro' ? (
-              <div className="bgm-row">
-                <label className="control-label">Background music</label>
-                <div className="bgm-controls">
-                  <button type="button" onClick={() => bgmInputRef.current?.click()}>
-                    <Upload size={14} aria-hidden="true" />
-                    {bgmFile ? bgmFile.name.slice(0, 20) : 'Upload BGM'}
-                  </button>
-                  {bgmFile ? (
-                    <button type="button" onClick={() => setBgmFile(null)}>
-                      <X size={14} aria-hidden="true" />
-                    </button>
-                  ) : null}
-                  <input ref={bgmInputRef} type="file" accept="audio/*" onChange={(e) => { setBgmFile(e.target.files?.[0] ?? null); e.target.value = '' }} hidden />
-                </div>
-                {bgmFile ? (
-                  <div className="range-row" style={{ marginBottom: 0 }}>
-                    <label htmlFor="bgm-vol">BGM volume</label>
-                    <span>{Math.round(bgmVolume * 100)}%</span>
-                    <input id="bgm-vol" type="range" min="0" max="0.5" step="0.01" value={bgmVolume} onChange={(e) => setBgmVolume(Number(e.target.value))} />
+            {showAdvanced ? (
+              <div className="advanced-section">
+                {engine === 'kokoro' ? (
+                  <div className="range-row">
+                    <label htmlFor="pitch">Pitch</label>
+                    <span>{pitchSemitones > 0 ? `+${pitchSemitones}` : pitchSemitones} st</span>
+                    <input
+                      id="pitch"
+                      type="range"
+                      min="-4"
+                      max="4"
+                      step="1"
+                      value={pitchSemitones}
+                      onChange={(event) => setPitchSemitones(Number(event.target.value))}
+                    />
                   </div>
                 ) : null}
-              </div>
-            ) : null}
 
-            {engine === 'kokoro' ? (
-              <div className="format-row">
-                <label className="control-label" htmlFor="format">Format</label>
-                <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
-                  <option value="wav">WAV (lossless)</option>
-                  <option value="mp3">MP3</option>
-                </select>
-                {audioFormat === 'mp3' ? (
-                  <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
-                    <option value={128}>128 kbps</option>
-                    <option value={192}>192 kbps</option>
-                    <option value={320}>320 kbps</option>
-                  </select>
-                ) : null}
-              </div>
-            ) : null}
-
-            <hr className="settings-divider" />
-
-            <label className="toggle-row">
-              <input type="checkbox" checked={separateLines} onChange={(event) => setSeparateLines(event.target.checked)} />
-              <span>
-                Separate lines
-                <small>Generate one audio file per non-empty line.</small>
-              </span>
-            </label>
-
-            {engine === 'kokoro' ? (
-              <>
-                <label className="toggle-row">
-                  <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
-                  <span>
-                    Stream playback
-                    <small>Play audio as each sentence is generated.</small>
-                  </span>
-                </label>
-                <label className="toggle-row">
-                  <input type="checkbox" checked={useWorker} onChange={(event) => setUseWorker(event.target.checked)} />
-                  <span>
-                    Background worker
-                    <small>Run inference off main thread for smoother UI.</small>
-                  </span>
-                </label>
-              </>
-            ) : null}
-
-            {engine === 'kokoro' ? (
-              <label className="toggle-row">
-                <input type="checkbox" checked={dialogMode} onChange={(event) => setDialogMode(event.target.checked)} />
-                <span>
-                  Dialog mode
-                  <small>Map [speaker:Name] prefixes to voices.</small>
-                </span>
-              </label>
-            ) : null}
-
-            {dialogMode && engine === 'kokoro' ? (
-              <div className="speaker-map">
-                {[...new Set(parseDialogLines(usableText).map((d) => d.speaker).filter(Boolean))].map((name) => (
-                  <div className="speaker-row" key={name}>
-                    <span>{name}</span>
-                    <select
-                      value={speakerMap[name!] ?? ''}
-                      onChange={(e) => setSpeakerMap((prev) => ({ ...prev, [name!]: e.target.value }))}
-                    >
-                      <option value="">Default ({selectedVoice.name})</option>
-                      {VOICES.map((v) => (
-                        <option value={v.id} key={v.id}>
-                          {v.name} ({v.gender})
-                        </option>
-                      ))}
+                {engine === 'kokoro' ? (
+                  <div className="format-row">
+                    <label className="control-label" htmlFor="format">Format</label>
+                    <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
+                      <option value="wav">WAV (lossless)</option>
+                      <option value="mp3">MP3</option>
                     </select>
+                    {audioFormat === 'mp3' ? (
+                      <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
+                        <option value={128}>128 kbps</option>
+                        <option value={192}>192 kbps</option>
+                        <option value={320}>320 kbps</option>
+                      </select>
+                    ) : null}
                   </div>
-                ))}
-              </div>
-            ) : null}
+                ) : null}
 
-            {engine === 'kokoro' ? (
-              <>
-                <button
-                  type="button"
-                  className="heading-action pron-toggle"
-                  onClick={() => setShowPronunciations(!showPronunciations)}
-                >
-                  Pronunciations ({Object.keys(pronunciations).length})
-                </button>
-                {showPronunciations ? (
-                  <div className="speaker-map">
-                    {Object.entries(pronunciations).map(([word, pron]) => (
-                      <div className="speaker-row" key={word}>
-                        <span>{word}</span>
-                        <span className="pron-replacement">{pron}</span>
-                        <button
-                          type="button"
-                          className="heading-action"
-                          onClick={() => setPronunciations((prev) => {
-                            const next = { ...prev }
-                            delete next[word]
-                            return next
-                          })}
-                        >
-                          <X size={12} aria-hidden="true" />
+                {engine === 'kokoro' ? (
+                  <div className="bgm-row">
+                    <label className="control-label">Background music</label>
+                    <div className="bgm-controls">
+                      <button type="button" onClick={() => bgmInputRef.current?.click()}>
+                        <Upload size={14} aria-hidden="true" />
+                        {bgmFile ? bgmFile.name.slice(0, 20) : 'Upload BGM'}
+                      </button>
+                      {bgmFile ? (
+                        <button type="button" onClick={() => setBgmFile(null)}>
+                          <X size={14} aria-hidden="true" />
                         </button>
+                      ) : null}
+                      <input ref={bgmInputRef} type="file" accept="audio/*" onChange={(e) => { setBgmFile(e.target.files?.[0] ?? null); e.target.value = '' }} hidden />
+                    </div>
+                    {bgmFile ? (
+                      <div className="range-row" style={{ marginBottom: 0 }}>
+                        <label htmlFor="bgm-vol">BGM volume</label>
+                        <span>{Math.round(bgmVolume * 100)}%</span>
+                        <input id="bgm-vol" type="range" min="0" max="0.5" step="0.01" value={bgmVolume} onChange={(e) => setBgmVolume(Number(e.target.value))} />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <label className="toggle-row">
+                  <input type="checkbox" checked={separateLines} onChange={(event) => setSeparateLines(event.target.checked)} />
+                  <span>
+                    Separate lines
+                    <small>Generate one audio file per non-empty line.</small>
+                  </span>
+                </label>
+
+                {engine === 'kokoro' ? (
+                  <>
+                    <label className="toggle-row">
+                      <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
+                      <span>
+                        Stream playback
+                        <small>Play audio as each sentence is generated.</small>
+                      </span>
+                    </label>
+                    <label className="toggle-row">
+                      <input type="checkbox" checked={useWorker} onChange={(event) => setUseWorker(event.target.checked)} />
+                      <span>
+                        Background worker
+                        <small>Run inference off main thread for smoother UI.</small>
+                      </span>
+                    </label>
+                  </>
+                ) : null}
+
+                {engine === 'kokoro' ? (
+                  <label className="toggle-row">
+                    <input type="checkbox" checked={dialogMode} onChange={(event) => setDialogMode(event.target.checked)} />
+                    <span>
+                      Dialog mode
+                      <small>Map [speaker:Name] prefixes to voices.</small>
+                    </span>
+                  </label>
+                ) : null}
+
+                {dialogMode && engine === 'kokoro' ? (
+                  <div className="speaker-map">
+                    {[...new Set(parseDialogLines(usableText).map((d) => d.speaker).filter(Boolean))].map((name) => (
+                      <div className="speaker-row" key={name}>
+                        <span>{name}</span>
+                        <select
+                          value={speakerMap[name!] ?? ''}
+                          onChange={(e) => setSpeakerMap((prev) => ({ ...prev, [name!]: e.target.value }))}
+                        >
+                          <option value="">Default ({selectedVoice.name})</option>
+                          {VOICES.map((v) => (
+                            <option value={v.id} key={v.id}>
+                              {v.name} ({v.gender})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     ))}
-                    <div className="speaker-row">
-                      <input
-                        type="text"
-                        className="pron-input"
-                        placeholder="Word"
-                        value={newWord}
-                        onChange={(e) => setNewWord(e.target.value)}
-                        aria-label="Pronunciation word"
-                      />
-                      <input
-                        type="text"
-                        className="pron-input"
-                        placeholder="Says as"
-                        value={newPronunciation}
-                        onChange={(e) => setNewPronunciation(e.target.value)}
-                        aria-label="Pronunciation replacement"
-                      />
-                      <button
-                        type="button"
-                        className="heading-action"
-                        onClick={() => {
-                          if (newWord.trim() && newPronunciation.trim()) {
-                            setPronunciations((prev) => ({ ...prev, [newWord.trim()]: newPronunciation.trim() }))
-                            setNewWord('')
-                            setNewPronunciation('')
-                          }
-                        }}
-                      >
-                        Add
-                      </button>
-                    </div>
                   </div>
                 ) : null}
-              </>
-            ) : null}
 
-            {progress !== null ? (
-              <div
-                className="progress-wrap"
-                role="progressbar"
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="Generation progress"
-              >
-                <span style={{ width: `${progress}%` }} />
+                {engine === 'kokoro' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="heading-action pron-toggle"
+                      onClick={() => setShowPronunciations(!showPronunciations)}
+                    >
+                      Pronunciations ({Object.keys(pronunciations).length})
+                    </button>
+                    {showPronunciations ? (
+                      <div className="speaker-map">
+                        {Object.entries(pronunciations).map(([word, pron]) => (
+                          <div className="speaker-row" key={word}>
+                            <span>{word}</span>
+                            <span className="pron-replacement">{pron}</span>
+                            <button
+                              type="button"
+                              className="heading-action"
+                              onClick={() => setPronunciations((prev) => {
+                                const next = { ...prev }
+                                delete next[word]
+                                return next
+                              })}
+                            >
+                              <X size={12} aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="speaker-row">
+                          <input
+                            type="text"
+                            className="pron-input"
+                            placeholder="Word"
+                            value={newWord}
+                            onChange={(e) => setNewWord(e.target.value)}
+                            aria-label="Pronunciation word"
+                          />
+                          <input
+                            type="text"
+                            className="pron-input"
+                            placeholder="Says as"
+                            value={newPronunciation}
+                            onChange={(e) => setNewPronunciation(e.target.value)}
+                            aria-label="Pronunciation replacement"
+                          />
+                          <button
+                            type="button"
+                            className="heading-action"
+                            onClick={() => {
+                              if (newWord.trim() && newPronunciation.trim()) {
+                                setPronunciations((prev) => ({ ...prev, [newWord.trim()]: newPronunciation.trim() }))
+                                setNewWord('')
+                                setNewPronunciation('')
+                              }
+                            }}
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
               </div>
             ) : null}
+            </div>
 
-            {genStats && !isGenerating ? (
-              <div className="gen-stats">
-                <span>{genStats.elapsed.toFixed(1)}s elapsed</span>
-                <span>{Math.round(genStats.chars / genStats.elapsed)} chars/s</span>
-                <span>{genStats.audioDuration.toFixed(1)}s audio</span>
-                <span>{(genStats.audioDuration / genStats.elapsed).toFixed(1)}x realtime</span>
-              </div>
-            ) : null}
+            <div className="settings-actions">
+              {progress !== null ? (
+                <div
+                  className="progress-wrap"
+                  role="progressbar"
+                  aria-valuenow={progress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Generation progress"
+                >
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+              ) : null}
 
-            {isGenerating ? (
-              <button
-                type="button"
-                className="generate-button cancel"
-                onClick={() => {
-                  abortRef.current = true
-                }}
-              >
-                <X size={18} aria-hidden="true" />
-                Cancel
+              {genStats && !isGenerating ? (
+                <div className="gen-stats">
+                  <span>{genStats.elapsed.toFixed(1)}s elapsed</span>
+                  <span>{Math.round(genStats.chars / genStats.elapsed)} chars/s</span>
+                  <span>{genStats.audioDuration.toFixed(1)}s audio</span>
+                  <span>{(genStats.audioDuration / genStats.elapsed).toFixed(1)}x realtime</span>
+                </div>
+              ) : null}
+
+              {isGenerating ? (
+                <button
+                  type="button"
+                  className="generate-button cancel"
+                  onClick={() => {
+                    abortRef.current = true
+                  }}
+                >
+                  <X size={18} aria-hidden="true" />
+                  Cancel
+                </button>
+              ) : (
+                <button type="button" className="generate-button" onClick={handleGenerate}>
+                  <Waves size={18} aria-hidden="true" />
+                  Generate audio
+                </button>
+              )}
+
+              <button type="button" className="secondary-action" onClick={clearOutputs}>
+                <Trash2 size={16} aria-hidden="true" />
+                Clear output
               </button>
-            ) : (
-              <button type="button" className="generate-button" onClick={handleGenerate}>
-                <Waves size={18} aria-hidden="true" />
-                Generate audio
-              </button>
-            )}
-
-            <button type="button" className="secondary-action" onClick={clearOutputs}>
-              <Trash2 size={16} aria-hidden="true" />
-              Clear output
-            </button>
+            </div>
           </aside>
         </section>
 
