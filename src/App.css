@@ -1112,3 +1112,44 @@ footer {
     padding-inline: 16px;
   }
 }
+
+.read-along {
+  grid-column: 1 / -1;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-0);
+  line-height: 1.7;
+}
+
+.read-along .cue {
+  display: inline;
+  min-height: 0;
+  margin: 0 2px 0 0;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.read-along .cue:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.read-along .cue.active {
+  color: var(--heading);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.result-actions .follow-active {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  color: var(--accent);
+}

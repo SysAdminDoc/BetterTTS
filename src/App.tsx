@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Captions,
   Check,
   ChevronDown,
   Download,
@@ -108,6 +109,154 @@ async function getDurationLabel(blob: Blob) {
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+type ResultRowProps = {
+  result: AudioResult
+  isSpeaking: boolean
+  onReplay: (text: string) => void
+  onShare: (result: AudioResult) => void
+  onSave: (result: AudioResult) => void
+}
+
+function ResultRow({ result, isSpeaking, onReplay, onShare, onSave }: ResultRowProps) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const activeCueRef = useRef<HTMLButtonElement | null>(null)
+  const [followAlong, setFollowAlong] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(-1)
+  const cues = useMemo(() => result.cues ?? [], [result.cues])
+
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el || !followAlong || cues.length === 0) return
+    let timer: ReturnType<typeof setInterval> | null = null
+    const sync = () => {
+      const t = el.currentTime
+      let idx = -1
+      for (let i = 0; i < cues.length; i++) {
+        if (t >= cues[i].startSec && t < cues[i].endSec) {
+          idx = i
+          break
+        }
+      }
+      setActiveIdx(idx)
+    }
+    const start = () => {
+      sync()
+      if (!timer) timer = setInterval(sync, 100)
+    }
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+    const end = () => {
+      stop()
+      setActiveIdx(-1)
+    }
+    el.addEventListener('play', start)
+    el.addEventListener('pause', stop)
+    el.addEventListener('seeked', sync)
+    el.addEventListener('ended', end)
+    if (!el.paused) start()
+    return () => {
+      stop()
+      el.removeEventListener('play', start)
+      el.removeEventListener('pause', stop)
+      el.removeEventListener('seeked', sync)
+      el.removeEventListener('ended', end)
+    }
+  }, [followAlong, cues])
+
+  useEffect(() => {
+    if (activeIdx < 0) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    activeCueRef.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
+  }, [activeIdx])
+
+  return (
+    <div className="result-row">
+      <div className="result-meta">
+        <span className="ready-dot" aria-hidden="true" />
+        <strong>{result.filename}</strong>
+        <span>{result.duration}</span>
+        <span>{result.size}</span>
+      </div>
+      {result.url ? (
+        <audio ref={audioRef} controls src={result.url} aria-label={result.filename}>
+          {result.vttUrl ? <track kind="captions" src={result.vttUrl} srcLang="en" label="English" /> : null}
+        </audio>
+      ) : null}
+      <div className="result-actions">
+        {result.replayText ? (
+          <button type="button" onClick={() => onReplay(result.replayText!)} disabled={isSpeaking}>
+            {isSpeaking ? <Loader2 size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+            Replay
+          </button>
+        ) : null}
+        {result.url && 'showSaveFilePicker' in window ? (
+          <button type="button" onClick={() => onSave(result)}>
+            <Download size={16} aria-hidden="true" />
+            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
+          </button>
+        ) : result.url ? (
+          <a href={result.url} download={result.filename}>
+            <Download size={16} aria-hidden="true" />
+            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
+          </a>
+        ) : null}
+        {result.url && typeof navigator !== 'undefined' && 'canShare' in navigator ? (
+          <button type="button" onClick={() => onShare(result)} aria-label="Share">
+            <Share2 size={16} aria-hidden="true" />
+          </button>
+        ) : null}
+        {result.url && cues.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setFollowAlong(!followAlong)}
+            aria-pressed={followAlong}
+            className={followAlong ? 'follow-active' : undefined}
+          >
+            <Captions size={16} aria-hidden="true" />
+            Follow
+          </button>
+        ) : null}
+        {result.srtUrl && result.vttUrl ? (
+          <>
+            <a href={result.srtUrl} download={result.filename.replace(/\.\w+$/, '.srt')}>
+              <FileText size={16} aria-hidden="true" />
+              SRT
+            </a>
+            <a href={result.vttUrl} download={result.filename.replace(/\.\w+$/, '.vtt')}>
+              <FileText size={16} aria-hidden="true" />
+              VTT
+            </a>
+          </>
+        ) : null}
+      </div>
+      {followAlong && cues.length > 0 ? (
+        <div className="read-along" aria-label="Follow along transcript">
+          {cues.map((cue, i) => (
+            <button
+              key={cue.index}
+              ref={i === activeIdx ? activeCueRef : null}
+              type="button"
+              className={i === activeIdx ? 'cue active' : 'cue'}
+              onClick={() => {
+                const el = audioRef.current
+                if (!el) return
+                el.currentTime = cue.startSec + 0.001
+                el.play().catch(() => {})
+              }}
+            >
+              {cue.text}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -928,57 +1077,14 @@ function App() {
               ) : (
                 <div className="result-list">
                   {results.map((result) => (
-                    <div className="result-row" key={result.id}>
-                      <div className="result-meta">
-                        <span className="ready-dot" aria-hidden="true" />
-                        <strong>{result.filename}</strong>
-                        <span>{result.duration}</span>
-                        <span>{result.size}</span>
-                      </div>
-                      {result.url ? (
-                        <audio controls src={result.url} aria-label={result.filename}>
-                          {result.vttUrl ? (
-                            <track kind="captions" src={result.vttUrl} srcLang="en" label="English" />
-                          ) : null}
-                        </audio>
-                      ) : null}
-                      <div className="result-actions">
-                        {result.replayText ? (
-                          <button type="button" onClick={() => replayBrowser(result.replayText!)} disabled={isSpeaking}>
-                            {isSpeaking ? <Loader2 size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-                            Replay
-                          </button>
-                        ) : null}
-                        {result.url && 'showSaveFilePicker' in window ? (
-                          <button type="button" onClick={() => saveWithPicker(result)}>
-                            <Download size={16} aria-hidden="true" />
-                            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
-                          </button>
-                        ) : result.url ? (
-                          <a href={result.url} download={result.filename}>
-                            <Download size={16} aria-hidden="true" />
-                            {result.filename.endsWith('.mp3') ? 'MP3' : 'WAV'}
-                          </a>
-                        ) : null}
-                        {result.url && typeof navigator !== 'undefined' && 'canShare' in navigator ? (
-                          <button type="button" onClick={() => shareResult(result)} aria-label="Share">
-                            <Share2 size={16} aria-hidden="true" />
-                          </button>
-                        ) : null}
-                        {result.srtUrl && result.vttUrl ? (
-                          <>
-                            <a href={result.srtUrl} download={result.filename.replace(/\.\w+$/, '.srt')}>
-                              <FileText size={16} aria-hidden="true" />
-                              SRT
-                            </a>
-                            <a href={result.vttUrl} download={result.filename.replace(/\.\w+$/, '.vtt')}>
-                              <FileText size={16} aria-hidden="true" />
-                              VTT
-                            </a>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
+                    <ResultRow
+                      key={result.id}
+                      result={result}
+                      isSpeaking={isSpeaking}
+                      onReplay={replayBrowser}
+                      onShare={shareResult}
+                      onSave={saveWithPicker}
+                    />
                   ))}
                   {zipUrl ? (
                     <a className="zip-download" href={zipUrl} download={zipName}>

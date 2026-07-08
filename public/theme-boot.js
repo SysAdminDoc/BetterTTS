@@ -7,7 +7,7 @@
       theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
     }
     document.documentElement.dataset.theme = theme
-  } catch (e) {
+  } catch {
     /* storage blocked — App applies the theme post-mount */
   }
 })()
