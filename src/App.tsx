@@ -29,6 +29,7 @@ import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-work
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, saveChunkBlob, saveJob } from './lib/queue.ts'
+import { parseEpub } from './lib/epub.ts'
 import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
 import { VOICES } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
@@ -1153,6 +1154,46 @@ function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  async function handleEpubImport(file: File) {
+    try {
+      setStatus('Parsing EPUB…')
+      const chapters = await parseEpub(file)
+      const allChunks = chapters.flatMap((ch) => {
+        const cleaned = cleanupText(ch.text, cleanup)
+        return splitInput(cleaned, false).map((text) => ({ title: ch.title, text }))
+      })
+      if (allChunks.length === 0) {
+        showToast({ tone: 'warn', message: 'No readable text found in this EPUB.' })
+        return
+      }
+      const job: QueueJob = {
+        id: crypto.randomUUID(),
+        title: file.name.replace(/\.epub$/i, ''),
+        createdAt: Date.now(),
+        voice: selectedVoice.id,
+        speed,
+        format: audioFormat,
+        bitrate: mp3Bitrate,
+        chunks: allChunks.map((c, i) => ({
+          index: i,
+          text: c.text.slice(0, MAX_TEXT_CHARS),
+          status: 'pending' as const,
+        })),
+      }
+      await saveJob(job)
+      setQueueJobs((prev) => [job, ...prev])
+      const skipped = chapters.filter((ch) => !ch.text.trim()).length
+      showToast({
+        tone: 'ok',
+        message: `Imported "${job.title}" — ${chapters.length} chapters, ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} empty chapters skipped.` : ''}`,
+      })
+    } catch (err) {
+      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'EPUB import failed.' })
+    } finally {
+      setStatus('Ready')
+    }
+  }
+
   function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
@@ -1161,8 +1202,13 @@ function App() {
       return
     }
 
+    if (file.name.toLowerCase().endsWith('.epub')) {
+      handleEpubImport(file)
+      return
+    }
+
     if (!file.name.toLowerCase().endsWith('.txt') && file.type !== 'text/plain') {
-      showToast({ tone: 'warn', message: 'Import supports plain .txt files for this static build.' })
+      showToast({ tone: 'warn', message: 'Import supports .txt and .epub files.' })
       return
     }
 
@@ -1240,9 +1286,9 @@ function App() {
               </button>
               <button type="button" onClick={() => fileInputRef.current?.click()}>
                 <Upload size={16} aria-hidden="true" />
-                Import .txt
+                Import
               </button>
-              <input ref={fileInputRef} type="file" accept=".txt,text/plain" onChange={handleFileUpload} hidden />
+              <input ref={fileInputRef} type="file" accept=".txt,.epub,text/plain,application/epub+zip" onChange={handleFileUpload} hidden />
               <select
                 className="pause-select"
                 value={pauseDuration}
