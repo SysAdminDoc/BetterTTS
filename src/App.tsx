@@ -19,29 +19,17 @@ import {
 } from 'lucide-react'
 import { Component, type ChangeEvent, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { KOKORO_SAMPLE_RATE, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
+import { PAUSE_TAG, formatBytes, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
+import { VOICES } from './lib/voices.ts'
+import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
+import { speakBrowser } from './lib/webspeech.ts'
 
 const APP_VERSION = '0.1.0'
-const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-const KOKORO_SAMPLE_RATE = 24000
 const MAX_TEXT_CHARS = 5000
 
 type Engine = 'kokoro' | 'browser'
 type Theme = 'dark' | 'light'
-
-type VoiceId =
-  | 'am_adam' | 'am_puck' | 'am_liam' | 'af_heart' | 'af_bella' | 'af_nova'
-  | 'af_alloy' | 'af_jessica' | 'af_kore' | 'af_nicole' | 'af_river' | 'af_sarah'
-  | 'am_echo' | 'am_eric' | 'am_fenrir' | 'am_michael' | 'am_onyx' | 'am_santa'
-  | 'bf_alice' | 'bf_emma' | 'bf_isabella' | 'bf_lily'
-  | 'bm_daniel' | 'bm_fable' | 'bm_george' | 'bm_lewis'
-
-type Voice = {
-  id: VoiceId
-  name: string
-  locale: 'en-us' | 'en-gb'
-  gender: 'Female' | 'Male'
-  grade: string
-}
 
 type AudioResult = {
   id: string
@@ -57,51 +45,6 @@ type Toast = {
   tone: 'ok' | 'warn' | 'error'
   message: string
 }
-
-type ProgressInfo = {
-  status?: string
-  file?: string
-  progress?: number
-  loaded?: number
-  total?: number
-}
-
-type KokoroModule = typeof import('kokoro-js')
-type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
-type RawAudioLike = {
-  audio?: Float32Array
-  sampling_rate?: number
-  toBlob?: () => Blob
-}
-
-const VOICES: Voice[] = [
-  { id: 'am_adam', name: 'Adam', locale: 'en-us', gender: 'Male', grade: 'F+' },
-  { id: 'am_puck', name: 'Puck', locale: 'en-us', gender: 'Male', grade: 'C+' },
-  { id: 'am_liam', name: 'Liam', locale: 'en-us', gender: 'Male', grade: 'D' },
-  { id: 'af_heart', name: 'Heart', locale: 'en-us', gender: 'Female', grade: 'A' },
-  { id: 'af_bella', name: 'Bella', locale: 'en-us', gender: 'Female', grade: 'A-' },
-  { id: 'af_nova', name: 'Nova', locale: 'en-us', gender: 'Female', grade: 'C' },
-  { id: 'af_alloy', name: 'Alloy', locale: 'en-us', gender: 'Female', grade: 'C' },
-  { id: 'af_jessica', name: 'Jessica', locale: 'en-us', gender: 'Female', grade: 'D' },
-  { id: 'af_kore', name: 'Kore', locale: 'en-us', gender: 'Female', grade: 'C+' },
-  { id: 'af_nicole', name: 'Nicole', locale: 'en-us', gender: 'Female', grade: 'B-' },
-  { id: 'af_river', name: 'River', locale: 'en-us', gender: 'Female', grade: 'D' },
-  { id: 'af_sarah', name: 'Sarah', locale: 'en-us', gender: 'Female', grade: 'C+' },
-  { id: 'am_echo', name: 'Echo', locale: 'en-us', gender: 'Male', grade: 'D' },
-  { id: 'am_eric', name: 'Eric', locale: 'en-us', gender: 'Male', grade: 'D' },
-  { id: 'am_fenrir', name: 'Fenrir', locale: 'en-us', gender: 'Male', grade: 'C+' },
-  { id: 'am_michael', name: 'Michael', locale: 'en-us', gender: 'Male', grade: 'C+' },
-  { id: 'am_onyx', name: 'Onyx', locale: 'en-us', gender: 'Male', grade: 'D' },
-  { id: 'am_santa', name: 'Santa', locale: 'en-us', gender: 'Male', grade: 'D-' },
-  { id: 'bf_alice', name: 'Alice', locale: 'en-gb', gender: 'Female', grade: 'D' },
-  { id: 'bf_emma', name: 'Emma', locale: 'en-gb', gender: 'Female', grade: 'B-' },
-  { id: 'bf_isabella', name: 'Isabella', locale: 'en-gb', gender: 'Female', grade: 'C' },
-  { id: 'bf_lily', name: 'Lily', locale: 'en-gb', gender: 'Female', grade: 'D' },
-  { id: 'bm_daniel', name: 'Daniel', locale: 'en-gb', gender: 'Male', grade: 'D' },
-  { id: 'bm_fable', name: 'Fable', locale: 'en-gb', gender: 'Male', grade: 'C' },
-  { id: 'bm_george', name: 'George', locale: 'en-gb', gender: 'Male', grade: 'C' },
-  { id: 'bm_lewis', name: 'Lewis', locale: 'en-gb', gender: 'Male', grade: 'D+' },
-]
 
 const STARTER_TEXT = `TTS4FREE is a free client-side text-to-speech web app.
 
@@ -120,8 +63,6 @@ const MODEL_ROWS = [
   ['Piper packs', 'Static model packs', 'Varies', 'Optional', 'Later'],
 ]
 
-let kokoroPromise: Promise<KokoroInstance> | null = null
-
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'dark'
   try {
@@ -132,81 +73,8 @@ function getInitialTheme(): Theme {
   return 'dark'
 }
 
-async function probeWebGpu(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !('gpu' in navigator)) return false
-  try {
-    const gpu = navigator.gpu as { requestAdapter(): Promise<unknown | null> }
-    const adapter = await gpu.requestAdapter()
-    return adapter != null
-  } catch {
-    return false
-  }
-}
-
-async function loadKokoro(onProgress: (info: ProgressInfo) => void) {
-  if (kokoroPromise) return kokoroPromise
-
-  const [{ KokoroTTS }, hasWebGpu] = await Promise.all([
-    import('kokoro-js'),
-    probeWebGpu(),
-  ])
-
-  const device = hasWebGpu ? ('webgpu' as const) : ('wasm' as const)
-  const dtype = hasWebGpu ? ('fp32' as const) : ('q8' as const)
-
-  const promise = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-    device,
-    dtype,
-    progress_callback: (info) => onProgress(info as ProgressInfo),
-  })
-  kokoroPromise = promise
-
-  try {
-    return await promise
-  } catch (err) {
-    kokoroPromise = null
-    if (hasWebGpu) {
-      const fallback = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-        device: 'wasm',
-        dtype: 'q8',
-        progress_callback: (info) => onProgress(info as ProgressInfo),
-      })
-      kokoroPromise = fallback
-      try {
-        return await fallback
-      } catch {
-        kokoroPromise = null
-        throw err
-      }
-    }
-    throw err
-  }
-}
-
-function slugify(value: string) {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 42)
-
-  return slug || 'tts4free-audio'
-}
-
 function timestamp() {
   return new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} kB`
-  }
-
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 async function getDurationLabel(blob: Blob) {
@@ -225,163 +93,6 @@ async function getDurationLabel(blob: Blob) {
     })
   } finally {
     URL.revokeObjectURL(url)
-  }
-}
-
-function encodeWav(samples: Float32Array, sampleRate: number) {
-  const buffer = new ArrayBuffer(44 + samples.length * 2)
-  const view = new DataView(buffer)
-
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, 36 + samples.length * 2, true)
-  writeString(view, 8, 'WAVE')
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, 1, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * 2, true)
-  view.setUint16(32, 2, true)
-  view.setUint16(34, 16, true)
-  writeString(view, 36, 'data')
-  view.setUint32(40, samples.length * 2, true)
-
-  let offset = 44
-  for (const sample of samples) {
-    const clamped = Math.max(-1, Math.min(1, sample))
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
-    offset += 2
-  }
-
-  return buffer
-}
-
-function writeString(view: DataView, offset: number, value: string) {
-  for (let index = 0; index < value.length; index += 1) {
-    view.setUint8(offset + index, value.charCodeAt(index))
-  }
-}
-
-function splitInput(text: string, separateLines: boolean) {
-  const normalized = text.trim()
-  if (!normalized) {
-    return []
-  }
-
-  if (!separateLines) {
-    return [normalized]
-  }
-
-  return normalized
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-}
-
-type TextSegment = { type: 'text'; content: string } | { type: 'pause'; duration: number }
-
-const PAUSE_TAG = /\[pause(?:\s+([\d.]+)\s*s?)?\]/gi
-
-function parsePauseTags(text: string): TextSegment[] {
-  const segments: TextSegment[] = []
-  let lastIndex = 0
-
-  for (const match of text.matchAll(PAUSE_TAG)) {
-    const before = text.slice(lastIndex, match.index)
-    if (before.trim()) segments.push({ type: 'text', content: before.trim() })
-    const duration = match[1] ? Number.parseFloat(match[1]) : 1
-    if (duration > 0 && duration <= 30) segments.push({ type: 'pause', duration })
-    lastIndex = match.index + match[0].length
-  }
-
-  const tail = text.slice(lastIndex)
-  if (tail.trim()) segments.push({ type: 'text', content: tail.trim() })
-  return segments.length > 0 ? segments : [{ type: 'text', content: text.trim() }]
-}
-
-function splitIntoSentences(text: string): string[] {
-  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
-  if (sentences.length === 0) return text.trim() ? [text.trim()] : []
-
-  const chunks: string[] = []
-  let buffer = ''
-
-  for (const s of sentences) {
-    if (buffer && buffer.length + s.length + 1 > 300) {
-      chunks.push(buffer)
-      buffer = s
-    } else {
-      buffer = buffer ? `${buffer} ${s}` : s
-    }
-  }
-  if (buffer) chunks.push(buffer)
-  return chunks
-}
-
-function concatFloat32Arrays(arrays: Float32Array[]): Float32Array {
-  const total = arrays.reduce((sum, a) => sum + a.length, 0)
-  const result = new Float32Array(total)
-  let offset = 0
-  for (const a of arrays) {
-    result.set(a, offset)
-    offset += a.length
-  }
-  return result
-}
-
-function getBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
-  const synth = window.speechSynthesis
-  const voices = synth.getVoices()
-  if (voices.length > 0) return Promise.resolve(voices)
-
-  return new Promise((resolve) => {
-    const onReady = () => {
-      synth.removeEventListener('voiceschanged', onReady)
-      resolve(synth.getVoices())
-    }
-    synth.addEventListener('voiceschanged', onReady)
-    setTimeout(() => {
-      synth.removeEventListener('voiceschanged', onReady)
-      resolve(synth.getVoices())
-    }, 2000)
-  })
-}
-
-async function speakBrowser(text: string, speed: number, chosenVoice?: SpeechSynthesisVoice) {
-  if (!('speechSynthesis' in window)) {
-    throw new Error('This browser does not expose speech synthesis.')
-  }
-
-  const synth = window.speechSynthesis
-  synth.cancel()
-
-  const voice = chosenVoice ?? (await getBrowserVoices()).find((v) => v.lang.toLowerCase().startsWith('en')) ?? null
-  const chunks = splitIntoSentences(text)
-  const rate = Math.max(0.5, Math.min(1.5, speed))
-
-  for (const chunk of chunks) {
-    await new Promise<void>((resolve, reject) => {
-      const utt = new SpeechSynthesisUtterance(chunk)
-      utt.rate = rate
-      utt.voice = voice
-      utt.onend = () => resolve()
-      utt.onerror = (ev) => {
-        if (ev.error === 'interrupted' || ev.error === 'canceled') resolve()
-        else reject(new Error('Browser speech playback failed.'))
-      }
-
-      const watchdog = setTimeout(() => {
-        synth.cancel()
-        resolve()
-      }, 20000)
-      const origEnd = utt.onend
-      utt.onend = (e) => {
-        clearTimeout(watchdog)
-        origEnd?.call(utt, e)
-      }
-
-      synth.speak(utt)
-    })
   }
 }
 
@@ -1057,7 +768,7 @@ git subtree push --prefix dist origin gh-pages
           <button
             type="button"
             onClick={() => {
-              kokoroPromise = null
+              resetKokoroSession()
               showToast({ tone: 'ok', message: 'Model cache handle reset for this page session.' })
             }}
           >
