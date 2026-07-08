@@ -47,6 +47,8 @@ type AudioResult = {
   url?: string
   replayText?: string
   cues?: Cue[]
+  srtUrl?: string
+  vttUrl?: string
 }
 
 type Toast = {
@@ -307,7 +309,14 @@ function App() {
     }
   }
 
-  async function generateKokoro(chunks: string[]) {
+  type SynthJob = {
+    text: string
+    voice: string
+    label: string
+    filenamePrefix: string
+  }
+
+  async function runSynthesis(jobs: SynthJob[], opts: { zipPrefix: string; successMessage?: string }) {
     setStatus('Loading Kokoro model')
     setProgress(3)
 
@@ -346,7 +355,11 @@ function App() {
       return audio.audio ?? null
     }
 
-    if (abortRef.current) return
+    if (abortRef.current) {
+      setStatus('Cancelled')
+      showToast({ tone: 'warn', message: 'Generation cancelled.' })
+      return
+    }
 
     setStatus('Generating local audio')
     const genStart = performance.now()
@@ -363,21 +376,22 @@ function App() {
       nextPlayTime = audioCtx.currentTime + 0.05
     }
 
-    const chunkPlans = chunks.map((chunk) => {
-      const segments = parsePauseTags(chunk)
+    const jobPlans = jobs.map((job) => {
+      const segments = parsePauseTags(job.text)
       return segments.map((seg) =>
         seg.type === 'pause' ? seg : { ...seg, sentences: splitIntoSentences(seg.content) },
       )
     })
     let totalSentences = 0
-    for (const plan of chunkPlans) {
+    for (const plan of jobPlans) {
       for (const seg of plan) if (seg.type === 'text') totalSentences += seg.sentences.length
     }
     let done = 0
 
-    for (let index = 0; index < chunks.length; index += 1) {
+    for (let index = 0; index < jobs.length; index += 1) {
       if (abortRef.current) break
-      const plan = chunkPlans[index]
+      const job = jobs[index]
+      const plan = jobPlans[index]
       const audioParts: Float32Array[] = []
       const cues: Cue[] = []
       let sampleOffset = 0
@@ -393,7 +407,7 @@ function App() {
         }
         for (const sentence of seg.sentences) {
           if (abortRef.current) break
-          const samples = await synthesize(applyPronunciations(sentence), selectedVoice.id, speed)
+          const samples = await synthesize(applyPronunciations(sentence), job.voice, speed)
           if (samples) {
             audioParts.push(samples)
             totalSamples += samples.length
@@ -412,8 +426,10 @@ function App() {
             }
           }
           done++
-          setProgress(35 + Math.round((done / totalSentences) * 55))
-          setStatus(`Generated ${done} / ${totalSentences}`)
+          if (totalSentences > 0) {
+            setProgress(35 + Math.round((done / totalSentences) * 55))
+            setStatus(`Generated ${done} / ${totalSentences}`)
+          }
         }
       }
 
@@ -429,19 +445,33 @@ function App() {
       if (bgmFile) processed = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
       const ext = formatExtension(audioFormat)
       const blob = await encodeAudio(processed, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
-      const baseName =
-        chunks.length === 1 ? slugify(chunks[index]) : `${String(index + 1).padStart(3, '0')}-${slugify(chunks[index])}`
-      const filename = `${baseName}-${timestamp()}${ext}`
-      const result = await buildResult(blob, chunks[index].slice(0, 64), filename)
-      result.cues = cues
+      const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
+      const result = await buildResult(blob, job.label, filename)
+      if (cues.length > 0) {
+        result.cues = cues
+        result.srtUrl = rememberUrl(URL.createObjectURL(new Blob([toSRT(cues)], { type: 'text/plain' })))
+        result.vttUrl = rememberUrl(URL.createObjectURL(new Blob([toVTT(cues)], { type: 'text/vtt' })))
+      }
 
       generated.push(result)
       zipFiles[filename] = blob
       setResults([...generated])
       saveClip(
-        { id: result.id, filename, label: result.label, voice: selectedVoice.id, speed, createdAt: Date.now(), size: blob.size, duration: result.duration },
+        { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration },
         blob,
       ).catch(() => {})
+    }
+
+    if (audioCtx) {
+      const ctx = audioCtx
+      if (abortRef.current) {
+        ctx.close().catch(() => {})
+      } else {
+        const delayMs = Math.max(0, (nextPlayTime - ctx.currentTime) * 1000) + 200
+        setTimeout(() => {
+          ctx.close().catch(() => {})
+        }, delayMs)
+      }
     }
 
     if (generated.length > 1) {
@@ -452,7 +482,7 @@ function App() {
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' })
       setZipUrl(rememberUrl(URL.createObjectURL(zipBlob)))
-      setZipName(`bettertts-${timestamp()}.zip`)
+      setZipName(`${opts.zipPrefix}-${timestamp()}.zip`)
     }
 
     setProgress(100)
@@ -466,8 +496,18 @@ function App() {
       showToast({ tone: 'warn', message: 'Generation cancelled.' })
     } else {
       setStatus('Local audio ready')
-      showToast({ tone: 'ok', message: 'Audio generated locally in your browser.' })
+      showToast({ tone: 'ok', message: opts.successMessage ?? 'Audio generated locally in your browser.' })
     }
+  }
+
+  async function generateKokoro(chunks: string[]) {
+    const jobs: SynthJob[] = chunks.map((chunk, index) => ({
+      text: chunk,
+      voice: selectedVoice.id,
+      label: chunk.slice(0, 64),
+      filenamePrefix: chunks.length === 1 ? slugify(chunk) : `${String(index + 1).padStart(3, '0')}-${slugify(chunk)}`,
+    }))
+    await runSynthesis(jobs, { zipPrefix: 'bettertts' })
   }
 
   async function generateBrowser(chunks: string[]) {
@@ -492,111 +532,34 @@ function App() {
     const lines = parseDialogLines(usableText)
     if (lines.length === 0) return
 
-    setStatus('Loading Kokoro model')
-    setProgress(3)
-
-    let ttsInline: Awaited<ReturnType<typeof loadKokoro>> | null = null
-    if (useWorker) {
-      const hasGpu = await probeWebGpu()
-      await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', hasGpu ? 'fp32' : 'q8', () => {})
-    } else {
-      ttsInline = await loadKokoro(() => {})
-    }
-
-    const synthesize = async (text: string, voice: string, spd: number): Promise<Float32Array | null> => {
-      if (useWorker) return generateWorker(text, voice, spd)
-      const audio = (await ttsInline!.generate(text, { voice: voice as never, speed: spd })) as RawAudioLike
-      return audio.audio ?? null
-    }
-
-    if (abortRef.current) return
-
-    const generated: AudioResult[] = []
-    const zipFiles: Record<string, Blob> = {}
-    let clearedPrevious = false
     const unmapped = new Set<string>()
-
-    for (let i = 0; i < lines.length; i++) {
-      if (abortRef.current) break
-      const { speaker, text: lineText } = lines[i]
-      const mappedVoiceId = speaker ? (speakerMap[speaker] || null) : null
-      const voiceForLine = (mappedVoiceId ?? selectedVoice.id) as typeof selectedVoice.id
-      if (speaker && !mappedVoiceId) unmapped.add(speaker)
-
-      const segments = parsePauseTags(lineText)
-      const audioParts: Float32Array[] = []
-      const cues: Cue[] = []
-      let sampleOffset = 0
-      let cueIndex = 1
-
-      for (const seg of segments) {
-        if (abortRef.current) break
-        if (seg.type === 'pause') {
-          const silence = new Float32Array(Math.round(seg.duration * KOKORO_SAMPLE_RATE))
-          audioParts.push(silence)
-          sampleOffset += silence.length
-          continue
-        }
-        for (const sentence of splitIntoSentences(seg.content)) {
-          if (abortRef.current) break
-          const samples = await synthesize(applyPronunciations(sentence), voiceForLine, speed)
-          if (samples) {
-            audioParts.push(samples)
-            const startSec = sampleOffset / KOKORO_SAMPLE_RATE
-            sampleOffset += samples.length
-            cues.push({ index: cueIndex++, startSec, endSec: sampleOffset / KOKORO_SAMPLE_RATE, text: sentence })
-          }
-        }
+    const jobs: SynthJob[] = lines.map((line, i) => {
+      const mappedVoiceId = line.speaker ? (speakerMap[line.speaker] || null) : null
+      if (line.speaker && !mappedVoiceId) unmapped.add(line.speaker)
+      return {
+        text: line.text,
+        voice: mappedVoiceId ?? selectedVoice.id,
+        label: `${line.speaker ? `[${line.speaker}] ` : ''}${line.text.slice(0, 50)}`,
+        filenamePrefix: `${String(i + 1).padStart(3, '0')}-${line.speaker ? slugify(line.speaker) : 'line'}-${slugify(line.text)}`,
       }
+    })
 
-      if (abortRef.current && audioParts.length === 0) break
-      if (!clearedPrevious) { clearOutputs(); clearedPrevious = true }
-
-      const raw = concatFloat32Arrays(audioParts)
-      let processed = pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones) : raw
-      if (bgmFile) processed = await mixBgm(processed, bgmFile, bgmVolume, KOKORO_SAMPLE_RATE)
-      const ext = formatExtension(audioFormat)
-      const blob = await encodeAudio(processed, KOKORO_SAMPLE_RATE, audioFormat, mp3Bitrate)
-      const prefix = speaker ? slugify(speaker) : String(i + 1).padStart(3, '0')
-      const filename = `${prefix}-${slugify(lineText)}-${timestamp()}${ext}`
-      const result = await buildResult(blob, `${speaker ? `[${speaker}] ` : ''}${lineText.slice(0, 50)}`, filename)
-      result.cues = cues
-
-      generated.push(result)
-      zipFiles[filename] = blob
-      setResults([...generated])
-      setProgress(5 + Math.round(((i + 1) / lines.length) * 85))
-      setStatus(`Generated ${i + 1} / ${lines.length}`)
-    }
-
-    if (generated.length > 1) {
-      const { default: JSZip } = await import('jszip')
-      const zip = new JSZip()
-      for (const [fn, b] of Object.entries(zipFiles)) zip.file(fn, b)
-      const zipBlob = await zip.generateAsync({ type: 'blob' })
-      setZipUrl(rememberUrl(URL.createObjectURL(zipBlob)))
-      setZipName(`bettertts-dialog-${timestamp()}.zip`)
-    }
-
-    setProgress(100)
-    if (generated.length > 0) setModelCached(true)
-    if (unmapped.size > 0) {
+    await runSynthesis(jobs, { zipPrefix: 'bettertts-dialog', successMessage: 'Dialog generated.' })
+    if (unmapped.size > 0 && !abortRef.current) {
       showToast({ tone: 'warn', message: `Unmapped speakers used default voice: ${[...unmapped].join(', ')}` })
-    } else {
-      showToast({ tone: 'ok', message: 'Dialog generated.' })
     }
-    setStatus('Dialog ready')
   }
 
   async function handleGenerate() {
     if (generatingRef.current) return
-    const chunks = dialogMode ? [] : splitInput(usableText, separateLines)
+    const effectiveDialog = dialogMode && engine === 'kokoro'
+    const chunks = effectiveDialog ? [] : splitInput(usableText, separateLines)
 
-    if (!dialogMode && chunks.length === 0) {
+    if (!effectiveDialog && chunks.length === 0) {
       showToast({ tone: 'warn', message: 'Enter text before generating audio.' })
       return
     }
-    if (dialogMode && parseDialogLines(usableText).length === 0) {
+    if (effectiveDialog && parseDialogLines(usableText).length === 0) {
       showToast({ tone: 'warn', message: 'Enter text with [speaker:Name] prefixes.' })
       return
     }
@@ -616,7 +579,7 @@ function App() {
     setIsGenerating(true)
 
     try {
-      if (dialogMode && engine === 'kokoro') {
+      if (effectiveDialog) {
         await generateDialog()
       } else if (engine === 'kokoro') {
         await generateKokoro(chunks)
@@ -696,7 +659,9 @@ function App() {
     try {
       const res = await fetch(result.url)
       const blob = await res.blob()
-      const file = new File([blob], result.filename, { type: 'audio/wav' })
+      const file = new File([blob], result.filename, {
+        type: result.filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+      })
       if (navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: result.label })
       }
@@ -889,19 +854,13 @@ function App() {
                             <Share2 size={16} aria-hidden="true" />
                           </button>
                         ) : null}
-                        {result.cues && result.cues.length > 0 ? (
+                        {result.srtUrl && result.vttUrl ? (
                           <>
-                            <a
-                              href={rememberUrl(URL.createObjectURL(new Blob([toSRT(result.cues)], { type: 'text/plain' })))}
-                              download={result.filename.replace(/\.wav$/, '.srt')}
-                            >
+                            <a href={result.srtUrl} download={result.filename.replace(/\.\w+$/, '.srt')}>
                               <FileText size={16} aria-hidden="true" />
                               SRT
                             </a>
-                            <a
-                              href={rememberUrl(URL.createObjectURL(new Blob([toVTT(result.cues)], { type: 'text/vtt' })))}
-                              download={result.filename.replace(/\.wav$/, '.vtt')}
-                            >
+                            <a href={result.vttUrl} download={result.filename.replace(/\.\w+$/, '.vtt')}>
                               <FileText size={16} aria-hidden="true" />
                               VTT
                             </a>
@@ -1323,6 +1282,7 @@ function App() {
                   className="generate-button cancel"
                   onClick={() => {
                     abortRef.current = true
+                    setStatus('Cancelling…')
                   }}
                 >
                   <X size={18} aria-hidden="true" />
