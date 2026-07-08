@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type ClipRecord, clearLibrary, deleteClip, getClipBlob, listClips, saveClip } from './library.ts'
+import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './library.ts'
 
 function record(id: string, createdAt: number): ClipRecord {
   return {
@@ -60,5 +60,22 @@ describe('library', () => {
     await saveClip(record('b', 2), new Blob(['b']))
     await clearLibrary()
     expect(await listClips()).toEqual([])
+  })
+
+  it('enforceLibraryCap evicts oldest clips past the byte budget', async () => {
+    await saveClip({ ...record('old', 1), size: 60 }, new Blob(['old']))
+    await saveClip({ ...record('mid', 2), size: 60 }, new Blob(['mid']))
+    await saveClip({ ...record('new', 3), size: 60 }, new Blob(['new']))
+    const evicted = await enforceLibraryCap(150)
+    expect(evicted).toBe(1)
+    const clips = await listClips()
+    expect(clips.map((c) => c.id)).toEqual(['new', 'mid'])
+    expect(await getClipBlob('old')).toBeNull()
+  })
+
+  it('enforceLibraryCap is a no-op under the budget', async () => {
+    await saveClip({ ...record('a', 1), size: 10 }, new Blob(['a']))
+    expect(await enforceLibraryCap(1000)).toBe(0)
+    expect((await listClips()).length).toBe(1)
   })
 })

@@ -25,7 +25,7 @@ import './App.css'
 import { type AudioFormat, encodeAudio, formatExtension, mixBgm, shiftPitch } from './lib/encode.ts'
 import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
-import { type ClipRecord, clearLibrary, deleteClip, getClipBlob, listClips, saveClip } from './lib/library.ts'
+import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { PAUSE_TAG, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
 import { VOICES } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
@@ -196,6 +196,8 @@ function App() {
   const [newWord, setNewWord] = useState('')
   const [newPronunciation, setNewPronunciation] = useState('')
   const [library, setLibrary] = useState<ClipRecord[]>([])
+  const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
+  const persistRequestedRef = useRef(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -246,8 +248,20 @@ function App() {
     }
   }, [availableVoices, voiceId])
 
+  function refreshStorageEstimate() {
+    navigator.storage
+      ?.estimate?.()
+      .then(({ usage, quota }) => {
+        if (usage != null && quota != null && quota > 0) {
+          setStorageEstimate(`${formatBytes(usage)} of ${formatBytes(quota)} used`)
+        }
+      })
+      .catch(() => {})
+  }
+
   useEffect(() => {
     listClips().then(setLibrary).catch(() => {})
+    refreshStorageEstimate()
   }, [])
 
   useEffect(() => {
@@ -416,6 +430,7 @@ function App() {
     const zipFiles: Record<string, Blob> = {}
     let clearedPrevious = false
     let warnedBgmEmpty = false
+    let warnedQuota = false
 
     let audioCtx: AudioContext | null = null
     let nextPlayTime = 0
@@ -514,7 +529,14 @@ function App() {
       saveClip(
         { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration },
         blob,
-      ).catch(() => {})
+      )
+        .then(() => enforceLibraryCap())
+        .catch((err: unknown) => {
+          if (!warnedQuota && err instanceof DOMException && err.name === 'QuotaExceededError') {
+            warnedQuota = true
+            showToast({ tone: 'warn', message: 'Storage is full — clip not saved. Clear the library or delete old clips.' })
+          }
+        })
     }
 
     if (audioCtx) {
@@ -541,8 +563,17 @@ function App() {
     }
 
     setProgress(100)
-    if (generated.length > 0) setModelCached(true)
+    if (generated.length > 0) {
+      setModelCached(true)
+      if (!persistRequestedRef.current) {
+        // Ask the browser to exempt our storage (model cache + clip library)
+        // from automatic eviction; Safari ITP purges unpersisted origins.
+        persistRequestedRef.current = true
+        navigator.storage?.persist?.().catch(() => {})
+      }
+    }
     listClips().then(setLibrary).catch(() => {})
+    refreshStorageEstimate()
     const elapsed = (performance.now() - genStart) / 1000
     const audioDuration = totalSamples / KOKORO_SAMPLE_RATE
     setGenStats({ elapsed, chars: totalChars, audioDuration })
@@ -1018,6 +1049,7 @@ function App() {
                   <strong>Kokoro local</strong>
                   <small>
                     {runtimeLabel}. WAV export.{modelCached ? ' Model cached.' : ''}
+                    {storageEstimate ? ` ${storageEstimate}.` : ''}
                   </small>
                 </button>
                 <button

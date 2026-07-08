@@ -101,3 +101,21 @@ export async function clearLibrary(): Promise<void> {
   tx.objectStore(BLOBS_STORE).clear()
   await txDone(tx)
 }
+
+export const LIBRARY_MAX_BYTES = 200 * 1024 * 1024
+
+// Evict oldest clips once the library exceeds the byte cap, so auto-saving
+// every generation can never silently fill the origin's storage quota.
+export async function enforceLibraryCap(maxBytes = LIBRARY_MAX_BYTES): Promise<number> {
+  const clips = await listClips()
+  let total = 0
+  const evict: string[] = []
+  for (const clip of clips) {
+    total += clip.size
+    if (total > maxBytes) evict.push(clip.id)
+  }
+  for (const id of evict) {
+    await deleteClip(id)
+  }
+  return evict.length
+}
