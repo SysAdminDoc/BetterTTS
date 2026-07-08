@@ -9,6 +9,7 @@ import {
   Moon,
   Play,
   RefreshCw,
+  Share2,
   SquareCode,
   Sun,
   Trash2,
@@ -208,6 +209,22 @@ function App() {
     load()
     window.speechSynthesis.addEventListener('voiceschanged', load)
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
+  }, [])
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    const shell = document.querySelector('.app-shell')
+    if (!shell) return
+    const handler = (e: Event) => {
+      const el = e.target as HTMLAudioElement
+      if (el.tagName !== 'AUDIO') return
+      const label = el.getAttribute('aria-label') ?? 'TTS4FREE'
+      navigator.mediaSession.metadata = new MediaMetadata({ title: label, artist: 'TTS4FREE' })
+      navigator.mediaSession.setActionHandler('play', () => el.play())
+      navigator.mediaSession.setActionHandler('pause', () => el.pause())
+    }
+    shell.addEventListener('play', handler, true)
+    return () => shell.removeEventListener('play', handler, true)
   }, [])
 
   useEffect(() => {
@@ -581,6 +598,42 @@ function App() {
     }
   }
 
+  async function shareResult(result: AudioResult) {
+    if (!result.url || !navigator.canShare) return
+    try {
+      const res = await fetch(result.url)
+      const blob = await res.blob()
+      const file = new File([blob], result.filename, { type: 'audio/wav' })
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: result.label })
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        showToast({ tone: 'warn', message: 'Share cancelled or unavailable.' })
+      }
+    }
+  }
+
+  async function saveWithPicker(result: AudioResult) {
+    if (!result.url) return
+    try {
+      const handle = await (window as Record<string, unknown>['showSaveFilePicker'] as (opts: unknown) => Promise<FileSystemFileHandle>)({
+        suggestedName: result.filename,
+        types: [{ description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } }],
+      })
+      const writable = await handle.createWritable()
+      const res = await fetch(result.url)
+      const blob = await res.blob()
+      await writable.write(blob)
+      await writable.close()
+      showToast({ tone: 'ok', message: `Saved ${result.filename}` })
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        showToast({ tone: 'warn', message: 'Save cancelled.' })
+      }
+    }
+  }
+
   function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
@@ -721,11 +774,21 @@ function App() {
                             Replay
                           </button>
                         ) : null}
-                        {result.url ? (
+                        {result.url && 'showSaveFilePicker' in window ? (
+                          <button type="button" onClick={() => saveWithPicker(result)}>
+                            <Download size={16} aria-hidden="true" />
+                            WAV
+                          </button>
+                        ) : result.url ? (
                           <a href={result.url} download={result.filename}>
                             <Download size={16} aria-hidden="true" />
                             WAV
                           </a>
+                        ) : null}
+                        {result.url && typeof navigator !== 'undefined' && 'canShare' in navigator ? (
+                          <button type="button" onClick={() => shareResult(result)} aria-label="Share">
+                            <Share2 size={16} aria-hidden="true" />
+                          </button>
                         ) : null}
                         {result.cues && result.cues.length > 0 ? (
                           <>
