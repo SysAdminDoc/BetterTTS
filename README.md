@@ -1,13 +1,13 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-39%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-70%20passing-53d889.svg)](#)
 
-**Free client-side text-to-speech studio.** Kokoro 82M runs entirely in your browser — no server, no signup, no character limits, no usage caps. Export WAV or MP3, keep everything private.
+**Free client-side text-to-speech studio.** Kokoro 82M runs entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV or MP3, keep everything private.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
@@ -41,7 +41,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
 ### Export & Output
-- **WAV** (lossless) and **MP3** (128/192/320 kbps) export with format and bitrate picker
+- **WAV** (lossless) and **MP3** (96/128/160 kbps — 160 is the MPEG ceiling at Kokoro's 24 kHz) export with format and bitrate picker
 - **Per-line generation** with individual files + automatic ZIP bundle
 - **SRT and VTT subtitle export** with sentence-level timing derived from audio sample counts
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads
@@ -56,18 +56,24 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 
 ### Studio Features
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
+- **Follow-along transcript** — click-to-seek sentence highlighting synced to playback
+- **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
+- **Text cleanup** — skip citations, shorten URLs, spell vowel-less acronyms, strip markdown before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
 - **Pronunciation dictionary** — custom word/replacement pairs persisted in localStorage
 - **Generation stats** — elapsed time, chars/s throughput, audio duration, realtime speed factor
 - **Cancel button** — abort generation mid-run, keep partial results
+- **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
-- **Installable PWA** with service worker for offline app shell
+- **Installable PWA** with service worker for offline app shell and per-build cache versioning
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
+- **Content-Security-Policy** baked into production builds
+- **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap
 - **Media Session API** — lock-screen play/pause controls for generated audio
-- **Dark and light themes** with `prefers-color-scheme` detection
+- **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
 - **Responsive layout** — works on desktop and mobile
-- **Accessible** — ARIA progressbar, alert toasts, labeled audio elements, AA contrast ratios
+- **Accessible** — ARIA progressbar, live status, native caption tracks, alert toasts, AA contrast ratios
 
 ## Quick Start
 

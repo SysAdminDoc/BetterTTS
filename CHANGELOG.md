@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.9.0 - 2026-07-08
+
+### Fixed
+- Per-result save button was dead on every Chromium browser (broken `showSaveFilePicker` cast invoked `window` as a function).
+- Unpunctuated text over ~300 characters was silently truncated by the tokenizer's 512-token cap — long pastes now hard-split on comma/word boundaries.
+- Worker crash during model load or "Reset session" mid-generation soft-locked the app; all pending promises now reject and the worker restarts lazily.
+- Streamed playback leaked one AudioContext per run (Safari fails after ~4-6); contexts now close after playback, immediately on cancel.
+- Cancel now actually stops sound: scheduled audio halts, Web Speech aborts via `speechSynthesis.cancel()`, cancelled dialog runs no longer report success, and cancelling during the model download acknowledges immediately.
+- SRT/VTT downloads were misnamed `.mp3` for MP3 output; subtitle URLs were re-minted on every keystroke.
+- MP3 bitrate picker offered 192/320 kbps that silently encoded at 160 (MPEG-2 ceiling at 24 kHz) — options are now honest 96/128/160.
+- Pitch-shifted exports clipped the final ~100 ms (SoundTouch latency now flushed); subtitle timestamps could emit invalid `,1000` millisecond fields; blank lines inside cues corrupted SRT blocks.
+- Pronunciation rules no longer cascade into each other or corrupt substrings ("cat" → "kat" no longer hits "catalog").
+- Stereo background music kept only the left channel; zero-length BGM produced silent NaN exports.
+- Voice-preview blob URLs and duration probes could leak or hang; IndexedDB now uses one memoized connection with upgrade handlers.
+- Double-clicking Generate interleaved two runs; preview during generate bricked the preview buttons; the worker reloaded the model on every click.
+
+### Added
+- **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, with a native caption track on every result.
+- **Article import by URL** — Readability extraction in-browser, plus Android PWA share-target support.
+- **Text cleanup pipeline** — skip `[12]`-style citations, read URLs as "link", letter-space vowel-less acronyms (SQL → S Q L), strip markdown syntax; each rule toggleable.
+- **CPU mode switch** — persistent WASM fallback for GPUs with corrupted WebGPU output, plus automatic WASM retry when WebGPU session init fails.
+- **Storage management** — persistent-storage request, usage meter on the engine card, 200 MB clip-library cap with oldest-first eviction, quota-full toasts.
+- **Update flow** — per-build service-worker cache versioning, old-cache pruning, "new version ready" toast, first-visit reload loop guard.
+- Content-Security-Policy baked into production builds; PWA manifest `id`/`scope`; COEP `credentialless` on Chromium for CDN resilience; zero-flash theme boot; absolute social-card URLs.
+- `npm run deploy` — worktree-based gh-pages publish that can never touch (or delete) working-tree files.
+
+### Changed
+- `generateKokoro`/`generateDialog` unified into one synthesis loop — dialog mode gains streaming playback, download progress, generation stats, library saves, and indexed collision-free filenames.
+- ZIP export switched from jszip to fflate (smaller, maintained, store-level for audio).
+- Strict TypeScript enabled repo-wide (tests now typechecked); lint broadened with react-hooks and jsx-a11y plugins.
+- Tests: 39 → 70 assertions across 5 suites (encode and library modules now covered).
+
 ## v0.8.0 - 2026-07-08
 
 ### UI Polish

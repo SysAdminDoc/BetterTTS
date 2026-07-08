@@ -33,7 +33,7 @@ import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
-const APP_VERSION = '0.8.0'
+const APP_VERSION = '0.9.0'
 const MAX_TEXT_CHARS = 5000
 
 type Engine = 'kokoro' | 'browser'
