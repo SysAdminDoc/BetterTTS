@@ -151,6 +151,8 @@ function App() {
     typeof navigator !== 'undefined' && 'gpu' in navigator ? 'WebGPU fp32' : 'WebAssembly q8',
   )
   const [modelCached, setModelCached] = useState(false)
+  const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
+  const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlsRef = useRef<string[]>([])
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
@@ -186,6 +188,14 @@ function App() {
       setVoiceId(availableVoices[0]?.id ?? 'af_heart')
     }
   }, [availableVoices, voiceId])
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+    const load = () => setBrowserVoices(window.speechSynthesis.getVoices())
+    load()
+    window.speechSynthesis.addEventListener('voiceschanged', load)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -344,7 +354,8 @@ function App() {
     setStatus('Starting browser speech')
     setProgress(5)
     const cleanText = chunks.join('\n\n').replace(PAUSE_TAG, ' ')
-    await speakBrowser(cleanText, speed)
+    const chosenVoice = browserVoices.find((v) => v.voiceURI === browserVoiceUri)
+    await speakBrowser(cleanText, speed, chosenVoice)
     const markerBlob = new Blob([cleanText], { type: 'text/plain' })
     const result = await buildResult(markerBlob, 'Browser speech playback', 'browser-playback.txt', cleanText)
 
@@ -402,7 +413,8 @@ function App() {
     if (isGenerating) return
     setIsSpeaking(true)
     try {
-      await speakBrowser(textToReplay.replace(PAUSE_TAG, ' '), speed)
+      const chosenVoice = browserVoices.find((v) => v.voiceURI === browserVoiceUri)
+      await speakBrowser(textToReplay.replace(PAUSE_TAG, ' '), speed, chosenVoice)
     } catch (error) {
       showToast({
         tone: 'error',
@@ -609,37 +621,59 @@ function App() {
               </div>
             </fieldset>
 
-            <label className="control-label" htmlFor="locale">
-              Language
-            </label>
-            <select id="locale" value={locale} onChange={(event) => setLocale(event.target.value as 'en-us' | 'en-gb')}>
-              <option value="en-us">English US</option>
-              <option value="en-gb">English British</option>
-            </select>
+            {engine === 'kokoro' ? (
+              <>
+                <label className="control-label" htmlFor="locale">
+                  Language
+                </label>
+                <select id="locale" value={locale} onChange={(event) => setLocale(event.target.value as 'en-us' | 'en-gb')}>
+                  <option value="en-us">English US</option>
+                  <option value="en-gb">English British</option>
+                </select>
 
-            <label className="control-label" htmlFor="voice">
-              Voice
-            </label>
-            <select id="voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
-              {availableVoices.map((voice) => (
-                <option value={voice.id} key={voice.id}>
-                  {voice.name} ({voice.gender}, grade {voice.grade})
-                </option>
-              ))}
-            </select>
+                <label className="control-label" htmlFor="voice">
+                  Voice
+                </label>
+                <select id="voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
+                  {availableVoices.map((voice) => (
+                    <option value={voice.id} key={voice.id}>
+                      {voice.name} ({voice.gender}, grade {voice.grade})
+                    </option>
+                  ))}
+                </select>
 
-            <div className="voice-buttons" aria-label="Favorite voices">
-              {availableVoices.slice(0, 6).map((voice) => (
-                <button
-                  type="button"
-                  className={voice.id === voiceId ? 'selected' : ''}
-                  key={voice.id}
-                  onClick={() => setVoiceId(voice.id)}
+                <div className="voice-buttons" aria-label="Favorite voices">
+                  {availableVoices.slice(0, 6).map((voice) => (
+                    <button
+                      type="button"
+                      className={voice.id === voiceId ? 'selected' : ''}
+                      key={voice.id}
+                      onClick={() => setVoiceId(voice.id)}
+                    >
+                      {voice.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="control-label" htmlFor="browser-voice">
+                  Browser voice
+                </label>
+                <select
+                  id="browser-voice"
+                  value={browserVoiceUri}
+                  onChange={(event) => setBrowserVoiceUri(event.target.value)}
                 >
-                  {voice.name}
-                </button>
-              ))}
-            </div>
+                  <option value="">Default (first English)</option>
+                  {browserVoices.map((v) => (
+                    <option value={v.voiceURI} key={v.voiceURI}>
+                      {v.name} ({v.lang})
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
 
             <div className="range-row">
               <label htmlFor="speed">Speed</label>
