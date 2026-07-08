@@ -155,6 +155,8 @@ function App() {
   const [modelCached, setModelCached] = useState(false)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
+  const previewCacheRef = useRef<Map<string, string>>(new Map())
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlsRef = useRef<string[]>([])
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
@@ -423,6 +425,34 @@ function App() {
     }
   }
 
+  async function previewVoice(id: string) {
+    if (previewingVoice || isGenerating) return
+    setPreviewingVoice(id)
+    try {
+      const cached = previewCacheRef.current.get(id)
+      if (cached) {
+        const audio = new Audio(cached)
+        await audio.play()
+        setPreviewingVoice(null)
+        return
+      }
+      const tts = await loadKokoro(() => {})
+      const result = (await tts.generate('This is how I sound.', { voice: id as typeof selectedVoice.id, speed: 1 })) as RawAudioLike
+      if (result.audio) {
+        const blob = new Blob([encodeWav(result.audio, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
+        const url = URL.createObjectURL(blob)
+        previewCacheRef.current.set(id, url)
+        const audio = new Audio(url)
+        await audio.play()
+        setModelCached(true)
+      }
+    } catch {
+      showToast({ tone: 'warn', message: 'Preview requires the model to be loaded first.' })
+    } finally {
+      setPreviewingVoice(null)
+    }
+  }
+
   async function replayBrowser(textToReplay: string) {
     if (isGenerating) return
     setIsSpeaking(true)
@@ -676,14 +706,28 @@ function App() {
 
                 <div className="voice-buttons" aria-label="Favorite voices">
                   {availableVoices.slice(0, 6).map((voice) => (
-                    <button
-                      type="button"
-                      className={voice.id === voiceId ? 'selected' : ''}
-                      key={voice.id}
-                      onClick={() => setVoiceId(voice.id)}
-                    >
-                      {voice.name}
-                    </button>
+                    <div className="voice-btn-row" key={voice.id}>
+                      <button
+                        type="button"
+                        className={voice.id === voiceId ? 'selected' : ''}
+                        onClick={() => setVoiceId(voice.id)}
+                      >
+                        {voice.name}
+                      </button>
+                      <button
+                        type="button"
+                        className="voice-preview"
+                        onClick={() => previewVoice(voice.id)}
+                        disabled={previewingVoice !== null}
+                        aria-label={`Preview ${voice.name}`}
+                      >
+                        {previewingVoice === voice.id ? (
+                          <Loader2 size={13} aria-hidden="true" />
+                        ) : (
+                          <Play size={13} aria-hidden="true" />
+                        )}
+                      </button>
+                    </div>
                   ))}
                 </div>
               </>

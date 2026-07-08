@@ -397,6 +397,12 @@ select {
   margin: 2px 0 22px;
 }
 
+.voice-btn-row {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 4px;
+}
+
 .voice-buttons button {
   min-height: 42px;
   border: 1px solid var(--border-strong);
@@ -405,6 +411,23 @@ select {
   color: var(--text);
   font: 650 14px/1 var(--sans);
   cursor: pointer;
+}
+
+.voice-preview {
+  display: inline-grid;
+  place-items: center;
+  min-height: 42px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.voice-preview:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .range-row {
