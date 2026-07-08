@@ -20,8 +20,9 @@ export function parsePauseTags(text: string): TextSegment[] {
 }
 
 export function splitIntoSentences(text: string): string[] {
+  if (!text.trim()) return []
   const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
-  if (sentences.length === 0) return text.trim() ? [text.trim()] : []
+  if (sentences.length === 0) return [text.trim()]
 
   const chunks: string[] = []
   let buffer = ''
