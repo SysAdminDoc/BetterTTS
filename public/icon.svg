@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">TTS4FREE icon</title>
+  <desc id="desc">A blue waveform mark inside a dark square.</desc>
+  <rect width="256" height="256" rx="28" fill="#05080d"/>
+  <path d="M42 130h22m14-22v44m22-76v108m22-136v160m22-122v84m22-62v40m22-22h26" fill="none" stroke="#5b9cff" stroke-width="14" stroke-linecap="round"/>
+  <path d="M42 130h22m14-22v44m22-76v108m22-136v160m22-122v84m22-62v40m22-22h26" fill="none" stroke="#54d1ff" stroke-width="4" stroke-linecap="round"/>
+</svg>

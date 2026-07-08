@@ -1,0 +1,17 @@
+{
+  "name": "TTS4FREE",
+  "short_name": "TTS4FREE",
+  "description": "Static GitHub Pages text-to-speech studio with in-browser Kokoro generation.",
+  "start_url": "/TTS4FREE/",
+  "display": "standalone",
+  "theme_color": "#05080d",
+  "background_color": "#05080d",
+  "icons": [
+    {
+      "src": "/TTS4FREE/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
