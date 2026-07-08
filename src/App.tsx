@@ -22,6 +22,7 @@ import './App.css'
 
 const APP_VERSION = '0.1.0'
 const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
+const KOKORO_SAMPLE_RATE = 24000
 const MAX_TEXT_CHARS = 5000
 
 type Engine = 'kokoro' | 'browser'
@@ -225,18 +226,6 @@ async function getDurationLabel(blob: Blob) {
   }
 }
 
-function rawAudioToBlob(audio: RawAudioLike) {
-  if (audio.toBlob) {
-    return audio.toBlob()
-  }
-
-  if (!audio.audio || !audio.sampling_rate) {
-    throw new Error('The audio engine returned an unsupported audio object.')
-  }
-
-  return new Blob([encodeWav(audio.audio, audio.sampling_rate)], { type: 'audio/wav' })
-}
-
 function encodeWav(samples: Float32Array, sampleRate: number) {
   const buffer = new ArrayBuffer(44 + samples.length * 2)
   const view = new DataView(buffer)
@@ -285,6 +274,57 @@ function splitInput(text: string, separateLines: boolean) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
+}
+
+type TextSegment = { type: 'text'; content: string } | { type: 'pause'; duration: number }
+
+const PAUSE_TAG = /\[pause(?:\s+([\d.]+)\s*s?)?\]/gi
+
+function parsePauseTags(text: string): TextSegment[] {
+  const segments: TextSegment[] = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(PAUSE_TAG)) {
+    const before = text.slice(lastIndex, match.index)
+    if (before.trim()) segments.push({ type: 'text', content: before.trim() })
+    const duration = match[1] ? Number.parseFloat(match[1]) : 1
+    if (duration > 0 && duration <= 30) segments.push({ type: 'pause', duration })
+    lastIndex = match.index + match[0].length
+  }
+
+  const tail = text.slice(lastIndex)
+  if (tail.trim()) segments.push({ type: 'text', content: tail.trim() })
+  return segments.length > 0 ? segments : [{ type: 'text', content: text.trim() }]
+}
+
+function splitIntoSentences(text: string): string[] {
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
+  if (sentences.length === 0) return text.trim() ? [text.trim()] : []
+
+  const chunks: string[] = []
+  let buffer = ''
+
+  for (const s of sentences) {
+    if (buffer && buffer.length + s.length + 1 > 300) {
+      chunks.push(buffer)
+      buffer = s
+    } else {
+      buffer = buffer ? `${buffer} ${s}` : s
+    }
+  }
+  if (buffer) chunks.push(buffer)
+  return chunks
+}
+
+function concatFloat32Arrays(arrays: Float32Array[]): Float32Array {
+  const total = arrays.reduce((sum, a) => sum + a.length, 0)
+  const result = new Float32Array(total)
+  let offset = 0
+  for (const a of arrays) {
+    result.set(a, offset)
+    offset += a.length
+  }
+  return result
 }
 
 function speakBrowser(text: string, speed: number) {
@@ -359,6 +399,7 @@ function App() {
   const [status, setStatus] = useState('Ready')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [pauseDuration, setPauseDuration] = useState(1)
   const [runtimeLabel, setRuntimeLabel] = useState(
     typeof navigator !== 'undefined' && 'gpu' in navigator ? 'WebGPU fp32' : 'WebAssembly q8',
   )
@@ -449,22 +490,49 @@ function App() {
     const generated: AudioResult[] = []
     const zipFiles: Record<string, Blob> = {}
 
+    const chunkPlans = chunks.map((chunk) => {
+      const segments = parsePauseTags(chunk)
+      return segments.map((seg) =>
+        seg.type === 'pause' ? seg : { ...seg, sentences: splitIntoSentences(seg.content) },
+      )
+    })
+    let totalSentences = 0
+    for (const plan of chunkPlans) {
+      for (const seg of plan) if (seg.type === 'text') totalSentences += seg.sentences.length
+    }
+    let done = 0
+
     for (let index = 0; index < chunks.length; index += 1) {
-      const chunk = chunks[index]
-      const audio = (await tts.generate(chunk, {
-        voice: selectedVoice.id,
-        speed,
-      })) as RawAudioLike
-      const blob = rawAudioToBlob(audio)
-      const baseName = chunks.length === 1 ? slugify(chunk) : `${String(index + 1).padStart(3, '0')}-${slugify(chunk)}`
+      const plan = chunkPlans[index]
+      const audioParts: Float32Array[] = []
+
+      for (const seg of plan) {
+        if (seg.type === 'pause') {
+          audioParts.push(new Float32Array(Math.round(seg.duration * KOKORO_SAMPLE_RATE)))
+          continue
+        }
+        for (const sentence of seg.sentences) {
+          const audio = (await tts.generate(sentence, {
+            voice: selectedVoice.id,
+            speed,
+          })) as RawAudioLike
+          if (audio.audio) audioParts.push(audio.audio)
+          done++
+          setProgress(35 + Math.round((done / totalSentences) * 55))
+          setStatus(`Generated ${done} / ${totalSentences}`)
+        }
+      }
+
+      const combined = concatFloat32Arrays(audioParts)
+      const blob = new Blob([encodeWav(combined, KOKORO_SAMPLE_RATE)], { type: 'audio/wav' })
+      const baseName =
+        chunks.length === 1 ? slugify(chunks[index]) : `${String(index + 1).padStart(3, '0')}-${slugify(chunks[index])}`
       const filename = `${baseName}-${timestamp()}.wav`
-      const result = await buildResult(blob, chunk.slice(0, 64), filename)
+      const result = await buildResult(blob, chunks[index].slice(0, 64), filename)
 
       generated.push(result)
       zipFiles[filename] = blob
       setResults([...generated])
-      setProgress(35 + Math.round(((index + 1) / chunks.length) * 55))
-      setStatus(`Generated ${index + 1} / ${chunks.length}`)
     }
 
     if (generated.length > 1) {
@@ -630,7 +698,21 @@ function App() {
                 Import .txt
               </button>
               <input ref={fileInputRef} type="file" accept=".txt,text/plain" onChange={handleFileUpload} hidden />
-              <button type="button" onClick={() => setText((current) => `${current.trimEnd()}\n\n[pause]\n\n`)}>
+              <select
+                className="pause-select"
+                value={pauseDuration}
+                onChange={(e) => setPauseDuration(Number(e.target.value))}
+                aria-label="Pause duration"
+              >
+                <option value={0.5}>0.5s</option>
+                <option value={1}>1s</option>
+                <option value={2}>2s</option>
+                <option value={5}>5s</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setText((current) => `${current.trimEnd()} [pause ${pauseDuration}s] `)}
+              >
                 <FileText size={16} aria-hidden="true" />
                 Insert pause
               </button>

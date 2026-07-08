@@ -183,6 +183,19 @@ footer button {
   margin: 12px 0 26px;
 }
 
+.pause-select {
+  width: auto;
+  height: 36px;
+  min-width: 64px;
+  margin-bottom: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: 600 13px/1 var(--sans);
+}
+
 .editor-actions button,
 .secondary-action,
 .result-actions button,
