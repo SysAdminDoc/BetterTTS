@@ -707,7 +707,8 @@ function App() {
     if (!result.url) return
     try {
       const isMp3 = result.filename.endsWith('.mp3')
-      const handle = await (window as Record<string, unknown>['showSaveFilePicker'] as (opts: unknown) => Promise<FileSystemFileHandle>)({
+      const picker = window as unknown as { showSaveFilePicker(opts: unknown): Promise<FileSystemFileHandle> }
+      const handle = await picker.showSaveFilePicker({
         suggestedName: result.filename,
         types: [isMp3
           ? { description: 'MP3 Audio', accept: { 'audio/mpeg': ['.mp3'] } }
