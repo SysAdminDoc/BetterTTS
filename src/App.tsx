@@ -25,7 +25,7 @@ import { VOICES } from './lib/voices.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
-const APP_VERSION = '0.1.0'
+const APP_VERSION = '0.2.0'
 const MAX_TEXT_CHARS = 5000
 
 type Engine = 'kokoro' | 'browser'
