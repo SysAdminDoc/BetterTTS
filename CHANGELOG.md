@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.0 - 2026-07-08
+
+### Features
+- Streaming playback: audio plays as each sentence generates via Web Audio scheduling (TF-14).
+- MP3 export with bitrate picker (128/192/320 kbps) via browser-side LAME.js encoder (TF-15).
+- Installable offline PWA: 192px/512px PNG icons, service worker for app-shell caching, og/twitter meta tags, apple-touch-icon (TF-19).
+- Media Session lock-screen controls, Web Share for audio files, showSaveFilePicker for native save dialog (TF-27).
+- Pronunciation overrides dictionary persisted in localStorage — word/replacement pairs applied before generation (TF-33).
+- COOP/COEP header injection via SW for SharedArrayBuffer threaded WASM on GitHub Pages (TF-28).
+
 ## v0.4.0 - 2026-07-08
 
 ### Features
