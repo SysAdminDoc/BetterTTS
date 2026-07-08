@@ -1,6 +1,6 @@
-# TTS4FREE v0.6.0
+# TTS4FREE v0.7.0
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](#)
 

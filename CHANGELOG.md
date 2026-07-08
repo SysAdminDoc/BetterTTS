@@ -1,9 +1,11 @@
 # Changelog
 
-## v0.6.0 - 2026-07-08
+## v0.7.0 - 2026-07-08
 
 ### Features
 - Web Worker for off-main-thread Kokoro inference — UI stays responsive during generation (TF-20).
+- Pitch control (±4 semitones) via SoundTouch.js post-processing without tempo change (TF-32).
+- Background-music bed mixing — upload audio, loop to speech length, mix at configurable volume (TF-34).
 
 ## v0.5.0 - 2026-07-08
 
