@@ -1,61 +1,204 @@
-# BetterTTS v0.7.0
+# BetterTTS
 
 [![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](#)
+[![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-39%20passing-53d889.svg)](#)
 
-BetterTTS is a static text-to-speech studio built for GitHub Pages. It runs Kokoro 82M in the browser through `kokoro-js` and Transformers.js, then exports generated speech as WAV or MP3 files. If the model cannot run on a device, the app falls back to the browser Web Speech API for playback.
+**Free client-side text-to-speech studio.** Kokoro 82M runs entirely in your browser — no server, no signup, no character limits, no usage caps. Export WAV or MP3, keep everything private.
+
+[**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
+
+---
+
+## Why BetterTTS?
+
+Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs the full Kokoro 82M neural model locally in your browser via WebGPU or WASM — your text never leaves your device. No API keys, no queue, no watermarks, no 10,000-character monthly cap.
+
+| | BetterTTS | ElevenLabs Free | TTSMaker Free | voice-generator.com |
+|---|---|---|---|---|
+| Character limit | **Unlimited** | 10,000/month | 20,000/week | Unlimited |
+| Signup required | **No** | Yes | No | No |
+| Runs locally | **Yes** | No | No | No |
+| WAV export | **Yes** | No (MP3 only) | Yes | No |
+| MP3 export | **Yes** | Yes | Yes | No |
+| Commercial use | **Yes (MIT)** | Paid only | With attribution | Yes |
+| Subtitle export | **SRT + VTT** | No | SRT (paid) | No |
+| Voice count | 28 | 30+ (free tier) | 300+ | 54 |
+| Pitch control | **Yes** | Paid only | No | No |
+| Offline capable | **Yes (PWA)** | No | No | No |
 
 ## Features
 
-- Client-side Kokoro generation with no private TTS server.
-- WAV and MP3 download with bitrate picker.
-- Streaming playback — audio plays as each sentence generates.
-- Web Worker inference for responsive UI during generation.
-- Optional per-line generation with ZIP download.
-- Dialog mode with per-speaker voice mapping.
-- 28 English US and English British Kokoro voices with preview.
-- SRT/VTT subtitle export from sentence-level timing.
-- Persistent clip library backed by IndexedDB.
-- Pitch control (±4 semitones) and background music mixing.
-- Pronunciation override dictionary.
-- Browser speech fallback for wide compatibility.
-- Dark default UI with a light theme toggle.
-- Installable offline PWA with service worker.
-- Plain static build for GitHub Pages.
+### Audio Generation
+- **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
+- **28 English voices** — 12 US female, 9 US male, 4 British female, 4 British male, each with quality grades
+- **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
+- **Web Worker inference** — generation runs off the main thread so the UI stays responsive
+- **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
+- **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
-## Develop
+### Export & Output
+- **WAV** (lossless) and **MP3** (128/192/320 kbps) export with format and bitrate picker
+- **Per-line generation** with individual files + automatic ZIP bundle
+- **SRT and VTT subtitle export** with sentence-level timing derived from audio sample counts
+- **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads
+- **Web Share** for sharing audio files directly from the app (Android Chrome)
+- **Native save dialog** via `showSaveFilePicker` on Chromium, with `<a download>` fallback
 
-```powershell
+### Audio Processing
+- **Pitch control** — ±4 semitones via SoundTouch.js, without tempo change
+- **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume
+- **Silence insertion** — `[pause 2s]` tags splice real silence into the output
+- **Speed control** — 0.5x to 1.5x playback rate
+
+### Studio Features
+- **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
+- **Voice preview** — one-click preview for each voice with session-cached audio
+- **Pronunciation dictionary** — custom word/replacement pairs persisted in localStorage
+- **Generation stats** — elapsed time, chars/s throughput, audio duration, realtime speed factor
+- **Cancel button** — abort generation mid-run, keep partial results
+
+### Platform
+- **Installable PWA** with service worker for offline app shell
+- **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
+- **Media Session API** — lock-screen play/pause controls for generated audio
+- **Dark and light themes** with `prefers-color-scheme` detection
+- **Responsive layout** — works on desktop and mobile
+- **Accessible** — ARIA progressbar, alert toasts, labeled audio elements, AA contrast ratios
+
+## Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/SysAdminDoc/BetterTTS.git
+cd BetterTTS
 npm install
+
+# Development
 npm run dev
-```
 
-## Verify
+# Run tests
+npm test
 
-```powershell
-npm run test
-npm run lint
+# Production build
 npm run build
 ```
 
-## Deploy To GitHub Pages
+Open `http://localhost:5173/BetterTTS/` in your browser.
 
-This project does not use GitHub Actions. Build locally and push the generated `dist` folder to a `gh-pages` branch:
+## Tech Stack
 
-```powershell
+| Layer | Technology |
+|---|---|
+| Framework | React 19 + TypeScript 6 |
+| Build | Vite 8 |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js |
+| MP3 Encoding | `@breezystack/lamejs` (LGPL-2.1, browser LAME) |
+| Pitch Shifting | `soundtouchjs` (LGPL-2.1, 11 kB gzipped) |
+| ZIP Packaging | `jszip` |
+| Icons | `lucide-react` |
+| Testing | Vitest (39 assertions across 3 suites) |
+| Linting | oxlint |
+| Hosting | GitHub Pages (static, no backend) |
+
+## Architecture
+
+```
+src/
+├── App.tsx                  # App shell, state, UI
+├── App.css                  # Layout and component styles
+├── index.css                # Design tokens, dark/light themes
+├── main.tsx                 # React entry point + SW registration
+├── lib/
+│   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
+│   ├── kokoro-worker.ts     # Web Worker client interface
+│   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
+│   ├── wav.ts               # Raw PCM → WAV encoder
+│   ├── text.ts              # Sentence splitting, pause parsing, slugify
+│   ├── voices.ts            # 28-voice catalog with quality grades
+│   ├── webspeech.ts         # Browser Speech API wrapper
+│   ├── subtitles.ts         # SRT/VTT serializers
+│   └── library.ts           # IndexedDB clip storage
+├── worker/
+│   └── tts.worker.ts        # Off-thread Kokoro inference
+└── soundtouchjs.d.ts        # Type declarations
+```
+
+**Key design decisions:**
+- Model files (~92 MB q8) download from HuggingFace CDN on first use and cache in the browser's Cache API
+- All audio generation and processing happens client-side — zero network calls after model download
+- Web Worker isolates WASM/WebGPU inference from the main thread
+- Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages
+
+## Deploy to GitHub Pages
+
+This project does not use GitHub Actions. Build locally and push the `dist` folder:
+
+```bash
 npm run build
 git subtree push --prefix dist origin gh-pages
 ```
 
-Then enable GitHub Pages in repository settings with:
+Then in repository settings: **Pages** → Source: `gh-pages` branch, folder: `/`.
 
-- Source: deploy from a branch
-- Branch: `gh-pages`
-- Folder: `/`
+## Voice Catalog
 
-## Model Notes
+28 voices spanning American and British English, graded A through F+:
 
-The active model path is `onnx-community/Kokoro-82M-v1.0-ONNX`. The first Kokoro run downloads model assets from Hugging Face and caches them in the browser. The app itself remains static and hostable on GitHub Pages.
+| Grade | Voices |
+|---|---|
+| A | Heart |
+| A- | Bella |
+| B- | Nicole, Emma |
+| C+ | Aoede, Kore, Sarah, Fenrir, Michael, Puck |
+| C | Alloy, Nova, Isabella, Fable, George |
+| C- | Sky |
+| D+ | Lewis |
+| D | Jessica, River, Echo, Eric, Liam, Onyx, Alice, Lily, Daniel |
+| D- | Santa |
+| F+ | Adam |
 
-Multilingual Kokoro expansion is planned as a follow-up because `kokoro-js` v1.2.1 exposes a reliable English voice set in its runtime voice map.
+## Model Details
+
+| Attribute | Value |
+|---|---|
+| Model | Kokoro-82M v1.0 |
+| Parameters | 82 million |
+| ONNX source | `onnx-community/Kokoro-82M-v1.0-ONNX` |
+| Sample rate | 24,000 Hz |
+| WebGPU dtype | fp32 (~326 MB) |
+| WASM dtype | q8 (~92 MB) |
+| Languages | English (US + British) |
+| License | Apache-2.0 |
+
+## Roadmap
+
+Planned features (see [ROADMAP.md](ROADMAP.md) for details):
+
+- Multilingual support (31 languages via Supertonic 3)
+- Voice mixing formulas (`af_heart(2)+bm_george(1)`)
+- EPUB/PDF audiobook import with chapter-aware batch generation
+- Word-level timestamps and karaoke highlighting
+- Additional engine support (KittenTTS, Piper)
+- Transformers.js v4 migration for WebGPU speedups
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run `npm test && npm run lint && npm run build`
+5. Submit a pull request
+
+Please match the existing code style. No new dependencies without justification.
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+Built with [Kokoro](https://github.com/hexgrad/kokoro) and [Transformers.js](https://github.com/huggingface/transformers.js).
