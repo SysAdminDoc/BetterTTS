@@ -327,26 +327,60 @@ function concatFloat32Arrays(arrays: Float32Array[]): Float32Array {
   return result
 }
 
-function speakBrowser(text: string, speed: number) {
-  return new Promise<void>((resolve, reject) => {
-    if (!('speechSynthesis' in window)) {
-      reject(new Error('This browser does not expose speech synthesis.'))
-      return
+function getBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
+  const synth = window.speechSynthesis
+  const voices = synth.getVoices()
+  if (voices.length > 0) return Promise.resolve(voices)
+
+  return new Promise((resolve) => {
+    const onReady = () => {
+      synth.removeEventListener('voiceschanged', onReady)
+      resolve(synth.getVoices())
     }
-
-    const synth = window.speechSynthesis
-    const utterance = new SpeechSynthesisUtterance(text)
-    const voices = synth.getVoices()
-    const preferredVoice = voices.find((voice) => voice.lang.toLowerCase().startsWith('en'))
-
-    utterance.rate = Math.max(0.5, Math.min(1.5, speed))
-    utterance.voice = preferredVoice ?? null
-    utterance.onend = () => resolve()
-    utterance.onerror = () => reject(new Error('Browser speech playback failed.'))
-
-    synth.cancel()
-    synth.speak(utterance)
+    synth.addEventListener('voiceschanged', onReady)
+    setTimeout(() => {
+      synth.removeEventListener('voiceschanged', onReady)
+      resolve(synth.getVoices())
+    }, 2000)
   })
+}
+
+async function speakBrowser(text: string, speed: number, chosenVoice?: SpeechSynthesisVoice) {
+  if (!('speechSynthesis' in window)) {
+    throw new Error('This browser does not expose speech synthesis.')
+  }
+
+  const synth = window.speechSynthesis
+  synth.cancel()
+
+  const voice = chosenVoice ?? (await getBrowserVoices()).find((v) => v.lang.toLowerCase().startsWith('en')) ?? null
+  const chunks = splitIntoSentences(text)
+  const rate = Math.max(0.5, Math.min(1.5, speed))
+
+  for (const chunk of chunks) {
+    await new Promise<void>((resolve, reject) => {
+      const utt = new SpeechSynthesisUtterance(chunk)
+      utt.rate = rate
+      utt.voice = voice
+      utt.onend = () => resolve()
+      utt.onerror = (ev) => {
+        if (ev.error === 'interrupted' || ev.error === 'canceled') resolve()
+        else reject(new Error('Browser speech playback failed.'))
+      }
+
+      const watchdog = setTimeout(() => {
+        synth.cancel()
+        resolve()
+      }, 20000)
+      const origEnd = utt.onend
+      utt.onend = (e) => {
+        clearTimeout(watchdog)
+        origEnd?.call(utt, e)
+      }
+
+      synth.speak(utt)
+    })
+  }
 }
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -554,10 +588,10 @@ function App() {
   async function generateBrowser(chunks: string[]) {
     setStatus('Starting browser speech')
     setProgress(5)
-    const spokenText = chunks.join('\n\n')
-    await speakBrowser(spokenText, speed)
-    const markerBlob = new Blob([spokenText], { type: 'text/plain' })
-    const result = await buildResult(markerBlob, 'Browser speech playback', 'browser-playback.txt', spokenText)
+    const cleanText = chunks.join('\n\n').replace(PAUSE_TAG, ' ')
+    await speakBrowser(cleanText, speed)
+    const markerBlob = new Blob([cleanText], { type: 'text/plain' })
+    const result = await buildResult(markerBlob, 'Browser speech playback', 'browser-playback.txt', cleanText)
 
     setResults([result])
     setProgress(100)
@@ -576,6 +610,8 @@ function App() {
       return
     }
 
+    if (isSpeaking && 'speechSynthesis' in window) window.speechSynthesis.cancel()
+    setIsSpeaking(false)
     clearOutputs()
     setIsGenerating(true)
     setToast(null)
@@ -602,9 +638,10 @@ function App() {
   }
 
   async function replayBrowser(textToReplay: string) {
+    if (isGenerating) return
     setIsSpeaking(true)
     try {
-      await speakBrowser(textToReplay, speed)
+      await speakBrowser(textToReplay.replace(PAUSE_TAG, ' '), speed)
     } catch (error) {
       showToast({
         tone: 'error',
