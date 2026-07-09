@@ -2,6 +2,8 @@
   "name": "bettertts",
   "private": true,
   "version": "0.17.0",
+  "description": "Private local text-to-speech studio for web and Windows.",
+  "author": "SysAdminDoc <matt_parker@outlook.com>",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {

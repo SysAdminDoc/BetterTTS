@@ -12,6 +12,7 @@
 - Output, Queue, and Library are now real tab panels instead of stacked anchor destinations. The empty output state is integrated into a functional transport surface, and Clear output moved from the generation inspector to that transport.
 - Moved offline packs, diagnostics, and the experimental Piper opt-in behind a dedicated System & diagnostics fold so everyday language, voice, and delivery controls remain reachable in the inspector.
 - Replaced the blue-heavy layered palette and decorative gradients with neutral dark/light semantic surfaces, quieter borders, flat selected states, and consistent 4-8px radii.
+- Windows packages now carry BetterTTS executable/installer artwork plus complete author and product-description metadata instead of Electron defaults.
 
 ### Fixed
 - Mobile editor input no longer collapses into a 42px grid track; the toolbar now uses a two-column command grid and the render tabs reflow without overlapping their status heading.

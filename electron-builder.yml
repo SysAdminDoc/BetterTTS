@@ -20,11 +20,11 @@ files:
 asar: true
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
         - x64
-  # icon: build/icon.ico   # add a 256px .ico under build/ before signed release
 
 nsis:
   oneClick: false
