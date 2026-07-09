@@ -111,6 +111,10 @@ export type CleanupOptions = {
   urls: boolean
   acronyms: boolean
   markdown: boolean
+  footnotes: boolean
+  pageArtifacts: boolean
+  numbers: boolean
+  metadata: boolean
 }
 
 export const DEFAULT_CLEANUP: CleanupOptions = {
@@ -118,6 +122,10 @@ export const DEFAULT_CLEANUP: CleanupOptions = {
   urls: true,
   acronyms: true,
   markdown: true,
+  footnotes: true,
+  pageArtifacts: true,
+  numbers: true,
+  metadata: true,
 }
 
 // Pre-synthesis cleanup for pasted technical/web content. Order matters:
@@ -135,11 +143,23 @@ export function cleanupText(input: string, opts: CleanupOptions): string {
       .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
       .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1')
   }
+  if (opts.metadata) {
+    out = stripMetadataLines(out)
+  }
+  if (opts.pageArtifacts) {
+    out = stripPageArtifacts(out)
+  }
+  if (opts.footnotes) {
+    out = stripFootnotesAndReferences(out)
+  }
   if (opts.urls) {
     out = out.replace(/\bhttps?:\/\/\S+/gi, 'link').replace(/\bwww\.\S+/gi, 'link')
   }
   if (opts.citations) {
     out = out.replace(/\[\d{1,3}(?:\s*[,–-]\s*\d{1,3})*\]/g, '')
+  }
+  if (opts.numbers) {
+    out = normalizeAudiobookNumbers(out)
   }
   if (opts.acronyms) {
     // Letter-space vowel-less ALL-CAPS runs (SQL → S Q L) so the phonemizer
@@ -147,6 +167,95 @@ export function cleanupText(input: string, opts: CleanupOptions): string {
     out = out.replace(/\b[BCDFGHJKLMNPQRSTVWXZ]{2,6}\b/g, (m) => m.split('').join(' '))
   }
   return out.replace(/[ \t]{2,}/g, ' ')
+}
+
+const UNIT_NAMES: Record<string, string> = {
+  '%': 'percent',
+  c: 'degrees Celsius',
+  cm: 'centimeters',
+  f: 'degrees Fahrenheit',
+  ft: 'feet',
+  g: 'grams',
+  in: 'inches',
+  kg: 'kilograms',
+  km: 'kilometers',
+  lb: 'pounds',
+  lbs: 'pounds',
+  m: 'meters',
+  mg: 'milligrams',
+  ml: 'milliliters',
+  mm: 'millimeters',
+}
+
+const CURRENCY_NAMES: Record<string, [string, string]> = {
+  '$': ['dollars', 'cents'],
+  '€': ['euros', 'cents'],
+  '£': ['pounds', 'pence'],
+}
+
+export function normalizeAudiobookNumbers(input: string): string {
+  return input
+    .replace(/([$€£])\s*(\d{1,7})(?:\.(\d{1,2}))?\b/g, (_, symbol: string, whole: string, cents?: string) => {
+      const [major, minor] = CURRENCY_NAMES[symbol] ?? ['units', 'cents']
+      const normalizedCents = cents?.padEnd(2, '0').slice(0, 2)
+      return normalizedCents && normalizedCents !== '00'
+        ? `${Number(whole)} ${major} and ${Number(normalizedCents)} ${minor}`
+        : `${Number(whole)} ${major}`
+    })
+    .replace(/\b(\d+(?:\.\d+)?)\s*(°?\s?(?:kg|mg|g|km|cm|mm|ml|lbs|lb|ft|in|m|%|°C|°F))(?=\s|[.,;:!?)]|$)/gi, (_, value: string, unit: string) => {
+      const key = unit.toLowerCase().replace(/\s+/g, '').replace(/^°/, '')
+      const label = UNIT_NAMES[key] ?? unit
+      return `${speakNumericToken(value)} ${label}`
+    })
+    .replace(/\b(\d+)\.(\d+)\b/g, (_, whole: string, fraction: string) => `${whole} point ${fraction.split('').join(' ')}`)
+}
+
+function stripMetadataLines(input: string): string {
+  return input
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:ISBN(?:-1[03])?|ISSN|DOI|Library of Congress|Cataloging-in-Publication|Printed in)\b/i.test(line))
+    .join('\n')
+    .replace(/\bISBN(?:-1[03])?:?\s*(?:97[89][-\s]?)?\d[-\d\s]{8,}\d\b/gi, ' ')
+    .replace(/\bDOI:?\s*10\.\d{4,9}\/\S+/gi, ' ')
+}
+
+function stripPageArtifacts(input: string): string {
+  const lines = input.split(/\r?\n/)
+  const counts = new Map<string, number>()
+  for (const line of lines) {
+    const key = normalizeRepeatedArtifactLine(line)
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return lines
+    .filter((line) => {
+      if (/^\s*(?:page\s*)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$/i.test(line)) return false
+      const key = normalizeRepeatedArtifactLine(line)
+      return !key || (counts.get(key) ?? 0) < 2
+    })
+    .join('\n')
+}
+
+function stripFootnotesAndReferences(input: string): string {
+  return input
+    .replace(/<\/?sup[^>]*>/gi, '')
+    .replace(/(?<=\p{L})[¹²³⁴⁵⁶⁷⁸⁹⁰]+/gu, '')
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:\[\d{1,3}\]|\d{1,3}[.)])\s+\S.{8,}$/i.test(line))
+    .join('\n')
+    .replace(/(?:^|\n)\s*(?:references|bibliography|endnotes)\s*\n[\s\S]*$/i, ' ')
+}
+
+function normalizeRepeatedArtifactLine(line: string): string | null {
+  const cleaned = line.replace(/\s+/g, ' ').trim()
+  if (cleaned.length < 3 || cleaned.length > 80) return null
+  if (/[.!?]"?$/.test(cleaned)) return null
+  if (/^\d/.test(cleaned)) return null
+  return cleaned.toLowerCase()
+}
+
+function speakNumericToken(value: string): string {
+  return value.includes('.') ? value.replace('.', ' point ') : value
 }
 
 export function formatBytes(bytes: number): string {

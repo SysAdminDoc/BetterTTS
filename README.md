@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-126%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-131%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, and KittenTTS run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
@@ -66,7 +66,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
-- **Text cleanup** — skip citations, shorten URLs, spell vowel-less acronyms, strip markdown before synthesis
+- **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
 - **Pronunciation dictionary** — custom word/replacement pairs persisted in localStorage
 - **Generation stats** — elapsed time, chars/s throughput, audio duration, realtime speed factor
@@ -131,7 +131,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (126 assertions across 17 suites) + Playwright smoke |
+| Testing | Vitest (131 assertions across 17 suites) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

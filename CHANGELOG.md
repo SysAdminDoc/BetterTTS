@@ -8,6 +8,7 @@
 - Added M4B/WebCodecs AAC capability preflight, browser-specific unsupported messages, and a chaptered ZIP fallback manifest for queue exports.
 - Added a diagnostics export panel that copies/downloads a sanitized local support bundle with browser, WebGPU, codec, storage, cache, model-route, and recent warning/error state.
 - Added `npm run smoke`, a local Playwright production-build smoke check for desktop/mobile rendering, theme switching, diagnostics copy, queue controls, M4B fallback messaging, screenshots, and unexpected console-noise regression.
+- Expanded text cleanup with reversible controls for footnotes/references, repeated page headers/footers, audiobook number/unit normalization, and ISBN/DOI/cataloging metadata removal.
 
 ### Changed
 - Split EPUB parsing and multilingual Kokoro runtime paths into on-demand chunks; the production worker bundle now stays small on first load and the fflate static/dynamic import warning is gone.

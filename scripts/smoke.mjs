@@ -129,6 +129,11 @@ async function runSmoke() {
     await desktop.page.getByRole('button', { name: 'Copy JSON' }).click()
     await desktop.page.getByText('Diagnostics copied to clipboard.').waitFor({ timeout: 20000 })
 
+    await desktop.page.getByRole('button', { name: 'Advanced options' }).click()
+    for (const label of ['Skip citations', 'Drop page headers', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
+      await desktop.page.getByLabel(label).waitFor({ timeout: 20000 })
+    }
+
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })

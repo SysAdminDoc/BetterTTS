@@ -2462,6 +2462,10 @@ function App() {
                     ['urls', 'Shorten URLs', 'Read web addresses as "link".'],
                     ['acronyms', 'Spell acronyms', 'Letter-space SQL, HTML, and similar.'],
                     ['markdown', 'Strip markdown', 'Drop #, *, backticks, and link syntax.'],
+                    ['pageArtifacts', 'Drop page headers', 'Remove repeated headers, footers, and page numbers.'],
+                    ['footnotes', 'Skip footnotes', 'Remove note markers and references sections.'],
+                    ['numbers', 'Normalize numbers', 'Read currency, decimals, units, and percentages clearly.'],
+                    ['metadata', 'Drop book metadata', 'Remove ISBN, DOI, and cataloging lines.'],
                   ] as const
                 ).map(([key, title, hint]) => (
                   <label className="toggle-row" key={key}>

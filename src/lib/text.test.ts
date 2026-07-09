@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CLEANUP, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './text.ts'
+import { DEFAULT_CLEANUP, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './text.ts'
 
 describe('slugify', () => {
   it('lowercases and replaces non-alphanumeric chars', () => {
@@ -180,7 +180,16 @@ describe('parseDialogLines', () => {
 })
 
 describe('cleanupText', () => {
-  const off = { citations: false, urls: false, acronyms: false, markdown: false }
+  const off = {
+    citations: false,
+    urls: false,
+    acronyms: false,
+    markdown: false,
+    footnotes: false,
+    pageArtifacts: false,
+    numbers: false,
+    metadata: false,
+  }
 
   it('strips numeric citation markers', () => {
     expect(cleanupText('Speed matters [12] a lot [1, 2] indeed [3-5].', { ...off, citations: true })).toBe(
@@ -232,6 +241,43 @@ describe('cleanupText', () => {
   it('is a no-op when every rule is off', () => {
     const text = 'Keep [12] https://x.dev SQL **bold**'
     expect(cleanupText(text, off)).toBe(text)
+  })
+
+  it('normalizes currency, decimals, units, and percentages', () => {
+    const result = cleanupText('The price is $12.50, pi is 3.14, mass is 2.5 kg, and progress is 50%.', { ...off, numbers: true })
+    expect(result).toContain('12 dollars and 50 cents')
+    expect(result).toContain('3 point 1 4')
+    expect(result).toContain('2 point 5 kilograms')
+    expect(result).toContain('50 percent')
+  })
+
+  it('removes ISBN-like metadata without deleting story text', () => {
+    const result = cleanupText('ISBN 978-1-4028-9462-6\nChapter One\nThe room was quiet.', { ...off, metadata: true })
+    expect(result).not.toContain('978-1-4028-9462-6')
+    expect(result).toContain('Chapter One')
+    expect(result).toContain('The room was quiet.')
+  })
+
+  it('removes repeated page headers, footers, and page numbers', () => {
+    const result = cleanupText('Book Title\n1\nThe first page.\nBook Title\nPage 2 of 300\nThe second page.', { ...off, pageArtifacts: true })
+    expect(result).not.toContain('Book Title')
+    expect(result).not.toContain('Page 2 of 300')
+    expect(result).toContain('The first page.')
+    expect(result).toContain('The second page.')
+  })
+
+  it('removes footnote markers, note lines, and references sections', () => {
+    const result = cleanupText('The claim¹ stays readable.\n[1] This is a footnote line.\nReferences\nSmith, Example Book.', { ...off, footnotes: true })
+    expect(result).toContain('The claim stays readable.')
+    expect(result).not.toContain('footnote line')
+    expect(result).not.toContain('References')
+    expect(result).not.toContain('Smith')
+  })
+})
+
+describe('normalizeAudiobookNumbers', () => {
+  it('keeps integer-looking tokens unchanged when no unit or currency is present', () => {
+    expect(normalizeAudiobookNumbers('Chapter 12 starts now')).toBe('Chapter 12 starts now')
   })
 })
 
