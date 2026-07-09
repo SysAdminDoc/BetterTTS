@@ -1,23 +1,25 @@
 :root {
-  --bg: #080c12;
-  --bg-strong: #05080d;
-  --surface-0: #0c121a;
-  --surface-1: #111923;
-  --surface-2: #172231;
-  --editor-bg: #070c12;
-  --border: #223041;
-  --border-strong: #33465b;
-  --heading: #eef6ff;
-  --text: #b8c4d5;
-  --muted: #7f8da1;
-  --accent: #5b9cff;
-  --accent-2: #54d1ff;
-  --success: #53d889;
-  --warning: #f2bd62;
-  --danger: #ff6b7a;
-  --shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.18);
-  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --bg: #070a0f;
+  --bg-strong: #030509;
+  --surface-0: #0b1118;
+  --surface-1: #101821;
+  --surface-2: #16212d;
+  --surface-3: #1b2a3a;
+  --editor-bg: #070b10;
+  --control-bg: #0d141d;
+  --border: #1d2a38;
+  --border-strong: #314457;
+  --heading: #f2f7ff;
+  --text: #c2ccda;
+  --muted: #8b98aa;
+  --accent: #4f94ff;
+  --accent-2: #43c8ff;
+  --success: #6ade91;
+  --warning: #f0c45f;
+  --danger: #ff6878;
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.46);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
   --sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -36,24 +38,26 @@
 }
 
 :root[data-theme='light'] {
-  --bg: #f3f7fb;
+  --bg: #eef3f8;
   --bg-strong: #fbfdff;
-  --surface-0: #f5f9fd;
+  --surface-0: #f6f9fd;
   --surface-1: #ffffff;
   --surface-2: #edf4fb;
+  --surface-3: #e3edf7;
   --editor-bg: #fbfdff;
-  --border: #d8e2ee;
-  --border-strong: #b9c8d9;
-  --heading: #101923;
-  --text: #334155;
-  --muted: #5e6978;
-  --accent: #2563eb;
-  --accent-2: #0891b2;
+  --control-bg: #f8fbff;
+  --border: #d5e0ec;
+  --border-strong: #afc0d3;
+  --heading: #111b27;
+  --text: #2e3b4d;
+  --muted: #657386;
+  --accent: #256fe6;
+  --accent-2: #0e9ac2;
   --success: #168a4f;
-  --warning: #a16207;
-  --danger: #dc2626;
-  --shadow: 0 18px 54px rgba(31, 48, 67, 0.14);
-  --shadow-sm: 0 2px 8px rgba(31, 48, 67, 0.08);
+  --warning: #9b6508;
+  --danger: #d9273d;
+  --shadow: 0 20px 60px rgba(31, 48, 67, 0.15);
+  --shadow-sm: 0 8px 22px rgba(31, 48, 67, 0.08);
   --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   color-scheme: light;
 }

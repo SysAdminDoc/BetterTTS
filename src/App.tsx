@@ -53,6 +53,7 @@ import { speakBrowser } from './lib/webspeech.ts'
 
 const APP_VERSION = '0.11.0'
 const MAX_TEXT_CHARS = 5000
+const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 
 type Engine = 'kokoro' | 'supertonic' | 'kitten' | 'browser'
 type Theme = 'dark' | 'light'
@@ -205,7 +206,7 @@ function ResultRow({ result, isSpeaking, onReplay, onShare, onSave }: ResultRowP
       </div>
       {result.url ? (
         <audio ref={audioRef} controls src={result.url} aria-label={result.filename}>
-          {result.vttUrl ? <track kind="captions" src={result.vttUrl} srcLang="en" label="English" /> : null}
+          <track kind="captions" src={result.vttUrl ?? EMPTY_VTT_URL} srcLang="en" label={result.vttUrl ? 'English' : 'No captions'} />
         </audio>
       ) : null}
       <div className="result-actions">
@@ -411,6 +412,16 @@ function App() {
   const lineNumbers = useMemo(() => text.split(/\r?\n/).map((_, index) => index + 1), [text])
   const usableText = text.slice(0, MAX_TEXT_CHARS)
   const overLimit = text.length > MAX_TEXT_CHARS
+  const wordCount = useMemo(() => text.trim().split(/\s+/).filter(Boolean).length, [text])
+  const lineCount = lineNumbers.length
+  const engineStatus =
+    engine === 'kokoro'
+      ? `${selectedKokoroLanguage.label} - ${kokoroRuntimeLabel}${modelCached ? ' - cached' : ''}${storageEstimate ? ` - ${storageEstimate}` : ''}`
+      : engine === 'supertonic'
+        ? 'English speed engine - 44.1 kHz fp32'
+        : engine === 'kitten'
+          ? `${selectedKittenModel.label} - ${selectedKittenModel.params} - WebGPU`
+          : 'Device-native speech playback'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -1439,6 +1450,11 @@ function App() {
               GitHub <ExternalLink size={14} aria-hidden="true" />
             </a>
           </nav>
+          <div className="topbar-status" aria-label="Runtime status">
+            <span className="status-dot" aria-hidden="true" />
+            <span>No backend</span>
+            <span>100% local</span>
+          </div>
           <button
             type="button"
             className="theme-button"
@@ -1453,7 +1469,7 @@ function App() {
         <section className="studio-grid" id="studio">
           <div className="editor-column">
             <div className="section-heading">
-              <span>Text</span>
+              <span>Script editor</span>
               <span className={overLimit ? 'danger-text' : ''}>
                 {text.length} / {MAX_TEXT_CHARS}
                 {overLimit ? ` (${text.length - MAX_TEXT_CHARS} over)` : ''}
@@ -1472,14 +1488,21 @@ function App() {
                 aria-label="Text to synthesize"
               />
             </div>
+            <div className="editor-statusbar" aria-label="Editor status">
+              <span>{wordCount} words</span>
+              <span>{text.length} characters</span>
+              <span>{lineCount} lines</span>
+              <span>Plain text</span>
+              <span>{cleanup.markdown ? 'Cleanup on' : 'Cleanup off'}</span>
+            </div>
             <div className="editor-actions">
               <button type="button" onClick={() => setText('')}>
                 <X size={16} aria-hidden="true" />
-                Clear
+                New
               </button>
               <button type="button" onClick={() => fileInputRef.current?.click()}>
                 <Upload size={16} aria-hidden="true" />
-                Import
+                Open
               </button>
               <input ref={fileInputRef} type="file" accept=".txt,.epub,text/plain,application/epub+zip" onChange={handleFileUpload} hidden />
               <select
@@ -1517,21 +1540,26 @@ function App() {
                   disabled={importingUrl || !importUrlValue.trim()}
                 >
                   {importingUrl ? <Loader2 size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
-                  Fetch
+                  Import
                 </button>
               </div>
             </div>
 
             <section className="output-panel" aria-label="Generated audio">
               <div className="section-heading">
-                <span>Output</span>
+                <span>Output deck</span>
                 <span aria-live="polite">{status}</span>
+              </div>
+              <div className="surface-tabs" aria-label="Output views">
+                <span className="active">Output</span>
+                <span>Timeline</span>
+                <span>Captions</span>
               </div>
               {results.length === 0 ? (
                 <div className="empty-output">
                   <Volume2 size={28} aria-hidden="true" />
-                  <span>Generated audio will appear here</span>
-                  <small style={{ color: 'var(--muted)', fontSize: 12 }}>Choose a voice and click Generate audio to start</small>
+                  <strong>No audio generated yet</strong>
+                  <small>Choose a voice and click Generate audio to start.</small>
                 </div>
               ) : (
                 <div className="result-list">
@@ -1559,6 +1587,7 @@ function App() {
               </p>
             </section>
 
+            <div className="workspace-secondary-grid">
             {queueJobs.length > 0 ? (
               <section className="output-panel" aria-label="Generation queue">
                 <div className="section-heading">
@@ -1617,7 +1646,18 @@ function App() {
                   })}
                 </div>
               </section>
-            ) : null}
+            ) : (
+              <section className="output-panel" aria-label="Generation queue">
+                <div className="section-heading">
+                  <span>Queue (0)</span>
+                </div>
+                <div className="compact-empty">
+                  <FileText size={28} aria-hidden="true" />
+                  <strong>Queue is empty</strong>
+                  <span>Add long-form Kokoro jobs when you need resumable chapter output.</span>
+                </div>
+              </section>
+            )}
 
             {library.length > 0 ? (
               <section className="output-panel" aria-label="Clip library">
@@ -1676,13 +1716,25 @@ function App() {
                   ))}
                 </div>
               </section>
-            ) : null}
+            ) : (
+              <section className="output-panel" aria-label="Clip library">
+                <div className="section-heading">
+                  <span>Library (0)</span>
+                </div>
+                <div className="compact-empty">
+                  <Download size={28} aria-hidden="true" />
+                  <strong>No saved clips</strong>
+                  <span>Saved generations appear here with download actions.</span>
+                </div>
+              </section>
+            )}
+            </div>
           </div>
 
           <aside className="settings-panel" aria-label="Voice settings">
             <div className="settings-scroll">
             <div className="section-heading">
-              <span>Voice settings</span>
+              <span>Control console</span>
               <span>v{APP_VERSION}</span>
             </div>
 
@@ -1725,9 +1777,13 @@ function App() {
                   onClick={() => setEngine('browser')}
                 >
                   <span>{engine === 'browser' ? <Check size={17} aria-hidden="true" /> : null}</span>
-                  <strong>Browser fallback</strong>
+                  <strong>Browser</strong>
                   <small>Native speech playback when Kokoro cannot run.</small>
                 </button>
+              </div>
+              <div className="engine-status">
+                <span className="status-dot" aria-hidden="true" />
+                <span>{engineStatus}</span>
               </div>
             </fieldset>
 
@@ -2245,6 +2301,10 @@ function App() {
             </div>
 
             <div className="settings-actions">
+              <div className="generation-head">
+                <span>Generation</span>
+                <span>{progress !== null ? `${progress}%` : status}</span>
+              </div>
               {progress !== null ? (
                 <div
                   className="progress-wrap"
@@ -2362,7 +2422,12 @@ git subtree push --prefix dist origin gh-pages
         </section>
 
         <footer>
-          <span>BetterTTS v{APP_VERSION}</span>
+          <div className="system-rail" aria-label="System status">
+            <span>BetterTTS v{APP_VERSION}</span>
+            <span><span className="status-dot" aria-hidden="true" /> Local only</span>
+            <span>{runtimeLabel}</span>
+            <span>{storageEstimate ?? 'Storage ready'}</span>
+          </div>
           <button
             type="button"
             disabled={isGenerating}
