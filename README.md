@@ -5,9 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-109%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-113%20passing-53d889.svg)](#)
 
-**Free client-side text-to-speech studio.** Kokoro 82M runs entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
+**Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, and KittenTTS run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
@@ -35,6 +35,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ### Audio Generation
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
 - **Supertonic speed engine** via Transformers.js — 10 English F/M voices, 44.1 kHz fp32 output, lazy-loaded only when selected
+- **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
 - **41 Kokoro voices** — 28 English voices plus Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
@@ -55,7 +56,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Pitch control** - +/-4 semitones via Signalsmith Stretch AudioWorklet/WASM rendering, without tempo change
 - **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume
 - **Silence insertion** — `[pause 2s]` tags splice real silence into the output
-- **Speed control** — 0.5x to 1.5x playback rate
+- **Speed control** — engine-aware ranges: Kokoro 0.5x-1.5x, Supertonic 0.8x-1.2x, KittenTTS 0.5x-2.0x
 
 ### Studio Features
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
@@ -107,14 +108,14 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 |---|---|
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
-| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js; KittenTTS via `kitten-tts-webgpu` |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-2.1, browser LAME) |
 | M4B Export | WebCodecs AAC + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
 | Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (109 assertions across 13 suites) |
+| Testing | Vitest (113 assertions across 14 suites) |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -133,11 +134,12 @@ src/
 │   ├── kokoro-timestamps.ts # Timestamped Kokoro loader and word cue alignment
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
+│   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
 │   ├── wav.ts               # Raw PCM → WAV encoder
 │   ├── text.ts              # Sentence splitting, pause parsing, slugify
-│   ├── voices.ts            # 28-voice catalog with quality grades
+│   ├── voices.ts            # 41-voice Kokoro catalog with quality grades
 │   ├── webspeech.ts         # Browser Speech API wrapper
 │   ├── subtitles.ts         # SRT/VTT serializers
 │   └── library.ts           # IndexedDB clip storage
@@ -205,13 +207,14 @@ Multilingual voices:
 
 Supertonic is available as a separate English speed engine: 66M parameters, 10 voices, 44,100 Hz output, HF-hosted fp32 ONNX assets, OpenRAIL license.
 
+KittenTTS is available as a separate English lightweight engine: Nano 15M / 24 MB by default, Micro 40M / 41 MB, Mini 80M / 78 MB, 8 voices, 24,000 Hz output, WebGPU-only shader inference, MIT package code, and Apache-2.0 model weights. The package is lazy-loaded and model weights stay HF-hosted until the engine is selected.
+
 Word timestamps are available as an opt-in Kokoro mode using `onnx-community/Kokoro-82M-v1.0-ONNX-timestamped`; the extra q8 model stays HF-hosted and powers word-level SRT/VTT plus follow-along highlighting.
 
 ## Roadmap
 
 Planned features (see [ROADMAP.md](ROADMAP.md) for details):
 
-- Additional engine support (KittenTTS, Piper)
 - Transformers.js v4 migration for WebGPU speedups
 
 ## Contributing

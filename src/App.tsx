@@ -33,6 +33,17 @@ import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBl
 import { buildM4bFromBlobs, m4bSupported } from './lib/m4b.ts'
 import { type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, saveChunkBlob, saveJob } from './lib/queue.ts'
 import { parseEpub } from './lib/epub.ts'
+import {
+  KITTEN_DEFAULT_MODEL,
+  KITTEN_MODELS,
+  KITTEN_PREVIEW_TEXT,
+  KITTEN_SAMPLE_RATE,
+  KITTEN_VOICES,
+  type KittenModelSize,
+  type KittenVoiceId,
+  clampKittenSpeed,
+  synthesizeKitten,
+} from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, synthesizeSupertonic } from './lib/supertonic.ts'
 import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
@@ -43,7 +54,7 @@ import { speakBrowser } from './lib/webspeech.ts'
 const APP_VERSION = '0.10.0'
 const MAX_TEXT_CHARS = 5000
 
-type Engine = 'kokoro' | 'supertonic' | 'browser'
+type Engine = 'kokoro' | 'supertonic' | 'kitten' | 'browser'
 type Theme = 'dark' | 'light'
 
 type AudioResult = {
@@ -76,9 +87,9 @@ const MODEL_ROWS = [
   ['Kokoro 82M', 'Kokoro local', '82M', 'EN / ES / FR / HI / IT / PT', 'Ready'],
   ['Kokoro timestamped', 'Kokoro local', '82M', 'Word-level timings', 'Opt-in'],
   ['Supertonic', 'Transformers.js', '66M', 'English speed engine', 'Ready'],
+  ['KittenTTS', 'WebGPU shaders', '15M / 40M / 80M', 'English lightweight engine', 'Ready'],
   ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT', 'Ready'],
   ['Browser voices', 'Web Speech', 'Native', 'Device voices', 'Fallback'],
-  ['Piper packs', 'Static model packs', 'Varies', 'Optional', 'Later'],
 ]
 
 function getInitialTheme(): Theme {
@@ -309,6 +320,8 @@ function App() {
   const [voiceId, setVoiceId] = useState('af_heart')
   const [supertonicVoiceId, setSupertonicVoiceId] = useState<SupertonicVoiceId>('F1')
   const [supertonicSteps, setSupertonicSteps] = useState(SUPERTONIC_DEFAULT_STEPS)
+  const [kittenVoiceId, setKittenVoiceId] = useState<KittenVoiceId>('Bella')
+  const [kittenModelSize, setKittenModelSize] = useState<KittenModelSize>(KITTEN_DEFAULT_MODEL)
   const [speed, setSpeed] = useState(1)
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
@@ -387,10 +400,14 @@ function App() {
   const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
   const selectedVoice = VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]
   const selectedSupertonicVoice = SUPERTONIC_VOICES.find((voice) => voice.id === supertonicVoiceId) ?? SUPERTONIC_VOICES[0]
+  const selectedKittenVoice = KITTEN_VOICES.find((voice) => voice.id === kittenVoiceId) ?? KITTEN_VOICES[0]
+  const selectedKittenModel = KITTEN_MODELS.find((model) => model.id === kittenModelSize) ?? KITTEN_MODELS[0]
   const selectedKokoroLanguage = kokoroLanguageForLocale(locale)
   const englishKokoro = isEnglishKokoroLocale(locale)
   const blendableVoices = useMemo(() => VOICES.filter((voice) => isEnglishKokoroLocale(voice.locale)), [])
   const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : 'WebGPU fp32 / WebAssembly q8') : runtimeLabel
+  const speedMin = engine === 'supertonic' ? 0.8 : 0.5
+  const speedMax = engine === 'supertonic' ? 1.2 : engine === 'kitten' ? 2 : 1.5
   const lineNumbers = useMemo(() => text.split(/\r?\n/).map((_, index) => index + 1), [text])
   const usableText = text.slice(0, MAX_TEXT_CHARS)
   const overLimit = text.length > MAX_TEXT_CHARS
@@ -417,7 +434,11 @@ function App() {
   }, [forceWasm])
 
   useEffect(() => {
-    if (engine === 'supertonic') setSpeed((current) => clampSupertonicSpeed(current))
+    setSpeed((current) => {
+      if (engine === 'supertonic') return clampSupertonicSpeed(current)
+      if (engine === 'kitten') return clampKittenSpeed(current)
+      return Math.min(1.5, Math.max(0.5, current))
+    })
   }, [engine])
 
   useEffect(() => {
@@ -632,11 +653,21 @@ function App() {
       setRuntimeLabel('Supertonic fp32')
       return { synthesize: (text, voice, spd) => synthesizeSupertonic(tts, text, voice as SupertonicVoiceId, spd, supertonicSteps) }
     }
+    if (engine === 'kitten') {
+      setRuntimeLabel('KittenTTS WebGPU')
+      return {
+        synthesize: (text, voice, spd) =>
+          synthesizeKitten(text, voice as KittenVoiceId, spd, kittenModelSize, (stage) => {
+            setStatus(stage)
+          }),
+      }
+    }
     return ensureKokoroEngine(onProgress)
   }
 
   async function runSynthesis(jobs: SynthJob[], opts: { zipPrefix: string; successMessage?: string }) {
-    setStatus(engine === 'supertonic' ? 'Loading Supertonic model' : 'Loading Kokoro model')
+    const loadingLabel = engine === 'supertonic' ? 'Loading Supertonic model' : engine === 'kitten' ? 'Loading KittenTTS model' : 'Loading Kokoro model'
+    setStatus(loadingLabel)
     setProgress(3)
 
     const fileTotals = new Map<string, { loaded: number; total: number }>()
@@ -669,7 +700,7 @@ function App() {
     setStatus('Generating local audio')
     const genStart = performance.now()
     let totalSamples = 0
-    const outputSampleRate = engine === 'supertonic' ? SUPERTONIC_SAMPLE_RATE : KOKORO_SAMPLE_RATE
+    const outputSampleRate = engine === 'supertonic' ? SUPERTONIC_SAMPLE_RATE : engine === 'kitten' ? KITTEN_SAMPLE_RATE : KOKORO_SAMPLE_RATE
     let totalChars = 0
     const generated: AudioResult[] = []
     const zipFiles: Record<string, Blob> = {}
@@ -879,6 +910,19 @@ function App() {
     await runSynthesis(jobs, { zipPrefix: 'bettertts-supertonic', successMessage: 'Supertonic audio generated locally.' })
   }
 
+  async function generateKitten(chunks: string[]) {
+    const jobs: SynthJob[] = chunks.map((chunk, index) => ({
+      text: chunk,
+      voice: kittenVoiceId,
+      label: `${selectedKittenVoice.name}: ${chunk.slice(0, 56)}`,
+      filenamePrefix: chunks.length === 1 ? slugify(chunk) : `${String(index + 1).padStart(3, '0')}-${slugify(chunk)}`,
+    }))
+    await runSynthesis(jobs, {
+      zipPrefix: 'bettertts-kitten',
+      successMessage: `${selectedKittenModel.label} KittenTTS audio generated locally.`,
+    })
+  }
+
   async function generateBrowser(chunks: string[]) {
     setStatus('Starting browser speech')
     setProgress(5)
@@ -961,6 +1005,8 @@ function App() {
         await generateKokoro(chunks)
       } else if (engine === 'supertonic') {
         await generateSupertonic(chunks)
+      } else if (engine === 'kitten') {
+        await generateKitten(chunks)
       } else {
         await generateBrowser(chunks)
       }
@@ -980,7 +1026,7 @@ function App() {
     }
   }
 
-  async function previewVoice(id: string) {
+  async function previewVoice(id: string, sampleText = kokoroLanguageForVoice(id).previewText) {
     if (previewingVoice || isGenerating) return
     setPreviewingVoice(id)
     try {
@@ -992,7 +1038,7 @@ function App() {
         return
       }
       const engineImpl = await ensureEngine(() => {})
-      const preview = await engineImpl.synthesize(kokoroLanguageForVoice(id).previewText, id, 1)
+      const preview = await engineImpl.synthesize(sampleText, id, 1)
       if (preview) {
         const blob = new Blob([encodeWav(preview.samples, preview.sampleRate)], { type: 'audio/wav' })
         const url = URL.createObjectURL(blob)
@@ -1662,6 +1708,15 @@ function App() {
                 </button>
                 <button
                   type="button"
+                  className={engine === 'kitten' ? 'engine-card selected' : 'engine-card'}
+                  onClick={() => setEngine('kitten')}
+                >
+                  <span>{engine === 'kitten' ? <Check size={17} aria-hidden="true" /> : null}</span>
+                  <strong>KittenTTS</strong>
+                  <small>{selectedKittenModel.label} {selectedKittenModel.params}. English WebGPU engine, {selectedKittenModel.weightSize} on first use.</small>
+                </button>
+                <button
+                  type="button"
                   className={engine === 'browser' ? 'engine-card selected' : 'engine-card'}
                   onClick={() => setEngine('browser')}
                 >
@@ -1738,6 +1793,65 @@ function App() {
                   ))}
                 </select>
               </>
+            ) : engine === 'kitten' ? (
+              <>
+                <label className="control-label" htmlFor="kitten-model">
+                  Model
+                </label>
+                <select
+                  id="kitten-model"
+                  value={kittenModelSize}
+                  onChange={(event) => setKittenModelSize(event.target.value as KittenModelSize)}
+                >
+                  {KITTEN_MODELS.map((model) => (
+                    <option value={model.id} key={model.id}>
+                      {model.label} ({model.params}, {model.weightSize})
+                    </option>
+                  ))}
+                </select>
+
+                <label className="control-label" htmlFor="kitten-voice">
+                  Voice
+                </label>
+                <select
+                  id="kitten-voice"
+                  value={kittenVoiceId}
+                  onChange={(event) => setKittenVoiceId(event.target.value as KittenVoiceId)}
+                >
+                  {KITTEN_VOICES.map((voice) => (
+                    <option value={voice.id} key={voice.id}>
+                      {voice.name} ({voice.gender})
+                    </option>
+                  ))}
+                </select>
+
+                <div className="voice-buttons" aria-label="KittenTTS voices">
+                  {KITTEN_VOICES.slice(0, 6).map((voice) => (
+                    <div className="voice-btn-row" key={voice.id}>
+                      <button
+                        type="button"
+                        className={voice.id === kittenVoiceId ? 'selected' : ''}
+                        onClick={() => setKittenVoiceId(voice.id)}
+                      >
+                        {voice.name}
+                      </button>
+                      <button
+                        type="button"
+                        className="voice-preview"
+                        onClick={() => previewVoice(voice.id, KITTEN_PREVIEW_TEXT)}
+                        disabled={previewingVoice !== null}
+                        aria-label={`Preview ${voice.name}`}
+                      >
+                        {previewingVoice === voice.id ? (
+                          <Loader2 size={13} aria-hidden="true" />
+                        ) : (
+                          <Play size={13} aria-hidden="true" />
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
               <>
                 <label className="control-label" htmlFor="browser-voice">
@@ -1764,8 +1878,8 @@ function App() {
               <input
                 id="speed"
                 type="range"
-                min={engine === 'supertonic' ? '0.8' : '0.5'}
-                max={engine === 'supertonic' ? '1.2' : '1.5'}
+                min={speedMin}
+                max={speedMax}
                 step="0.05"
                 value={speed}
                 onChange={(event) => setSpeed(Number(event.target.value))}
@@ -1829,7 +1943,7 @@ function App() {
                       <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
                         <option value={96}>96 kbps</option>
                         <option value={128}>128 kbps</option>
-                        <option value={160}>{engine === 'kokoro' ? '160 kbps (max at 24 kHz)' : '160 kbps'}</option>
+                        <option value={160}>{engine === 'kokoro' || engine === 'kitten' ? '160 kbps (max at 24 kHz)' : '160 kbps'}</option>
                       </select>
                     ) : null}
                   </div>
@@ -2185,7 +2299,7 @@ function App() {
         <section className="technical-note" id="docs">
           <span>How it works</span>
           <p>
-            Kokoro 82M and Supertonic run locally in your browser via Transformers.js. English Kokoro WASM q8 loads from this site first; multilingual voice bins, timestamped Kokoro, Supertonic, and Kokoro WebGPU fp32 remain HF-hosted. No server involved.
+            Kokoro 82M and Supertonic run locally in your browser via Transformers.js; KittenTTS runs through its WebGPU shader engine. English Kokoro WASM q8 loads from this site first; multilingual voice bins, timestamped Kokoro, Supertonic, KittenTTS weights, and Kokoro WebGPU fp32 remain HF-hosted. No server involved.
           </p>
           <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank" rel="noreferrer">
             Model card <ExternalLink size={15} aria-hidden="true" />

@@ -20,6 +20,7 @@
     "@mozilla/readability": "^0.6.0",
     "ephone": "^1.0.2",
     "fflate": "^0.8.3",
+    "kitten-tts-webgpu": "^0.1.1",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^1.23.0",
     "phonemizer": "^1.2.1",

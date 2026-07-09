@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added KittenTTS as a lazy-loaded English WebGPU engine via `kitten-tts-webgpu`, with 8 voices, Nano/Micro/Mini model selection, 0.5x-2.0x speed controls, WAV/MP3/Opus export through the existing pipeline, focused metadata/WAV parser tests, and desktop/mobile browser QA (TF-29).
 - Added Kokoro multilingual generation for Spanish, French, Hindi, Italian, and Brazilian Portuguese voices via `ephone`/eSpeak NG phonemization and the direct Kokoro model path; English generation remains on the existing `tts.generate()` path (TF-25).
 - Added chaptered M4B audiobook export for completed queue jobs, with WebCodecs AAC encoding, QuickTime `tref/chap` text-track chapters, Nero `chpl` chapter metadata, EPUB TOC title preservation, and focused muxer tests (TF-74).
 - Added opt-in word-level Kokoro timestamps via the timestamped q8 ONNX graph, with word-level SRT/VTT and follow-along cues plus browser QA (TF-26).
