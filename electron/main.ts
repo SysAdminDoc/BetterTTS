@@ -161,10 +161,10 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
 
     const probe = (await win.webContents.executeJavaScript(`(() => ({
       brand: document.querySelector('.brand')?.textContent?.trim() ?? null,
-      cards: document.querySelectorAll('.summary-card').length,
+      railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform ?? null,
-    }))()`)) as { brand: string | null; cards: number; generate: boolean; platform: unknown }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: unknown }
 
     try {
       const image = await win.webContents.capturePage()
@@ -174,7 +174,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       /* capture is best-effort on a hidden window */
     }
 
-    result.ok = probe.brand === 'BetterTTS' && probe.cards >= 6 && probe.generate && Boolean(probe.platform)
+    result.ok = probe.brand === 'BetterTTS' && probe.railItems >= 5 && probe.generate && Boolean(probe.platform)
     result.probe = probe
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err)

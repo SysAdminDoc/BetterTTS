@@ -838,6 +838,7 @@ function App() {
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
   const [genStats, setGenStats] = useState<{ elapsed: number; chars: number; audioDuration: number } | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showSystemTools, setShowSystemTools] = useState(false)
   const [showPronunciations, setShowPronunciations] = useState(false)
   const [voiceMixEnabled, setVoiceMixEnabled] = useState(false)
   const [voiceMixEntries, setVoiceMixEntries] = useState<VoiceMixEntry[]>([
@@ -935,16 +936,6 @@ function App() {
           : engine === 'piper'
             ? selectedPiperLanguage.label
             : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
-  const activeVoiceDetail =
-    engine === 'kokoro'
-      ? selectedKokoroLanguage.label
-      : engine === 'supertonic'
-        ? 'English speed engine'
-        : engine === 'kitten'
-          ? selectedKittenModel.label
-          : engine === 'piper'
-            ? PIPER_PLUS_MODEL_LABEL
-            : 'Device speech'
   const activeSampleRate =
     engine === 'supertonic'
       ? `${(SUPERTONIC_SAMPLE_RATE / 1000).toFixed(1)} kHz`
@@ -2572,16 +2563,10 @@ function App() {
             </span>
             <span>BetterTTS</span>
           </a>
-        <nav className="nav-links" aria-label="Primary">
-            <a href="#studio" className={activeNavSection === 'studio' ? 'active' : undefined} aria-current={activeNavSection === 'studio' ? 'location' : undefined}>
-              Studio
-            </a>
-            <a href="#models" className={activeNavSection === 'models' ? 'active' : undefined} aria-current={activeNavSection === 'models' ? 'location' : undefined}>Models</a>
-            <a href="#docs" className={activeNavSection === 'docs' ? 'active' : undefined} aria-current={activeNavSection === 'docs' ? 'location' : undefined}>Docs</a>
-            <a href="https://github.com/SysAdminDoc/BetterTTS" target="_blank" rel="noreferrer">
-              GitHub <ExternalLink size={14} aria-hidden="true" />
-            </a>
-          </nav>
+          <div className="project-context" aria-label="Current workspace">
+            <strong>Local studio</strong>
+            <span><span className="status-dot" aria-hidden="true" /> Session active</span>
+          </div>
           <div className="topbar-status" aria-label="Runtime status">
             <span className="status-dot" aria-hidden="true" />
             <span>No backend</span>
@@ -2598,38 +2583,53 @@ function App() {
           </button>
         </header>
 
-        <section className="studio-command-strip" aria-label="Studio status summary">
-          <div className="summary-card summary-card-primary">
-            <span>Engine</span>
-            <strong>{activeEngineName}</strong>
-            <small>{engineStatus}</small>
-          </div>
-          <div className="summary-card">
-            <span>Voice</span>
-            <strong>{activeVoiceName}</strong>
-            <small>{activeVoiceDetail}</small>
-          </div>
-          <div className="summary-card">
-            <span>Delivery</span>
-            <strong>{speedSummary}</strong>
-            <small>{editorModeLabel}</small>
-          </div>
-          <div className="summary-card">
-            <span>Output</span>
-            <strong>{outputFormatLabel}</strong>
-            <small>{captionModeLabel}</small>
-          </div>
-          <div className="summary-card">
-            <span>Queue / Library</span>
-            <strong>{queueSummaryLabel}</strong>
-            <small>{librarySummaryLabel}</small>
-          </div>
-          <div className="summary-card">
-            <span>System</span>
-            <strong>{runtimeLabel}</strong>
-            <small>{storageEstimate ?? 'Storage n/a'}</small>
-          </div>
-        </section>
+        <nav className="app-rail" aria-label="Workspace">
+          <a
+            href="#studio"
+            className={activeNavSection === 'studio' && !['queue-panel', 'library-panel', 'diagnostics-panel'].includes(activeWorkspaceHash) ? 'rail-link active' : 'rail-link'}
+            aria-current={activeNavSection === 'studio' && !['queue-panel', 'library-panel', 'diagnostics-panel'].includes(activeWorkspaceHash) ? 'page' : undefined}
+          >
+            <Waves size={21} aria-hidden="true" />
+            <span>Studio</span>
+          </a>
+          <a
+            href="#queue-panel"
+            className={activeWorkspaceHash === 'queue-panel' ? 'rail-link active' : 'rail-link'}
+            aria-current={activeWorkspaceHash === 'queue-panel' ? 'page' : undefined}
+            title={queueSummaryLabel}
+          >
+            <FileText size={20} aria-hidden="true" />
+            <span>Queue</span>
+            {queueJobs.length > 0 ? <small>{queueJobs.length}</small> : null}
+          </a>
+          <a
+            href="#library-panel"
+            className={activeWorkspaceHash === 'library-panel' ? 'rail-link active' : 'rail-link'}
+            aria-current={activeWorkspaceHash === 'library-panel' ? 'page' : undefined}
+            title={librarySummaryLabel}
+          >
+            <Download size={20} aria-hidden="true" />
+            <span>Library</span>
+            {library.length > 0 ? <small>{library.length}</small> : null}
+          </a>
+          <a href="#models" className={activeNavSection === 'models' ? 'rail-link active' : 'rail-link'} aria-current={activeNavSection === 'models' ? 'page' : undefined}>
+            <SquareCode size={20} aria-hidden="true" />
+            <span>Models</span>
+          </a>
+          <a
+            href="#diagnostics-panel"
+            className={activeWorkspaceHash === 'diagnostics-panel' ? 'rail-link active' : 'rail-link'}
+            aria-current={activeWorkspaceHash === 'diagnostics-panel' ? 'page' : undefined}
+            onClick={() => setShowSystemTools(true)}
+          >
+            <Settings2 size={20} aria-hidden="true" />
+            <span>Diagnostics</span>
+          </a>
+          <a href="#docs" className={activeNavSection === 'docs' ? 'rail-link rail-link-bottom active' : 'rail-link rail-link-bottom'} aria-current={activeNavSection === 'docs' ? 'page' : undefined}>
+            <Info size={20} aria-hidden="true" />
+            <span>Docs</span>
+          </a>
+        </nav>
 
         <section className="studio-grid" id="studio">
           <div className="studio-workbench">
@@ -2721,26 +2721,42 @@ function App() {
             </div>
 
             <div className="workspace-column">
-              <section className="output-panel output-deck" id="generated-output" aria-label="Generated audio">
-              <div className="section-heading">
-                <span>Output</span>
-                <span aria-live="polite">{status}</span>
-              </div>
-              <div className="workspace-tabs" aria-label="Workspace sections">
+              <div className="workspace-header">
+                <div className="section-heading">
+                  <span>Render monitor</span>
+                  <span aria-live="polite">{status}</span>
+                </div>
+                <div className="workspace-tabs" role="tablist" aria-label="Render workspace">
                 {([['generated-output', 'Output'], ['queue-panel', 'Queue'], ['library-panel', 'Library']] as const).map(([target, label]) => {
                   const isActive = activeWorkspaceHash === target || (target === 'generated-output' && !['queue-panel', 'library-panel'].includes(activeWorkspaceHash))
                   return (
-                    <a
+                    <button
+                      type="button"
+                      role="tab"
                       key={target}
-                      href={`#${target}`}
                       className={isActive ? 'active' : undefined}
-                      aria-current={isActive ? 'location' : undefined}
+                      aria-selected={isActive}
+                      aria-controls={target}
+                      onClick={() => {
+                        setActiveWorkspaceHash(target)
+                        setActiveNavSection('studio')
+                        window.history.replaceState(null, '', `#${target}`)
+                      }}
                     >
                       {label}
-                    </a>
+                      {target === 'queue-panel' && queueJobs.length > 0 ? <small>{queueJobs.length}</small> : null}
+                      {target === 'library-panel' && library.length > 0 ? <small>{library.length}</small> : null}
+                    </button>
                   )
                 })}
+                </div>
               </div>
+              <section
+                className={`output-panel output-deck workspace-panel ${!['queue-panel', 'library-panel'].includes(activeWorkspaceHash) ? 'active' : ''}`}
+                id="generated-output"
+                role="tabpanel"
+                aria-label="Generated audio"
+              >
               <div className="output-session-card">
                 <div>
                   <span>Current output</span>
@@ -2751,19 +2767,25 @@ function App() {
                   <strong>{engine === 'browser' ? 'Device audio' : activeSampleRate}</strong>
                   <small>{status}</small>
                 </div>
-                <div className="output-waveform" aria-hidden="true" />
-              </div>
-              <div className="output-capabilities" aria-label="Available output formats">
-                <span>Audio files</span>
-                <span>ZIP bundles</span>
-                <span>Captions</span>
+                <div className="output-waveform" aria-hidden="true">
+                  {results.length === 0 ? (
+                    <span className="waveform-empty">
+                      <Volume2 size={22} aria-hidden="true" />
+                      <span>Generate audio to begin the waveform</span>
+                    </span>
+                  ) : null}
+                </div>
+                <div className="output-transport" aria-label="Output transport">
+                  <button type="button" disabled={results.length === 0} aria-label="Play current output">
+                    <Play size={16} aria-hidden="true" />
+                  </button>
+                  <strong>{results.length > 0 ? results[0].duration : '00:00'}</strong>
+                  <span className="transport-track" aria-hidden="true" />
+                  <span>{engine === 'browser' ? 'Device' : activeSampleRate}</span>
+                </div>
               </div>
               {results.length === 0 ? (
-                <div className="empty-output">
-                  <Volume2 size={28} aria-hidden="true" />
-                  <strong>No audio generated yet</strong>
-                  <small>Choose a voice and click Generate audio to start.</small>
-                </div>
+                <p className="output-empty-note">Choose a voice, review the script, then generate a preview or queue a resumable export.</p>
               ) : (
                 <div className="result-list">
                   {results.map((result) => (
@@ -2792,7 +2814,7 @@ function App() {
 
               <div className="workspace-secondary-grid">
             {queueJobs.length > 0 ? (
-              <section className="output-panel queue-panel" id="queue-panel" aria-label="Generation queue">
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue">
                 <div className="section-heading">
                   <span>Queue ({queueJobs.length})</span>
                 </div>
@@ -2883,7 +2905,7 @@ function App() {
                 </div>
               </section>
             ) : (
-              <section className="output-panel queue-panel" id="queue-panel" aria-label="Generation queue">
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue">
                 <div className="section-heading">
                   <span>Queue (0)</span>
                 </div>
@@ -2896,7 +2918,7 @@ function App() {
             )}
 
             {library.length > 0 ? (
-              <section className="output-panel library-panel" id="library-panel" aria-label="Clip library">
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library">
                 <div className="section-heading">
                   <span>Library ({library.length})</span>
                   <button
@@ -2914,7 +2936,7 @@ function App() {
                 </div>
               </section>
             ) : (
-              <section className="output-panel library-panel" id="library-panel" aria-label="Clip library">
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library">
                 <div className="section-heading">
                   <span>Library (0)</span>
                 </div>
@@ -2932,18 +2954,14 @@ function App() {
           <aside className="settings-panel" aria-label="Voice settings">
             <div className="settings-scroll">
             <div className="section-heading">
-              <span>Control console</span>
+              <span>Properties</span>
               <span>v{APP_VERSION}</span>
             </div>
-            <div className="console-summary" aria-label="Selected voice and output">
-              <span>
-                <strong>{activeVoiceName}</strong>
-                <small>Voice</small>
-              </span>
-              <span>
-                <strong>{outputFormatLabel}</strong>
-                <small>Output</small>
-              </span>
+            <div className="inspector-summary" aria-label="Current render settings">
+              <span><small>Engine</small><strong>{activeEngineName}</strong></span>
+              <span><small>Voice</small><strong>{activeVoiceName}</strong></span>
+              <span><small>Delivery</small><strong>{speedSummary}</strong></span>
+              <span><small>Output</small><strong>{outputFormatLabel}</strong></span>
             </div>
 
             <fieldset className="control-module engine-module">
@@ -2956,7 +2974,7 @@ function App() {
                   aria-pressed={engine === 'kokoro'}
                 >
                   <span>{engine === 'kokoro' ? <Check size={17} aria-hidden="true" /> : null}</span>
-                  <strong>Kokoro local</strong>
+                  <strong>Kokoro 82M</strong>
                   <small>
                     {selectedKokoroLanguage.label}. {kokoroRuntimeLabel}. WAV export.{kokoroRuntimeLabel === 'WebAssembly q8' ? ' Pages-hosted English model.' : ' HF model.'}{modelCached ? ' Model cached.' : ''}
                     {storageEstimate ? ` ${storageEstimate}.` : ''}
@@ -3021,7 +3039,20 @@ function App() {
                 <span className="status-dot" aria-hidden="true" />
                 <span>{engineStatus}</span>
               </div>
-              <div className="cache-manager" aria-label="Offline pack manager">
+              <button
+                type="button"
+                className="advanced-toggle system-tools-toggle"
+                id="diagnostics-panel"
+                onClick={() => setShowSystemTools(!showSystemTools)}
+                aria-expanded={showSystemTools}
+              >
+                <Settings2 size={15} aria-hidden="true" />
+                System & diagnostics
+                <ChevronDown size={15} aria-hidden="true" className={showSystemTools ? 'chevron-open' : ''} />
+              </button>
+              {showSystemTools ? (
+              <div className="system-tools-section">
+                <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>
                     <strong>Offline packs</strong>
@@ -3077,7 +3108,7 @@ function App() {
                   <p className="cache-empty">Checking model cache…</p>
                 )}
               </div>
-              <div className="diagnostics-panel" aria-label="Diagnostics export">
+                <div className="diagnostics-panel" aria-label="Diagnostics export">
                 <div className="cache-manager-head">
                   <span>
                     <strong>Diagnostics</strong>
@@ -3110,6 +3141,8 @@ function App() {
                 </div>
                 <small>{m4bCapabilityText(m4bCapability)}</small>
               </div>
+              </div>
+              ) : null}
             </fieldset>
 
             {engine === 'kokoro' ? (

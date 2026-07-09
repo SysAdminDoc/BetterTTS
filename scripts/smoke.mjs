@@ -187,7 +187,7 @@ async function openSeededApp(context, jobId) {
   await page.getByText('BetterTTS').first().waitFor({ timeout: 20000 })
   await seedCompletedQueueJob(page, jobId)
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.getByLabel('Generation queue').waitFor({ timeout: 20000 })
+  await page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
   return { page, messages }
 }
 
@@ -212,7 +212,7 @@ async function runSmoke() {
     if (!title.includes('BetterTTS')) throw new Error(`Unexpected page title: ${title}`)
     const body = await desktop.page.locator('body').innerText()
     const bodyLower = body.toLowerCase()
-    if (!bodyLower.includes('script') || !bodyLower.includes('control console')) throw new Error('App shell did not render expected content')
+    if (!bodyLower.includes('script') || !bodyLower.includes('properties')) throw new Error('App shell did not render expected content')
     if (/Vite Error|Internal Server Error|Failed to compile/i.test(body)) throw new Error('Framework error overlay detected')
 
     console.log('Checking theme and diagnostics...')
@@ -221,6 +221,7 @@ async function runSmoke() {
     const afterTheme = await desktop.page.evaluate(() => document.documentElement.dataset.theme)
     if (!afterTheme || afterTheme === beforeTheme) throw new Error(`Theme toggle did not change theme; got ${afterTheme}`)
 
+    await desktop.page.getByRole('button', { name: 'System & diagnostics' }).click()
     await desktop.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
     await desktop.page.getByRole('button', { name: 'Copy JSON' }).click()
     await desktop.page.getByText('Diagnostics copied to clipboard.').waitFor({ timeout: 20000 })
@@ -248,6 +249,7 @@ async function runSmoke() {
     await desktop.page.getByText('Import supports .txt, .epub, .pdf, and .docx files.').waitFor({ timeout: 20000 })
 
     console.log('Checking queue playback controls...')
+    await desktop.page.getByRole('tab', { name: /Queue/ }).click()
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })
@@ -268,12 +270,22 @@ async function runSmoke() {
     await chunkEditor.getByRole('button', { name: 'Cancel' }).click()
 
     console.log('Checking library playback controls...')
+    await desktop.page.getByRole('tab', { name: /Library/ }).click()
     const libraryPanel = desktop.page.getByLabel('Clip library')
     await libraryPanel.scrollIntoViewIfNeeded()
     await libraryPanel.getByRole('button', { name: 'Play' }).click()
     await libraryPanel.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByText(/Resumed at/).waitFor({ timeout: 20000 })
+    await desktop.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+    await desktop.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
+    if ((await desktop.page.evaluate(() => document.documentElement.dataset.theme)) === 'light') await desktop.page.getByRole('button', { name: /Switch to dark theme/ }).click()
+    await desktop.page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      document.scrollingElement?.scrollTo(0, 0)
+      document.querySelector('.settings-scroll')?.scrollTo(0, 0)
+    })
+    await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'desktop.png'), fullPage: false })
     await desktopContext.close()
 
@@ -300,12 +312,23 @@ async function runSmoke() {
       })
     })
     const mobile = await openSeededApp(mobileContext, 'smoke-unsupported')
+    await mobile.page.getByRole('tab', { name: /Queue/ }).click()
     const fallbackText = await mobile.page.locator('.capability-strip').innerText()
     if (!fallbackText.includes('chaptered ZIP fallback')) throw new Error(`Missing M4B fallback copy: ${fallbackText}`)
     await mobile.page.getByRole('button', { name: 'ZIP fallback' }).waitFor({ timeout: 20000 })
     const m4bButton = mobile.page.getByRole('button', { name: 'M4B' })
     if (!(await m4bButton.isDisabled())) throw new Error('M4B button should be disabled in unsupported AAC smoke state')
+    await mobile.page.getByRole('button', { name: 'System & diagnostics' }).click()
     await mobile.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
+    await mobile.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+    await mobile.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
+    if ((await mobile.page.evaluate(() => document.documentElement.dataset.theme)) === 'dark') await mobile.page.getByRole('button', { name: /Switch to light theme/ }).click()
+    await mobile.page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      document.scrollingElement?.scrollTo(0, 0)
+      document.querySelector('.settings-scroll')?.scrollTo(0, 0)
+    })
+    await mobile.page.waitForTimeout(200)
     await mobile.page.screenshot({ path: join(smokeDir, 'mobile.png'), fullPage: false })
     await mobileContext.close()
     await browser.close()
