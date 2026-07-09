@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-119%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-122%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, and KittenTTS run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
@@ -49,8 +49,8 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
 ### Export & Output
-- **WAV** (lossless), **MP3** (96/128/160 kbps), **Opus/WebM**, and **chaptered M4B audiobook** export
-- **Per-line generation** with individual files + automatic ZIP bundle
+- **WAV** (lossless), **MP3** (96/128/160 kbps), **Opus/WebM**, and **chaptered M4B audiobook** export with AAC capability preflight
+- **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
@@ -74,6 +74,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
 - **EPUB import** — chapter-aware parsing with TOC title extraction, queued for batch generation
 - **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
+- **M4B preflight + fallback** — queue UI reports WebCodecs AAC support before export; Firefox/Linux AAC gaps get a chaptered ZIP/Opus fallback path
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
@@ -115,12 +116,12 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 | Build | Vite 8 |
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu` |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
-| M4B Export | WebCodecs AAC + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
+| M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
 | Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (119 assertions across 16 suites) |
+| Testing | Vitest (122 assertions across 16 suites) |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

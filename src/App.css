@@ -352,6 +352,35 @@ button:disabled {
   box-shadow: var(--shadow-sm);
 }
 
+.capability-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 54%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.capability-strip svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.capability-strip.ok {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  color: color-mix(in srgb, var(--success) 72%, var(--text));
+}
+
+.capability-strip.warn {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+  color: color-mix(in srgb, var(--warning) 72%, var(--text));
+}
+
 .empty-output,
 .result-row {
   border: 1px solid var(--border-strong);

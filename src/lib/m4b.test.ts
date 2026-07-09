@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aacAudioSpecificConfig, buildM4bContainer, normalizeM4bChapters } from './m4b.ts'
+import { aacAudioSpecificConfig, buildM4bContainer, checkM4bCapability, normalizeM4bChapters } from './m4b.ts'
 
 type ParsedBox = {
   type: string
@@ -95,6 +95,51 @@ describe('normalizeM4bChapters', () => {
 describe('aacAudioSpecificConfig', () => {
   it('writes AAC-LC config bytes for 24 kHz mono', () => {
     expect(Array.from(aacAudioSpecificConfig(24000, 1))).toEqual([0x13, 0x08])
+  })
+})
+
+describe('checkM4bCapability', () => {
+  it('reports the first supported AAC sample rate', async () => {
+    const capability = await checkM4bCapability({
+      audioData: {},
+      audioContext: {},
+      audioEncoder: {
+        isConfigSupported: async (config: AudioEncoderConfig) => ({ supported: config.sampleRate === 44100 }),
+      },
+      navigator: { platform: 'Win32', userAgent: 'Chromium' },
+    })
+
+    expect(capability).toMatchObject({
+      supported: true,
+      codec: 'mp4a.40.2',
+      sampleRate: 44100,
+    })
+  })
+
+  it('explains missing WebCodecs with a Firefox-specific ZIP fallback', async () => {
+    const capability = await checkM4bCapability({
+      audioContext: {},
+      navigator: { platform: 'Win32', userAgent: 'Firefox/140.0' },
+    })
+
+    expect(capability.supported).toBe(false)
+    expect(capability.message).toContain('Firefox')
+    expect(capability.message).toContain('chaptered ZIP fallback')
+  })
+
+  it('explains AAC gaps on Linux browser builds', async () => {
+    const capability = await checkM4bCapability({
+      audioData: {},
+      audioContext: {},
+      audioEncoder: {
+        isConfigSupported: async () => ({ supported: false }),
+      },
+      navigator: { platform: 'Linux x86_64', userAgent: 'Chrome/140.0 Linux' },
+    })
+
+    expect(capability).toMatchObject({ supported: false, reason: 'aac-unsupported' })
+    expect(capability.message).toContain('Linux')
+    expect(capability.message).toContain('Opus/WebM')
   })
 })
 

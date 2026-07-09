@@ -16,6 +16,30 @@ export type M4bProgress = {
   total: number
 }
 
+export type M4bCapability =
+  | {
+    supported: true
+    codec: typeof AAC_CODEC
+    sampleRate: number
+    message: string
+  }
+  | {
+    supported: false
+    reason: 'missing-webcodecs' | 'missing-audio-context' | 'aac-unsupported' | 'check-failed'
+    message: string
+  }
+
+type AudioEncoderSupportProbe = {
+  isConfigSupported(config: AudioEncoderConfig): Promise<{ supported?: boolean }>
+}
+
+export type M4bCapabilityEnvironment = {
+  audioEncoder?: AudioEncoderSupportProbe
+  audioData?: unknown
+  audioContext?: unknown
+  navigator?: Pick<Navigator, 'platform' | 'userAgent'>
+}
+
 export type AacFrame = {
   data: Uint8Array
   duration: number
@@ -51,6 +75,7 @@ const MAX_CHPL_TITLE_BYTES = 255
 const AAC_SUPPORT_TIMEOUT_MS = 5000
 const AUDIO_DECODE_TIMEOUT_MS = 15000
 const AAC_FLUSH_TIMEOUT_MS = 20000
+const AAC_CANDIDATE_SAMPLE_RATES = [48000, 44100, 32000, 24000]
 const TEXT_SAMPLE_ENTRY_STUB = new Uint8Array([
   0x00, 0x00, 0x00, 0x01,
   0x00, 0x00,
@@ -74,7 +99,51 @@ const ENCD_BOX = new Uint8Array([
 ])
 
 export function m4bSupported(): boolean {
-  return typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined' && typeof AudioContext !== 'undefined'
+  return hasM4bBaseSupport(readM4bEnvironment())
+}
+
+export async function checkM4bCapability(env = readM4bEnvironment()): Promise<M4bCapability> {
+  if (!env.audioEncoder || !env.audioData) {
+    return {
+      supported: false,
+      reason: 'missing-webcodecs',
+      message: m4bFallbackMessage(env.navigator, 'This browser does not expose WebCodecs AudioEncoder/AudioData.'),
+    }
+  }
+
+  if (!env.audioContext) {
+    return {
+      supported: false,
+      reason: 'missing-audio-context',
+      message: m4bFallbackMessage(env.navigator, 'This browser does not expose AudioContext for decoding queue chunks.'),
+    }
+  }
+
+  try {
+    const sampleRate = await findSupportedAacSampleRate(env.audioEncoder)
+    if (sampleRate != null) {
+      return {
+        supported: true,
+        codec: AAC_CODEC,
+        sampleRate,
+        message: `M4B AAC export available (${sampleRate} Hz AAC-LC).`,
+      }
+    }
+    return {
+      supported: false,
+      reason: 'aac-unsupported',
+      message: m4bFallbackMessage(env.navigator, 'This browser does not expose the AAC encoder required for M4B.'),
+    }
+  } catch (err) {
+    return {
+      supported: false,
+      reason: 'check-failed',
+      message: m4bFallbackMessage(
+        env.navigator,
+        err instanceof Error ? err.message : 'Could not verify this browser\'s AAC encoder.',
+      ),
+    }
+  }
 }
 
 export function normalizeM4bChapters(chunks: M4bChunkSource[]): M4bChapterSource[] {
@@ -172,21 +241,66 @@ async function decodeChapterSources(
 }
 
 async function chooseAacSampleRate(preferredRate: number): Promise<number> {
-  const rates = Array.from(new Set([preferredRate, 48000, 44100, 32000, 24000]))
-  for (const sampleRate of rates) {
-    const support = await withTimeout(
-      AudioEncoder.isConfigSupported({
-        codec: AAC_CODEC,
-        sampleRate,
-        numberOfChannels: 1,
-        bitrate: 128000,
-      }),
-      AAC_SUPPORT_TIMEOUT_MS,
-      'Timed out checking this browser\'s AAC encoder support.',
-    )
-    if (support.supported) return sampleRate
-  }
+  const rates = Array.from(new Set([preferredRate, ...AAC_CANDIDATE_SAMPLE_RATES]))
+  const sampleRate = await findSupportedAacSampleRate(AudioEncoder, rates)
+  if (sampleRate != null) return sampleRate
   throw new Error('This browser does not expose a WebCodecs AAC encoder.')
+}
+
+async function findSupportedAacSampleRate(
+  audioEncoder: AudioEncoderSupportProbe,
+  rates = AAC_CANDIDATE_SAMPLE_RATES,
+): Promise<number | null> {
+  for (const sampleRate of rates) {
+    try {
+      const support = await withTimeout(
+        audioEncoder.isConfigSupported({
+          codec: AAC_CODEC,
+          sampleRate,
+          numberOfChannels: 1,
+          bitrate: 128000,
+        }),
+        AAC_SUPPORT_TIMEOUT_MS,
+        'Timed out checking this browser\'s AAC encoder support.',
+      )
+      if (support.supported) return sampleRate
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Timed out')) throw err
+    }
+  }
+  return null
+}
+
+function hasM4bBaseSupport(env: M4bCapabilityEnvironment): boolean {
+  return Boolean(env.audioEncoder && env.audioData && env.audioContext)
+}
+
+function readM4bEnvironment(): M4bCapabilityEnvironment {
+  return {
+    audioEncoder: typeof AudioEncoder === 'undefined' ? undefined : AudioEncoder,
+    audioData: typeof AudioData === 'undefined' ? undefined : AudioData,
+    audioContext: typeof AudioContext === 'undefined' ? undefined : AudioContext,
+    navigator: typeof navigator === 'undefined' ? undefined : navigator,
+  }
+}
+
+function m4bFallbackMessage(navigatorLike: M4bCapabilityEnvironment['navigator'], reason: string): string {
+  const userAgent = navigatorLike?.userAgent ?? ''
+  const platform = navigatorLike?.platform ?? ''
+  const lowerUserAgent = userAgent.toLowerCase()
+  const lowerPlatform = platform.toLowerCase()
+  const fallback = 'Use the chaptered ZIP fallback; choose Opus/WebM for smaller files when the browser supports Opus.'
+
+  if (lowerUserAgent.includes('firefox')) {
+    return `${reason} Firefox does not provide WebCodecs AAC export here. ${fallback}`
+  }
+  if (lowerUserAgent.includes('linux') || lowerPlatform.includes('linux')) {
+    return `${reason} Some Linux browser builds omit AAC encoding. ${fallback}`
+  }
+  if (lowerUserAgent.includes('safari') && !lowerUserAgent.includes('chrome') && !lowerUserAgent.includes('chromium')) {
+    return `${reason} Safari/WebKit support varies by version. ${fallback}`
+  }
+  return `${reason} ${fallback}`
 }
 
 async function encodeAacChapters(

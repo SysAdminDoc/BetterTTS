@@ -30,7 +30,7 @@ import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './lib/library.ts'
-import { buildM4bFromBlobs, m4bSupported } from './lib/m4b.ts'
+import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
   type ModelCacheEngineId,
@@ -145,6 +145,15 @@ function queueEngineText(job: QueueJob): string {
   if (job.engine === 'supertonic') return `Supertonic - ${job.supertonicSteps ?? SUPERTONIC_DEFAULT_STEPS} steps`
   if (job.engine === 'kitten') return `KittenTTS - ${(job.kittenModel ?? KITTEN_DEFAULT_MODEL).toUpperCase()}`
   return `Kokoro - ${job.language ?? 'English US'}`
+}
+
+function m4bCapabilityTone(capability: M4bCapability | null): 'ok' | 'warn' | 'muted' {
+  if (capability == null) return 'muted'
+  return capability.supported ? 'ok' : 'warn'
+}
+
+function m4bCapabilityText(capability: M4bCapability | null): string {
+  return capability?.message ?? 'Checking M4B WebCodecs AAC support...'
 }
 
 async function getDurationLabel(blob: Blob) {
@@ -429,6 +438,7 @@ function App() {
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [m4bExportingJobId, setM4bExportingJobId] = useState<string | null>(null)
+  const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
@@ -458,6 +468,7 @@ function App() {
   const lineCount = lineNumbers.length
   const cacheRows = modelCache?.engines ?? []
   const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
+  const m4bExportReady = m4bCapability?.supported === true
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
     : !usableText.trim()
@@ -504,6 +515,26 @@ function App() {
   useEffect(() => {
     refreshModelCacheStatus().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    checkM4bCapability()
+      .then((capability) => {
+        if (!cancelled) setM4bCapability(capability)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setM4bCapability({
+            supported: false,
+            reason: 'check-failed',
+            message: err instanceof Error ? err.message : 'Could not verify M4B AAC support.',
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -1423,14 +1454,38 @@ function App() {
 
     const { zip } = await import('fflate')
     const entries: Record<string, Uint8Array> = {}
+    const manifestChunks: Array<{
+      index: number
+      filename: string
+      text: string
+      chapterTitle?: string
+      chapterIndex?: number
+    }> = []
     for (const chunk of doneChunks) {
       const blob = await getChunkBlob(jobId, chunk.index)
       if (blob) {
         const ext = formatExtension(job.format)
-        entries[`${String(chunk.index + 1).padStart(3, '0')}-${slugify(chunk.text)}${ext}`] =
-          new Uint8Array(await blob.arrayBuffer())
+        const filename = `${String(chunk.index + 1).padStart(3, '0')}-${slugify(chunk.text)}${ext}`
+        entries[filename] = new Uint8Array(await blob.arrayBuffer())
+        manifestChunks.push({
+          index: chunk.index,
+          filename,
+          text: chunk.text,
+          chapterTitle: chunk.chapterTitle,
+          chapterIndex: chunk.chapterIndex,
+        })
       }
     }
+    entries['chapters.json'] = new TextEncoder().encode(JSON.stringify({
+      app: 'BetterTTS',
+      title: job.title,
+      engine: job.engine,
+      voice: job.voice,
+      format: job.format,
+      bitrate: job.bitrate,
+      exportedAt: new Date().toISOString(),
+      chunks: manifestChunks,
+    }, null, 2))
     const zipped = await new Promise<Uint8Array>((resolve, reject) => {
       zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)))
     })
@@ -1450,8 +1505,13 @@ function App() {
       showToast({ tone: 'warn', message: 'Finish every queue chunk before exporting M4B.' })
       return
     }
-    if (!m4bSupported()) {
-      showToast({ tone: 'warn', message: 'M4B export requires Chromium or another browser with WebCodecs AAC.' })
+    let capability = m4bCapability
+    if (capability == null) {
+      capability = await checkM4bCapability()
+      setM4bCapability(capability)
+    }
+    if (!capability.supported) {
+      showToast({ tone: 'warn', message: capability.message })
       return
     }
 
@@ -1734,6 +1794,10 @@ function App() {
                 <div className="section-heading">
                   <span>Queue ({queueJobs.length})</span>
                 </div>
+                <div className={`capability-strip ${m4bCapabilityTone(m4bCapability)}`}>
+                  <Info size={15} aria-hidden="true" />
+                  <span>{m4bCapabilityText(m4bCapability)}</span>
+                </div>
                 <div className="result-list">
                   {queueJobs.map((job) => {
                     const { done, total, pct } = jobProgress(job)
@@ -1762,17 +1826,21 @@ function App() {
                             </button>
                           ) : null}
                           {done > 0 ? (
-                            <button type="button" onClick={() => downloadJobZip(job.id)}>
+                            <button
+                              type="button"
+                              onClick={() => downloadJobZip(job.id)}
+                              title={done === total && !m4bExportReady ? 'Download chaptered ZIP fallback with chapters.json.' : 'Download completed chunks as a chaptered ZIP.'}
+                            >
                               <Download size={16} aria-hidden="true" />
-                              ZIP
+                              {done === total && !m4bExportReady ? 'ZIP fallback' : 'ZIP'}
                             </button>
                           ) : null}
                           {done === total && total > 0 ? (
                             <button
                               type="button"
                               onClick={() => downloadJobM4b(job.id)}
-                              disabled={m4bExportingJobId !== null || !m4bSupported()}
-                              title={m4bSupported() ? 'Export chaptered M4B' : 'M4B export requires WebCodecs AAC support.'}
+                              disabled={m4bExportingJobId !== null || !m4bExportReady}
+                              title={m4bExportReady ? 'Export chaptered M4B' : m4bCapabilityText(m4bCapability)}
                             >
                               {m4bExportingJobId === job.id ? <Loader2 size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
                               M4B
