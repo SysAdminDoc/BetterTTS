@@ -4,7 +4,6 @@
 // bound (DirectML → CPU fallback), the model I/O signature, and a forward-pass
 // latency for a small token sequence. This is the "confirm native beats WASM
 // before wiring the UI" step from the roadmap; it does not do phonemization yet.
-import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import ort from 'onnxruntime-node'
