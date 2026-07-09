@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type QueueJob, deleteJob, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, replaceQueueChunk, saveChunkBlob, saveJob } from './queue.ts'
+import { type QueueJob, deleteJob, deleteJobWithSnapshot, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, replaceQueueChunk, restoreQueueJob, saveChunkBlob, saveJob } from './queue.ts'
 
 function makeJob(id: string, chunks = 3): QueueJob {
   return {
@@ -72,6 +72,19 @@ describe('queue', () => {
     expect(await getJob('q4')).toBeNull()
     expect(await getChunkBlob('q4', 0)).toBeNull()
     expect(await getChunkBlob('q4', 1)).toBeNull()
+  })
+
+  it('restores a deleted queue job and all saved chunk audio', async () => {
+    await saveJob(makeJob('undo-job', 2))
+    await saveChunkBlob('undo-job', 0, new Blob(['chunk zero']))
+    await saveChunkBlob('undo-job', 1, new Blob(['chunk one']))
+    const snapshot = await deleteJobWithSnapshot('undo-job')
+    expect(snapshot?.blobs.map((entry) => entry.chunkIndex)).toEqual([0, 1])
+    expect(await getJob('undo-job')).toBeNull()
+    await restoreQueueJob(snapshot!)
+    expect((await getJob('undo-job'))?.title).toBe('Job undo-job')
+    expect(await (await getChunkBlob('undo-job', 0))!.text()).toBe('chunk zero')
+    expect(await (await getChunkBlob('undo-job', 1))!.text()).toBe('chunk one')
   })
 
   it('jobProgress computes percentages', () => {

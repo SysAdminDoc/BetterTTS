@@ -35,6 +35,11 @@ export type QueueJob = {
   chunks: QueueChunk[]
 }
 
+export type QueueJobSnapshot = {
+  job: QueueJob
+  blobs: Array<{ chunkIndex: number; blob: Blob }>
+}
+
 const DB_NAME = 'bettertts-queue'
 const DB_VERSION = 2
 const JOBS_STORE = 'jobs'
@@ -91,6 +96,13 @@ function txDone(tx: IDBTransaction): Promise<void> {
   })
 }
 
+function requestValue<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
 export async function saveJob(job: QueueJob): Promise<void> {
   const db = await openDB()
   const tx = db.transaction(JOBS_STORE, 'readwrite')
@@ -129,6 +141,44 @@ export async function deleteJob(id: string): Promise<void> {
   // Chunk blobs are keyed as "{jobId}:{chunkIndex}" — a bounded range delete
   // avoids materializing every stored audio blob just to prefix-match keys.
   tx.objectStore(CHUNKS_STORE).delete(IDBKeyRange.bound(`${id}:`, `${id}:￿`))
+  await txDone(tx)
+}
+
+export async function deleteJobWithSnapshot(id: string): Promise<QueueJobSnapshot | null> {
+  const db = await openDB()
+  const tx = db.transaction([JOBS_STORE, CHUNKS_STORE], 'readwrite')
+  const done = txDone(tx)
+  const jobs = tx.objectStore(JOBS_STORE)
+  const chunks = tx.objectStore(CHUNKS_STORE)
+  const range = IDBKeyRange.bound(`${id}:`, `${id}:\uffff`)
+  const [rawJob, keys, blobs] = await Promise.all([
+    requestValue(jobs.get(id)),
+    requestValue(chunks.getAllKeys(range)),
+    requestValue(chunks.getAll(range)) as Promise<Blob[]>,
+  ])
+  jobs.delete(id)
+  chunks.delete(range)
+  await done
+
+  if (!rawJob) return null
+  return {
+    job: migrateQueueJob(rawJob),
+    blobs: keys.flatMap((key, index) => {
+      const chunkIndex = Number(String(key).slice(id.length + 1))
+      const blob = blobs[index]
+      return Number.isInteger(chunkIndex) && blob ? [{ chunkIndex, blob }] : []
+    }),
+  }
+}
+
+export async function restoreQueueJob(snapshot: QueueJobSnapshot): Promise<void> {
+  const db = await openDB()
+  const tx = db.transaction([JOBS_STORE, CHUNKS_STORE], 'readwrite')
+  tx.objectStore(JOBS_STORE).put(migrateQueueJob(snapshot.job))
+  const chunks = tx.objectStore(CHUNKS_STORE)
+  for (const entry of snapshot.blobs) {
+    chunks.put(entry.blob, `${snapshot.job.id}:${entry.chunkIndex}`)
+  }
   await txDone(tx)
 }
 

@@ -1866,6 +1866,24 @@ footer {
   border-color: color-mix(in srgb, var(--danger) 62%, var(--border));
 }
 
+.toast-action {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--heading);
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
+}
+
 .fatal-shell {
   display: grid;
   min-height: 100svh;

@@ -12,6 +12,11 @@ export type ClipRecord = {
   cues?: Cue[]
 }
 
+export type ClipSnapshot = {
+  record: ClipRecord
+  blob: Blob | null
+}
+
 const DB_NAME = 'bettertts-library'
 const DB_VERSION = 1
 const CLIPS_STORE = 'clips'
@@ -70,6 +75,13 @@ function txDone(tx: IDBTransaction): Promise<void> {
   })
 }
 
+function requestValue<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
 export async function saveClip(record: ClipRecord, blob: Blob): Promise<void> {
   const db = await openDB()
   const tx = db.transaction([CLIPS_STORE, BLOBS_STORE], 'readwrite')
@@ -110,11 +122,65 @@ export async function deleteClip(id: string): Promise<void> {
   await txDone(tx)
 }
 
+export async function deleteClipWithSnapshot(id: string): Promise<ClipSnapshot | null> {
+  const db = await openDB()
+  const tx = db.transaction([CLIPS_STORE, BLOBS_STORE], 'readwrite')
+  const done = txDone(tx)
+  const clips = tx.objectStore(CLIPS_STORE)
+  const blobs = tx.objectStore(BLOBS_STORE)
+  const [record, blob] = await Promise.all([
+    requestValue(clips.get(id)) as Promise<ClipRecord | undefined>,
+    requestValue(blobs.get(id)) as Promise<Blob | undefined>,
+  ])
+  if (record) {
+    clips.delete(id)
+    blobs.delete(id)
+  }
+  await done
+  return record ? { record, blob: blob ?? null } : null
+}
+
 export async function clearLibrary(): Promise<void> {
   const db = await openDB()
   const tx = db.transaction([CLIPS_STORE, BLOBS_STORE], 'readwrite')
   tx.objectStore(CLIPS_STORE).clear()
   tx.objectStore(BLOBS_STORE).clear()
+  await txDone(tx)
+}
+
+export async function clearLibraryWithSnapshot(): Promise<ClipSnapshot[]> {
+  const db = await openDB()
+  const tx = db.transaction([CLIPS_STORE, BLOBS_STORE], 'readwrite')
+  const done = txDone(tx)
+  const clips = tx.objectStore(CLIPS_STORE)
+  const blobs = tx.objectStore(BLOBS_STORE)
+  const [records, blobKeys, blobValues] = await Promise.all([
+    requestValue(clips.getAll()) as Promise<ClipRecord[]>,
+    requestValue(blobs.getAllKeys()),
+    requestValue(blobs.getAll()) as Promise<Blob[]>,
+  ])
+  clips.clear()
+  blobs.clear()
+  await done
+
+  const recordsById = new Map(records.map((record) => [record.id, record]))
+  return blobKeys.flatMap((key, index) => {
+    const record = recordsById.get(String(key))
+    const blob = blobValues[index]
+    return record && blob ? [{ record, blob }] : []
+  })
+}
+
+export async function restoreClipSnapshots(snapshots: ClipSnapshot[]): Promise<void> {
+  if (snapshots.length === 0) return
+  const db = await openDB()
+  const tx = db.transaction([CLIPS_STORE, BLOBS_STORE], 'readwrite')
+  const clips = tx.objectStore(CLIPS_STORE)
+  const blobs = tx.objectStore(BLOBS_STORE)
+  for (const snapshot of snapshots) {
+    clips.put(snapshot.record)
+    if (snapshot.blob) blobs.put(snapshot.blob, snapshot.record.id)
+  }
   await txDone(tx)
 }
 

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, saveClip } from './library.ts'
+import { type ClipRecord, clearLibrary, clearLibraryWithSnapshot, deleteClip, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './library.ts'
 
 function record(id: string, createdAt: number): ClipRecord {
   return {
@@ -71,6 +71,47 @@ describe('library', () => {
     await saveClip(record('a', 1), new Blob(['a']))
     await saveClip(record('b', 2), new Blob(['b']))
     await clearLibrary()
+    expect(await listClips()).toEqual([])
+  })
+
+  it('restores a deleted clip from its audio snapshot', async () => {
+    await saveClip(record('undo-one', 1), new Blob(['recover me']))
+    const snapshot = await deleteClipWithSnapshot('undo-one')
+    expect(snapshot?.record.id).toBe('undo-one')
+    expect(await listClips()).toEqual([])
+    await restoreClipSnapshots(snapshot ? [snapshot] : [])
+    expect((await listClips()).map((clip) => clip.id)).toEqual(['undo-one'])
+    expect(await (await getClipBlob('undo-one'))!.text()).toBe('recover me')
+  })
+
+  it('restores every clip after a clear-library snapshot', async () => {
+    await saveClip(record('undo-a', 1), new Blob(['audio a']))
+    await saveClip(record('undo-b', 2), new Blob(['audio b']))
+    const snapshots = await clearLibraryWithSnapshot()
+    expect(snapshots).toHaveLength(2)
+    expect(await listClips()).toEqual([])
+    await restoreClipSnapshots(snapshots)
+    expect((await listClips()).map((clip) => clip.id)).toEqual(['undo-b', 'undo-a'])
+    expect(await (await getClipBlob('undo-b'))!.text()).toBe('audio b')
+  })
+
+  it('removes a clip whose audio blob is already missing', async () => {
+    await saveClip(record('missing-audio', 1), new Blob(['temporary']))
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('bettertts-library')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    const tx = db.transaction('blobs', 'readwrite')
+    tx.objectStore('blobs').delete('missing-audio')
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+
+    const snapshot = await deleteClipWithSnapshot('missing-audio')
+    expect(snapshot?.blob).toBeNull()
     expect(await listClips()).toEqual([])
   })
 

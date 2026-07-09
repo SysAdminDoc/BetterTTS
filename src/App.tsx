@@ -49,7 +49,7 @@ import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
-import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, saveClip } from './lib/library.ts'
+import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
@@ -76,7 +76,7 @@ import {
   resetPiperPlusSession,
   synthesizePiperPlus,
 } from './lib/piper-plus.ts'
-import { type QueueEngine, type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, saveChunkBlob, saveJob } from './lib/queue.ts'
+import { type QueueEngine, type QueueJob, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveChunkBlob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
   clearPlaybackState,
@@ -138,6 +138,10 @@ type AudioResult = {
 type Toast = {
   tone: 'ok' | 'warn' | 'error'
   message: string
+  action?: {
+    label: string
+    run: () => void | Promise<void>
+  }
 }
 
 const STARTER_TEXT = `Welcome to BetterTTS — free text-to-speech that runs entirely in your browser.
@@ -514,7 +518,7 @@ function ResultRow({ result, isSpeaking, onReplay, onShare, onSave }: ResultRowP
 
 type LibraryClipRowProps = {
   clip: ClipRecord
-  onDeleted: (clipId: string) => void
+  onDeleted: (snapshot: ClipSnapshot) => void
   onNotice: (toast: Toast) => void
 }
 
@@ -572,18 +576,18 @@ function LibraryClipRow({ clip, onDeleted, onNotice }: LibraryClipRowProps) {
     }
   }
 
-  const removeClip = () => {
+  const removeClip = async () => {
     setBusy('delete')
-    deleteClip(clip.id)
-      .then(() => {
-        if (url) URL.revokeObjectURL(url)
-        onDeleted(clip.id)
-        onNotice({ tone: 'ok', message: `Removed ${shortUiLabel(clip.label, 48)} from the library.` })
-      })
-      .catch(() => {
-        onNotice({ tone: 'error', message: 'Could not remove this saved clip.' })
-      })
-      .finally(() => setBusy(null))
+    try {
+      const snapshot = await deleteClipWithSnapshot(clip.id)
+      if (!snapshot) throw new Error('Saved audio is missing for this clip.')
+      if (url) URL.revokeObjectURL(url)
+      onDeleted(snapshot)
+    } catch (error) {
+      onNotice({ tone: 'error', message: error instanceof Error ? error.message : 'Could not remove this saved clip.' })
+    } finally {
+      setBusy(null)
+    }
   }
 
   return (
@@ -1347,7 +1351,20 @@ function App() {
     toastTimerRef.current = setTimeout(() => {
       setToast((current) => (current?.message === nextToast.message ? null : current))
       toastTimerRef.current = null
-    }, 5500)
+    }, nextToast.action ? 8500 : 5500)
+  }
+
+  async function runToastAction(action: NonNullable<Toast['action']>) {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = null
+    }
+    setToast(null)
+    try {
+      await action.run()
+    } catch {
+      showToast({ tone: 'error', message: 'Could not restore the removed item.' })
+    }
   }
 
   function applyPronunciations(input: string): string {
@@ -2553,9 +2570,21 @@ function App() {
 
   async function removeQueueJob(jobId: string, title: string) {
     try {
-      await deleteJob(jobId)
+      const snapshot = await deleteJobWithSnapshot(jobId)
+      if (!snapshot) throw new Error('Queue job not found.')
       setQueueJobs((prev) => prev.filter((job) => job.id !== jobId))
-      showToast({ tone: 'ok', message: `Removed queue job "${shortUiLabel(title, 56)}".` })
+      showToast({
+        tone: 'ok',
+        message: `Removed queue job "${shortUiLabel(title, 56)}".`,
+        action: {
+          label: 'Undo',
+          run: async () => {
+            await restoreQueueJob(snapshot)
+            setQueueJobs((prev) => [snapshot.job, ...prev.filter((job) => job.id !== snapshot.job.id)].sort((a, b) => b.createdAt - a.createdAt))
+            showToast({ tone: 'ok', message: `Restored queue job "${shortUiLabel(title, 56)}".` })
+          },
+        },
+      })
     } catch {
       showToast({ tone: 'error', message: 'Could not remove this queue job.' })
     }
@@ -2563,9 +2592,20 @@ function App() {
 
   async function clearSavedLibrary() {
     try {
-      await clearLibrary()
+      const snapshots = await clearLibraryWithSnapshot()
       setLibrary([])
-      showToast({ tone: 'ok', message: 'Cleared saved clip library.' })
+      showToast({
+        tone: 'ok',
+        message: snapshots.length > 0 ? `Cleared ${snapshots.length} saved clip${snapshots.length === 1 ? '' : 's'}.` : 'The clip library is already empty.',
+        action: snapshots.length > 0 ? {
+          label: 'Undo',
+          run: async () => {
+            await restoreClipSnapshots(snapshots)
+            setLibrary((await listClips()))
+            showToast({ tone: 'ok', message: `Restored ${snapshots.length} saved clip${snapshots.length === 1 ? '' : 's'}.` })
+          },
+        } : undefined,
+      })
     } catch {
       showToast({ tone: 'error', message: 'Could not clear the clip library.' })
     }
@@ -3128,7 +3168,25 @@ function App() {
                 <ul className="result-list" aria-label="Saved clips">
                   {library.map((clip) => (
                     <li key={clip.id}>
-                      <LibraryClipRow clip={clip} onDeleted={(id) => setLibrary((prev) => prev.filter((c) => c.id !== id))} onNotice={showToast} />
+                      <LibraryClipRow
+                        clip={clip}
+                        onDeleted={(snapshot) => {
+                          setLibrary((prev) => prev.filter((item) => item.id !== snapshot.record.id))
+                          showToast({
+                            tone: 'ok',
+                            message: `Removed ${shortUiLabel(snapshot.record.label, 48)} from the library.`,
+                            action: {
+                              label: 'Undo',
+                              run: async () => {
+                                await restoreClipSnapshots([snapshot])
+                                setLibrary((prev) => [snapshot.record, ...prev.filter((item) => item.id !== snapshot.record.id)].sort((a, b) => b.createdAt - a.createdAt))
+                                showToast({ tone: 'ok', message: `Restored ${shortUiLabel(snapshot.record.label, 48)}.` })
+                              },
+                            },
+                          })
+                        }}
+                        onNotice={showToast}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -4094,6 +4152,11 @@ npm run deploy
                 ? <TriangleAlert size={17} aria-hidden="true" />
                 : <Info size={17} aria-hidden="true" />}
             <span>{toast.message}</span>
+            {toast.action ? (
+              <button type="button" className="toast-action" onClick={() => runToastAction(toast.action!)}>
+                {toast.action.label}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </main>
