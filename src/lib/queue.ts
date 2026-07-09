@@ -150,6 +150,30 @@ export function nextPendingChunk(job: QueueJob): QueueChunk | null {
   return job.chunks.find((c) => c.status === 'pending') ?? null
 }
 
+export function replaceQueueChunk(
+  job: QueueJob,
+  chunkIndex: number,
+  patch: Pick<QueueChunk, 'text' | 'status'> & Partial<Pick<QueueChunk, 'chapterTitle' | 'chapterIndex' | 'duration' | 'cues'>>,
+): QueueJob {
+  return {
+    ...job,
+    chunks: job.chunks.map((chunk) => (
+      chunk.index === chunkIndex
+        ? {
+            ...chunk,
+            text: patch.text,
+            status: patch.status,
+            chapterTitle: patch.chapterTitle,
+            chapterIndex: patch.chapterIndex ?? chunk.chapterIndex,
+            duration: patch.duration,
+            cues: patch.cues,
+            error: undefined,
+          }
+        : chunk
+    )),
+  }
+}
+
 export function migrateQueueJob(raw: unknown): QueueJob {
   const job = raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
   const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' ? job.engine : 'kokoro'

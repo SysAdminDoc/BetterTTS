@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-147%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-148%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, and KittenTTS run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
@@ -74,7 +74,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Cancel button** — abort generation mid-run, keep partial results
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
 - **EPUB import** — chapter-aware parsing with TOC title extraction, queued for batch generation
-- **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, playable completed chunks, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
+- **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, edit/regenerate completed chunks safely, play completed chunks, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
 - **M4B preflight + fallback** — queue UI reports WebCodecs AAC support before export; Firefox/Linux AAC gaps get a chaptered ZIP/Opus fallback path
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
@@ -133,7 +133,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 | Document Import | `pdfjs-dist` for PDF text; `fflate` + XML parsing for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (147 assertions across 19 suites) + Playwright smoke |
+| Testing | Vitest (148 assertions across 19 suites) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

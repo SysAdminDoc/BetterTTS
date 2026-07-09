@@ -48,7 +48,7 @@ import {
   prefetchKokoroQ8Pack,
   readModelCacheStatus,
 } from './lib/model-cache.ts'
-import { type QueueEngine, type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, saveChunkBlob, saveJob } from './lib/queue.ts'
+import { type QueueEngine, type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, saveChunkBlob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
   clearPlaybackState,
@@ -511,12 +511,31 @@ type QueueChunkPlayerProps = {
   jobId: string
   chunk: QueueJob['chunks'][number]
   format: AudioFormat
+  regenerating: boolean
+  onRegenerate: (jobId: string, chunkIndex: number, nextText: string, nextTitle?: string) => Promise<void>
 }
 
-function QueueChunkPlayer({ jobId, chunk, format }: QueueChunkPlayerProps) {
+function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate }: QueueChunkPlayerProps) {
   const [url, setUrl] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [draftText, setDraftText] = useState(chunk.text)
+  const [draftTitle, setDraftTitle] = useState(chunk.chapterTitle ?? '')
   const vttUrl = useMemo(() => cueDataUrl(chunk.cues), [chunk.cues])
   const label = `Chunk ${chunk.index + 1}: ${chunk.chapterTitle ?? chunk.text.slice(0, 38)}`
+
+  useEffect(() => {
+    if (!editing) {
+      setDraftText(chunk.text)
+      setDraftTitle(chunk.chapterTitle ?? '')
+    }
+  }, [chunk.text, chunk.chapterTitle, editing])
+
+  useEffect(() => {
+    setUrl((current) => {
+      if (current) URL.revokeObjectURL(current)
+      return null
+    })
+  }, [chunk.text, chunk.duration])
 
   useEffect(() => {
     return () => {
@@ -545,8 +564,49 @@ function QueueChunkPlayer({ jobId, chunk, format }: QueueChunkPlayerProps) {
         <Play size={15} aria-hidden="true" />
         {url ? 'Loaded' : 'Play'}
       </button>
+      <button type="button" onClick={() => setEditing((value) => !value)} disabled={regenerating}>
+        <FileText size={15} aria-hidden="true" />
+        {editing ? 'Close' : 'Edit'}
+      </button>
       {url ? (
         <PlaybackAudio playbackKey={`queue:${jobId}:${chunk.index}`} src={url} label={label} cues={chunk.cues} vttUrl={vttUrl} />
+      ) : null}
+      {editing ? (
+        <div className="queue-chunk-editor">
+          <label>
+            Chapter title
+            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Chapter title" />
+          </label>
+          <label>
+            Segment text
+            <textarea value={draftText} onChange={(event) => setDraftText(event.target.value)} rows={4} />
+          </label>
+          <div className="queue-chunk-editor-actions">
+            <button
+              type="button"
+              onClick={() => {
+                setDraftText(chunk.text)
+                setDraftTitle(chunk.chapterTitle ?? '')
+                setEditing(false)
+              }}
+              disabled={regenerating}
+            >
+              <X size={15} aria-hidden="true" />
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onRegenerate(jobId, chunk.index, draftText, draftTitle).then(() => setEditing(false)).catch(() => {})
+              }}
+              disabled={regenerating || !draftText.trim()}
+            >
+              {regenerating ? <Loader2 size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+              {draftText === chunk.text ? 'Save title' : 'Regenerate'}
+            </button>
+          </div>
+          <small>Old audio stays available until the replacement segment finishes successfully.</small>
+        </div>
       ) : null}
     </div>
   )
@@ -661,6 +721,7 @@ function App() {
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [regeneratingChunkKey, setRegeneratingChunkKey] = useState<string | null>(null)
   const [m4bExportingJobId, setM4bExportingJobId] = useState<string | null>(null)
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
@@ -1689,6 +1750,45 @@ function App() {
     showToast({ tone: 'ok', message: `Queued "${job.title}" — ${job.chunks.length} chunks.` })
   }
 
+  async function synthesizeQueueChunkBlob(
+    job: QueueJob,
+    text: string,
+    synthesize: LoadedQueueEngine['synthesize'],
+    sampleRate: number,
+  ): Promise<{ blob: Blob; duration: string; cues?: Cue[] }> {
+    const sentences = splitIntoSentences(applyPronunciations(text))
+    const parts: Float32Array[] = []
+    const cues: Cue[] = []
+    let sampleOffset = 0
+    let cueIndex = 1
+    for (const sentence of sentences) {
+      if (abortRef.current) break
+      const audio = await synthesize(sentence, job.voice, job.speed)
+      if (audio) {
+        const startSec = sampleOffset / sampleRate
+        parts.push(audio.samples)
+        sampleOffset += audio.samples.length
+        const endSec = sampleOffset / sampleRate
+        if (audio.wordCues?.length) {
+          for (const cue of audio.wordCues) {
+            const wordStart = Math.max(startSec, Math.min(endSec, startSec + cue.startSec))
+            const wordEnd = Math.max(wordStart, Math.min(endSec, startSec + cue.endSec))
+            if (wordEnd > wordStart) cues.push({ index: cueIndex++, startSec: wordStart, endSec: wordEnd, text: cue.text })
+          }
+        } else {
+          cues.push({ index: cueIndex++, startSec, endSec, text: sentence })
+        }
+      }
+    }
+    if (parts.length === 0) throw new Error('No audio produced')
+    const raw = concatFloat32Arrays(parts)
+    return {
+      blob: await encodeAudio(raw, sampleRate, job.format, job.bitrate),
+      duration: `${(raw.length / sampleRate).toFixed(1)}s`,
+      cues: cues.length > 0 ? cues : undefined,
+    }
+  }
+
   async function resumeJob(jobId: string) {
     if (generatingRef.current) return
     const jobs = await listJobs()
@@ -1714,41 +1814,11 @@ function App() {
         setQueueJobs((prev) => prev.map((j) => (j.id === jobId ? { ...job } : j)))
 
         try {
-          const sentences = splitIntoSentences(applyPronunciations(chunk.text))
-          const parts: Float32Array[] = []
-          const cues: Cue[] = []
-          let sampleOffset = 0
-          let cueIndex = 1
-          for (const sentence of sentences) {
-            if (abortRef.current) break
-            const audio = await synthesize(sentence, job.voice, job.speed)
-            if (audio) {
-              const startSec = sampleOffset / sampleRate
-              parts.push(audio.samples)
-              sampleOffset += audio.samples.length
-              const endSec = sampleOffset / sampleRate
-              if (audio.wordCues?.length) {
-                for (const cue of audio.wordCues) {
-                  const wordStart = Math.max(startSec, Math.min(endSec, startSec + cue.startSec))
-                  const wordEnd = Math.max(wordStart, Math.min(endSec, startSec + cue.endSec))
-                  if (wordEnd > wordStart) cues.push({ index: cueIndex++, startSec: wordStart, endSec: wordEnd, text: cue.text })
-                }
-              } else {
-                cues.push({ index: cueIndex++, startSec, endSec, text: sentence })
-              }
-            }
-          }
-          if (parts.length > 0) {
-            const raw = concatFloat32Arrays(parts)
-            const blob = await encodeAudio(raw, sampleRate, job.format, job.bitrate)
-            await saveChunkBlob(jobId, chunk.index, blob)
-            chunk.duration = `${(raw.length / sampleRate).toFixed(1)}s`
-            chunk.cues = cues.length > 0 ? cues : undefined
-            chunk.status = 'done'
-          } else {
-            chunk.status = 'failed'
-            chunk.error = 'No audio produced'
-          }
+          const replacement = await synthesizeQueueChunkBlob(job, chunk.text, synthesize, sampleRate)
+          await saveChunkBlob(jobId, chunk.index, replacement.blob)
+          chunk.duration = replacement.duration
+          chunk.cues = replacement.cues
+          chunk.status = 'done'
         } catch (err) {
           chunk.status = 'failed'
           chunk.error = err instanceof Error ? err.message : 'Failed'
@@ -1770,6 +1840,78 @@ function App() {
     } finally {
       generatingRef.current = false
       setIsGenerating(false)
+      setActiveJobId(null)
+      setProgress(null)
+      setStatus('Ready')
+    }
+  }
+
+  async function regenerateQueueChunk(jobId: string, chunkIndex: number, nextText: string, nextTitle?: string) {
+    if (generatingRef.current || regeneratingChunkKey) return
+    const cleanText = nextText.trim()
+    if (!cleanText) {
+      showToast({ tone: 'warn', message: 'Segment text cannot be empty.' })
+      return
+    }
+
+    const chunkKey = `${jobId}:${chunkIndex}`
+    const currentJob = queueJobs.find((job) => job.id === jobId)
+    const currentChunk = currentJob?.chunks.find((chunk) => chunk.index === chunkIndex)
+    if (!currentJob || !currentChunk) return
+    const chapterTitle = nextTitle?.trim() || undefined
+
+    if (cleanText === currentChunk.text) {
+      const nextJob = replaceQueueChunk(currentJob, chunkIndex, {
+        text: cleanText,
+        status: currentChunk.status,
+        chapterTitle,
+        chapterIndex: currentChunk.chapterIndex,
+        duration: currentChunk.duration,
+        cues: currentChunk.cues,
+      })
+      await saveJob(nextJob)
+      setQueueJobs((prev) => prev.map((job) => (job.id === jobId ? nextJob : job)))
+      showToast({ tone: 'ok', message: 'Chapter metadata updated.' })
+      return
+    }
+
+    generatingRef.current = true
+    setIsGenerating(true)
+    setRegeneratingChunkKey(chunkKey)
+    setActiveJobId(jobId)
+    abortRef.current = false
+    setStatus(`Regenerating chunk ${chunkIndex + 1}`)
+    setProgress(5)
+
+    try {
+      const jobs = await listJobs()
+      const job = jobs.find((j) => j.id === jobId)
+      const chunk = job?.chunks.find((c) => c.index === chunkIndex)
+      if (!job || !chunk) throw new Error('Queue chunk was removed.')
+      const onProgress = (info: { status?: string }) => {
+        if (info.status === 'ready') setStatus('Model ready')
+      }
+      const { synthesize, sampleRate } = await ensureQueueEngine(job, onProgress)
+      const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate)
+      await saveChunkBlob(jobId, chunkIndex, replacement.blob)
+      const nextJob = replaceQueueChunk(job, chunkIndex, {
+        text: cleanText,
+        status: 'done',
+        chapterTitle,
+        chapterIndex: chunk.chapterIndex,
+        duration: replacement.duration,
+        cues: replacement.cues,
+      })
+      await saveJob(nextJob)
+      setQueueJobs((prev) => prev.map((item) => (item.id === jobId ? nextJob : item)))
+      setProgress(100)
+      showToast({ tone: 'ok', message: `Chunk ${chunkIndex + 1} regenerated. ZIP/M4B exports will use the replacement audio.` })
+    } catch (err) {
+      showToast({ tone: 'error', message: err instanceof Error ? `${err.message} Old audio kept.` : 'Regeneration failed. Old audio kept.' })
+    } finally {
+      generatingRef.current = false
+      setIsGenerating(false)
+      setRegeneratingChunkKey(null)
       setActiveJobId(null)
       setProgress(null)
       setStatus('Ready')
@@ -2231,7 +2373,14 @@ function App() {
                         {doneChunks.length > 0 ? (
                           <div className="queue-chunk-list" aria-label={`${job.title} completed chunks`}>
                             {doneChunks.map((chunk) => (
-                              <QueueChunkPlayer key={chunk.index} jobId={job.id} chunk={chunk} format={job.format} />
+                              <QueueChunkPlayer
+                                key={chunk.index}
+                                jobId={job.id}
+                                chunk={chunk}
+                                format={job.format}
+                                regenerating={regeneratingChunkKey === `${job.id}:${chunk.index}`}
+                                onRegenerate={regenerateQueueChunk}
+                              />
                             ))}
                           </div>
                         ) : null}

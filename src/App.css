@@ -58,6 +58,7 @@
 .result-actions button,
 .playback-tools button,
 .queue-chunk-row > button,
+.queue-chunk-editor-actions button,
 .zip-download,
 .secondary-action,
 footer button {
@@ -301,6 +302,7 @@ footer button {
 .result-actions a,
 .playback-tools button,
 .queue-chunk-row > button,
+.queue-chunk-editor-actions button,
 .zip-download,
 footer button {
   display: inline-flex;
@@ -331,6 +333,7 @@ button:hover,
 .result-actions a:hover,
 .playback-tools button:hover,
 .queue-chunk-row > button:hover,
+.queue-chunk-editor-actions button:hover,
 .zip-download:hover,
 footer button:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
@@ -576,7 +579,7 @@ button:disabled {
 
 .queue-chunk-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   align-items: start;
   gap: 10px;
   padding: 10px;
@@ -616,6 +619,58 @@ button:disabled {
 
 .queue-chunk-row .playback-block {
   grid-column: 1 / -1;
+}
+
+.queue-chunk-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-0));
+}
+
+.queue-chunk-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font: 700 11px/1.2 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.queue-chunk-editor input,
+.queue-chunk-editor textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--control-bg);
+  color: var(--text);
+  font: 500 13px/1.45 var(--sans);
+}
+
+.queue-chunk-editor input {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.queue-chunk-editor textarea {
+  resize: vertical;
+  padding: 9px 10px;
+}
+
+.queue-chunk-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.queue-chunk-editor small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .heading-action {

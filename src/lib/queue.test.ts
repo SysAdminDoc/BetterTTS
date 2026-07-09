@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type QueueJob, deleteJob, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, saveChunkBlob, saveJob } from './queue.ts'
+import { type QueueJob, deleteJob, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, replaceQueueChunk, saveChunkBlob, saveJob } from './queue.ts'
 
 function makeJob(id: string, chunks = 3): QueueJob {
   return {
@@ -135,6 +135,25 @@ describe('queue', () => {
 
     expect(migrated.chunks[0].duration).toBe('1.2s')
     expect(migrated.chunks[0].cues).toEqual([{ index: 1, startSec: 0, endSec: 1.2, text: 'Chunk text.' }])
+  })
+
+  it('replaces one queue chunk without mutating the original job', () => {
+    const job = makeJob('replace', 2)
+    job.chunks[0] = { ...job.chunks[0], status: 'failed', error: 'old failure', chapterTitle: 'Old title' }
+    const next = replaceQueueChunk(job, 0, {
+      text: 'Replacement text.',
+      status: 'done',
+      chapterTitle: 'New title',
+      duration: '2.0s',
+      cues: [{ index: 1, startSec: 0, endSec: 2, text: 'Replacement text.' }],
+    })
+
+    expect(next).not.toBe(job)
+    expect(next.chunks[0]).toMatchObject({ text: 'Replacement text.', status: 'done', chapterTitle: 'New title', duration: '2.0s' })
+    expect(next.chunks[0].error).toBeUndefined()
+    expect(next.chunks[1]).toEqual(job.chunks[1])
+    expect(job.chunks[0].text).toBe('Chunk 0 text.')
+    expect(job.chunks[0].error).toBe('old failure')
   })
 
   it('persists engine-specific queue settings', async () => {
