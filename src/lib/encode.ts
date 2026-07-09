@@ -5,10 +5,20 @@ export type AudioFormat = 'wav' | 'mp3' | 'opus'
 // Kokoro output is 24 kHz → MPEG-2 LSF, whose bitrate table tops out at 160 kbps.
 // lamejs silently clamps higher requests, so the UI must not offer them.
 export const MAX_MP3_KBPS_24K = 160
+// MPEG-1/2/2.5 define exactly these sample rates. lamejs behavior outside the
+// table is undefined (silent garbage), so unsupported rates must fail loudly
+// BEFORE encoding — the ≥88.2 kHz AAC crash class, one format over.
+export const MP3_SUPPORTED_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000] as const
 const DEFAULT_PITCH_SAMPLE_RATE = 24000
 const SIGNALSMITH_RENDER_GUARD_SECONDS = 0.25
 
 export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128): Promise<Blob> {
+  if (samples.length === 0) {
+    return Promise.reject(new Error('No audio samples to encode — the export would be an empty file.'))
+  }
+  if (format === 'mp3' && !(MP3_SUPPORTED_RATES as readonly number[]).includes(sampleRate)) {
+    return Promise.reject(new Error(`MP3 cannot encode ${sampleRate} Hz audio — export WAV or Opus instead.`))
+  }
   if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate)
   if (format === 'opus') return encodeOpus(samples, sampleRate, bitrate)
   return Promise.resolve(new Blob([encodeWav(samples, sampleRate)], { type: 'audio/wav' }))

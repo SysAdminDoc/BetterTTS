@@ -96,6 +96,27 @@ describe('aacAudioSpecificConfig', () => {
   it('writes AAC-LC config bytes for 24 kHz mono', () => {
     expect(Array.from(aacAudioSpecificConfig(24000, 1))).toEqual([0x13, 0x08])
   })
+
+  it('maps every AAC frequency-table rate to its index (incl. the ≥88.2 kHz device rates)', () => {
+    const table = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+    for (const [index, rate] of table.entries()) {
+      const bytes = aacAudioSpecificConfig(rate, 1)
+      expect(bytes.length).toBe(2)
+      // AudioSpecificConfig: 5 bits object type (2=LC), 4 bits frequency index.
+      const frequencyIndex = ((bytes[0] & 0x07) << 1) | (bytes[1] >> 7)
+      expect(frequencyIndex).toBe(index)
+    }
+  })
+
+  it('rejects rates outside the AAC frequency table before muxing', () => {
+    expect(() => aacAudioSpecificConfig(192000, 1)).toThrow(/Unsupported AAC sample rate/)
+    expect(() => aacAudioSpecificConfig(12345, 1)).toThrow(/Unsupported AAC sample rate/)
+  })
+
+  it('rejects impossible channel counts', () => {
+    expect(() => aacAudioSpecificConfig(24000, 0)).toThrow(/channel count/)
+    expect(() => aacAudioSpecificConfig(24000, 8)).toThrow(/channel count/)
+  })
 })
 
 describe('checkM4bCapability', () => {

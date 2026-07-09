@@ -134,6 +134,60 @@ describe('buildWebmOpus', () => {
   })
 })
 
+// Codec boundaries are where this pipeline has historically shipped bugs (MP3
+// bitrate ceiling, Opus timestamp rollover, ≥88.2 kHz AAC, truncated WAV) —
+// exercise the full sample-rate matrix instead of one happy-path rate.
+describe('codec boundary matrix', () => {
+  const engineRates = [22050, 24000, 44100, 48000] as const
+  const deviceRates = [88200, 96000] as const
+
+  function sineAt(rate: number, seconds: number): Float32Array {
+    const out = new Float32Array(Math.round(seconds * rate))
+    for (let i = 0; i < out.length; i++) out[i] = Math.sin((2 * Math.PI * 440 * i) / rate) * 0.5
+    return out
+  }
+
+  it.each([...engineRates, ...deviceRates])('WAV headers round-trip %d Hz exactly', async (rate) => {
+    const samples = sineAt(rate, 0.01)
+    const blob = await encodeAudio(samples, rate, 'wav')
+    const view = new DataView(await blob.arrayBuffer())
+    expect(view.getUint32(24, true)).toBe(rate)
+    expect(view.getUint32(28, true)).toBe(rate * 2)
+    expect(view.getUint32(40, true)).toBe(samples.length * 2)
+    expect(blob.size).toBe(44 + samples.length * 2)
+  })
+
+  it.each(engineRates)('MP3 encodes MPEG-supported rate %d Hz to frame-synced audio', async (rate) => {
+    const blob = await encodeAudio(sineAt(rate, 0.2), rate, 'mp3', 128)
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    expect(bytes.length).toBeGreaterThan(0)
+    expect(bytes[0]).toBe(0xff)
+    expect(bytes[1] & 0xe0).toBe(0xe0)
+  })
+
+  it('MP3 accepts the full MPEG-1 bitrate range at 44.1 kHz', async () => {
+    const blob = await encodeAudio(sineAt(44100, 0.1), 44100, 'mp3', 320)
+    expect(blob.size).toBeGreaterThan(0)
+  })
+
+  it.each(deviceRates)('MP3 rejects non-MPEG rate %d Hz before encoding', async (rate) => {
+    await expect(encodeAudio(sineAt(rate, 0.01), rate, 'mp3', 128)).rejects.toThrow(/MP3 cannot encode/)
+  })
+
+  it.each(['wav', 'mp3', 'opus'] as const)('rejects empty input for %s instead of writing an empty file', async (format) => {
+    await expect(encodeAudio(new Float32Array(0), 24000, format)).rejects.toThrow(/No audio samples/)
+  })
+
+  it('survives a multi-rollover Opus duration (>65.5 s)', async () => {
+    // Two full int16 timestamp ranges: every relative block timestamp must
+    // still fit signed int16 after cluster rolls.
+    const frameCount = Math.ceil((70 * 48000) / 960)
+    const opusFrames = Array.from({ length: frameCount }, () => new Uint8Array([0xfc, 0xff, 0xfe]) as Uint8Array<ArrayBuffer>)
+    const blob = buildWebmOpus(opusFrames, 48000, frameCount * 960, null, 0)
+    expect(blob.size).toBeGreaterThan(0)
+  })
+})
+
 describe('shiftPitch', () => {
   it('returns the input untouched at 0 semitones', async () => {
     const samples = sine(0.2)
