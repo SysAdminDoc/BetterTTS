@@ -714,6 +714,25 @@ button:disabled {
   gap: 10px;
 }
 
+/* Result/queue/library lists are semantic <ul>s so screen readers announce
+   item counts — strip the browser list chrome without touching the grid. */
+ul.result-list,
+ul.queue-chunk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.result-list > li,
+ul.queue-chunk-list > li {
+  min-width: 0;
+}
+
+/* Failure/completeness strips inside a queue job row span the full row grid. */
+.queue-job-row .capability-strip {
+  grid-column: 1 / -1;
+}
+
 .result-row {
   display: grid;
   grid-template-columns: minmax(190px, 1fr) minmax(210px, 0.85fr) auto;

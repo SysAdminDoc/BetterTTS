@@ -869,6 +869,38 @@ function App() {
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
+  const outputPanelRef = useRef<HTMLElement | null>(null)
+  const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
+  const advancedSectionRef = useRef<HTMLDivElement | null>(null)
+  const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
+  const systemToolsSectionRef = useRef<HTMLDivElement | null>(null)
+  const pronunciationsToggleRef = useRef<HTMLButtonElement | null>(null)
+  const pronunciationsSectionRef = useRef<HTMLDivElement | null>(null)
+
+  // Escape while focus is inside an expanded fold collapses it and returns
+  // focus to its toggle, so keyboard users are never stranded in a
+  // collapsed-away subtree. Scoped by containment — Escape elsewhere is inert.
+  useEffect(() => {
+    function onEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      const target = event.target instanceof Node ? event.target : null
+      if (!target) return
+      const folds: Array<[HTMLElement | null, () => void, HTMLButtonElement | null]> = [
+        [advancedSectionRef.current, () => setShowAdvanced(false), advancedToggleRef.current],
+        [systemToolsSectionRef.current, () => setShowSystemTools(false), systemToolsToggleRef.current],
+        [pronunciationsSectionRef.current, () => setShowPronunciations(false), pronunciationsToggleRef.current],
+      ]
+      for (const [container, collapse, toggle] of folds) {
+        if (container?.contains(target)) {
+          collapse()
+          toggle?.focus()
+          return
+        }
+      }
+    }
+    document.addEventListener('keydown', onEscape)
+    return () => document.removeEventListener('keydown', onEscape)
+  }, [])
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1761,6 +1793,11 @@ function App() {
     } else {
       setStatus('Local audio ready')
       showToast({ tone: 'ok', message: opts.successMessage ?? 'Audio generated locally in your browser.' })
+    }
+    if (!abortRef.current && generated.length > 0) {
+      // Land keyboard/screen-reader focus on the fresh results instead of
+      // leaving it stranded on the Generate button.
+      outputPanelRef.current?.focus()
     }
     } finally {
       closeStreamContext()
@@ -2863,6 +2900,8 @@ function App() {
                 id="generated-output"
                 role="tabpanel"
                 aria-label="Generated audio"
+                ref={outputPanelRef}
+                tabIndex={-1}
               >
               <div className="output-session-card">
                 <div>
@@ -2904,24 +2943,27 @@ function App() {
               {results.length === 0 ? (
                 <p className="output-empty-note">Choose a voice, review the script, then generate a preview or queue a resumable export.</p>
               ) : (
-                <div className="result-list">
+                <ul className="result-list" aria-label="Generated clips">
                   {results.map((result) => (
-                    <ResultRow
-                      key={result.id}
-                      result={result}
-                      isSpeaking={isSpeaking}
-                      onReplay={replayBrowser}
-                      onShare={shareResult}
-                      onSave={saveWithPicker}
-                    />
+                    <li key={result.id}>
+                      <ResultRow
+                        result={result}
+                        isSpeaking={isSpeaking}
+                        onReplay={replayBrowser}
+                        onShare={shareResult}
+                        onSave={saveWithPicker}
+                      />
+                    </li>
                   ))}
                   {zipUrl ? (
-                    <a className="zip-download" href={zipUrl} download={zipName}>
-                      <Download size={17} aria-hidden="true" />
-                      Download all ZIP
-                    </a>
+                    <li>
+                      <a className="zip-download" href={zipUrl} download={zipName}>
+                        <Download size={17} aria-hidden="true" />
+                        Download all ZIP
+                      </a>
+                    </li>
                   ) : null}
-                </div>
+                </ul>
               )}
               <p className="privacy-note">
                 <Info size={16} aria-hidden="true" />
@@ -2939,7 +2981,7 @@ function App() {
                   <Info size={15} aria-hidden="true" />
                   <span>{m4bCapabilityText(m4bCapability)}</span>
                 </div>
-                <div className="result-list">
+                <ul className="result-list" aria-label="Queued jobs">
                   {queueJobs.map((job) => {
                     const { done, total, pct } = jobProgress(job)
                     const isActive = activeJobId === job.id
@@ -2948,7 +2990,8 @@ function App() {
                     const failedChunks = job.chunks.filter((chunk) => chunk.status === 'failed')
                     const warnedChunks = job.chunks.filter((chunk) => chunk.status === 'done' && chunk.warning)
                     return (
-                      <div className="result-row queue-job-row" key={job.id}>
+                      <li key={job.id}>
+                      <div className="result-row queue-job-row">
                         <div className="result-meta">
                           <span className={`ready-dot ${queueStatus}`} aria-hidden="true" />
                           <strong>{job.title}</strong>
@@ -3024,24 +3067,26 @@ function App() {
                           ) : null}
                         </div>
                         {doneChunks.length > 0 ? (
-                          <div className="queue-chunk-list" aria-label={`${job.title} completed chunks`}>
+                          <ul className="queue-chunk-list" aria-label={`${job.title} completed chunks`}>
                             {doneChunks.map((chunk) => (
-                              <QueueChunkPlayer
-                                key={chunk.index}
-                                jobId={job.id}
-                                chunk={chunk}
-                                format={job.format}
-                                regenerating={regeneratingChunkKey === `${job.id}:${chunk.index}`}
-                                onRegenerate={regenerateQueueChunk}
-                                onNotice={showToast}
-                              />
+                              <li key={chunk.index}>
+                                <QueueChunkPlayer
+                                  jobId={job.id}
+                                  chunk={chunk}
+                                  format={job.format}
+                                  regenerating={regeneratingChunkKey === `${job.id}:${chunk.index}`}
+                                  onRegenerate={regenerateQueueChunk}
+                                  onNotice={showToast}
+                                />
+                              </li>
                             ))}
-                          </div>
+                          </ul>
                         ) : null}
                       </div>
+                      </li>
                     )
                   })}
-                </div>
+                </ul>
               </section>
             ) : (
               <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue">
@@ -3068,11 +3113,13 @@ function App() {
                     Clear library
                   </button>
                 </div>
-                <div className="result-list">
+                <ul className="result-list" aria-label="Saved clips">
                   {library.map((clip) => (
-                    <LibraryClipRow key={clip.id} clip={clip} onDeleted={(id) => setLibrary((prev) => prev.filter((c) => c.id !== id))} onNotice={showToast} />
+                    <li key={clip.id}>
+                      <LibraryClipRow clip={clip} onDeleted={(id) => setLibrary((prev) => prev.filter((c) => c.id !== id))} onNotice={showToast} />
+                    </li>
                   ))}
-                </div>
+                </ul>
               </section>
             ) : (
               <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library">
@@ -3170,6 +3217,7 @@ function App() {
                 type="button"
                 className="advanced-toggle system-tools-toggle"
                 id="diagnostics-panel"
+                ref={systemToolsToggleRef}
                 onClick={() => setShowSystemTools(!showSystemTools)}
                 aria-expanded={showSystemTools}
               >
@@ -3178,7 +3226,7 @@ function App() {
                 <ChevronDown size={15} aria-hidden="true" className={showSystemTools ? 'chevron-open' : ''} />
               </button>
               {showSystemTools ? (
-              <div className="system-tools-section">
+              <div className="system-tools-section" role="group" aria-label="System and diagnostics" ref={systemToolsSectionRef}>
                 <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
                   <input
                     id="experimental-piper"
@@ -3468,6 +3516,7 @@ function App() {
             <button
               type="button"
               className="advanced-toggle"
+              ref={advancedToggleRef}
               onClick={() => setShowAdvanced(!showAdvanced)}
               aria-expanded={showAdvanced}
             >
@@ -3477,7 +3526,7 @@ function App() {
             </button>
 
             {showAdvanced ? (
-              <div className="advanced-section">
+              <div className="advanced-section" role="group" aria-label="Advanced options" ref={advancedSectionRef}>
                 {engine === 'kokoro' ? (
                   <div className="range-row">
                     <label htmlFor="pitch">Pitch</label>
@@ -3789,13 +3838,14 @@ function App() {
                     <button
                       type="button"
                       className="heading-action pron-toggle"
+                      ref={pronunciationsToggleRef}
                       onClick={() => setShowPronunciations(!showPronunciations)}
                       aria-expanded={showPronunciations}
                     >
                       Pronunciations ({Object.keys(pronunciations).length})
                     </button>
                     {showPronunciations ? (
-                      <div className="speaker-map">
+                      <div className="speaker-map" role="group" aria-label="Pronunciation dictionary" ref={pronunciationsSectionRef}>
                         {Object.entries(pronunciations).map(([word, pron]) => (
                           <div className="speaker-row" key={word}>
                             <span>{word}</span>
