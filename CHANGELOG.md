@@ -6,6 +6,7 @@
 - Added guardrails and visible recovery messages for slow article imports, oversized files, missing queue/library blobs, failed ZIP exports, and failed clip/library delete actions.
 - Improved control semantics, selected-state labels, output-clearing feedback, and model/support copy so secondary controls read correctly in assistive technology and no longer resemble inactive tabs.
 - Fixed Opus/WebM native share metadata and ensured stream-preview audio contexts close even when later pitch, background-music, encoding, or ZIP work fails.
+- Removed share-target query/hash payloads from diagnostics location data and expanded diagnostic redaction for secret-like URL path segments.
 
 ## v0.13.0 - 2026-07-09
 

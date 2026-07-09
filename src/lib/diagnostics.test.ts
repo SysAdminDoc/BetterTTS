@@ -4,6 +4,7 @@ import {
   collectDiagnostics,
   getRecentDiagnosticEvents,
   recordDiagnosticEvent,
+  sanitizeDiagnosticLocation,
   sanitizeDiagnosticText,
 } from './diagnostics.ts'
 
@@ -54,7 +55,7 @@ describe('collectDiagnostics', () => {
       },
     }, {
       now: () => new Date('2026-07-09T00:00:00.000Z'),
-      location: { href: 'https://example.test/BetterTTS/' },
+      location: { href: 'https://example.test/BetterTTS/?url=https%3A%2F%2Farticle.example%2Fprivate&text=Shared%20article#clip' },
       navigator: {
         userAgent: 'UnitTest',
         platform: 'Win32',
@@ -99,6 +100,7 @@ describe('collectDiagnostics', () => {
 
     expect(bundle.generatedAt).toBe('2026-07-09T00:00:00.000Z')
     expect(bundle.app.version).toBe('0.13.0')
+    expect(bundle.app.location).toBe('https://example.test/BetterTTS/')
     expect(bundle.browser).toMatchObject({ userAgent: 'UnitTest', hardwareConcurrency: 8, deviceMemoryGb: 16 })
     expect(bundle.capabilities.webGpu.status).toBe('no adapter available')
     expect(bundle.capabilities.webCodecs.opus).toBe(true)
@@ -116,8 +118,20 @@ describe('collectDiagnostics', () => {
 
 describe('sanitizeDiagnosticText', () => {
   it('redacts common secret patterns', () => {
-    expect(sanitizeDiagnosticText('https://x.test/?password=hunter2 Authorization: Basic abc123')).toBe(
-      'https://x.test/?password=REDACTED Authorization: Basic REDACTED',
+    expect(sanitizeDiagnosticText('https://x.test/token/abc123?password=hunter2 Authorization: Basic abc123')).toBe(
+      'https://x.test/token/REDACTED?password=REDACTED Authorization: Basic REDACTED',
     )
+  })
+})
+
+describe('sanitizeDiagnosticLocation', () => {
+  it('keeps app origin and path but removes share-target payloads', () => {
+    expect(sanitizeDiagnosticLocation('https://x.test/BetterTTS/?url=https%3A%2F%2Fsource.test%2Fstory&text=Private#read')).toBe(
+      'https://x.test/BetterTTS/',
+    )
+  })
+
+  it('falls back safely for malformed locations', () => {
+    expect(sanitizeDiagnosticLocation('not a url?token=abc#hash')).toBe('not a url')
   })
 })

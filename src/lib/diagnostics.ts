@@ -222,7 +222,7 @@ export async function collectDiagnostics(
     app: {
       name: 'BetterTTS',
       version: input.appVersion,
-      location: locationLike?.href ?? 'unknown',
+      location: sanitizeDiagnosticLocation(locationLike?.href),
     },
     browser: {
       userAgent: navigatorLike?.userAgent ?? 'unknown',
@@ -309,7 +309,20 @@ export function sanitizeDiagnosticText(value: unknown): string {
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 REDACTED')
     .replace(/((?:api[_-]?key|token|secret|password|passwd|pwd)=)[^&\s]+/gi, '$1REDACTED')
     .replace(/([?&](?:key|token|secret|password)=)[^&\s]+/gi, '$1REDACTED')
+    .replace(/(\/(?:api[_-]?key|token|secret|password|passwd|pwd)\/)[^/?#\s]+/gi, '$1REDACTED')
     .slice(0, 700)
+}
+
+export function sanitizeDiagnosticLocation(href: string | undefined): string {
+  if (!href) return 'unknown'
+  try {
+    const url = new URL(href)
+    url.search = ''
+    url.hash = ''
+    return sanitizeDiagnosticText(url.toString())
+  } catch {
+    return sanitizeDiagnosticText(href).replace(/[?#].*$/, '') || 'unknown'
+  }
 }
 
 async function readSafely<T extends object>(reader: () => Promise<T>, fallback: T): Promise<T & { error?: string }> {
