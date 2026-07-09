@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## v0.16.0 - 2026-07-09
+
+### Fixed
+- Restored the production Kokoro engine: GitHub Pages ran Jekyll over the deployed branch and silently dropped Vite's `__vite-browser-external-*` chunks (no `.nojekyll`), 404ing the Kokoro and multilingual lazy imports on the live site. Deploys now ship `.nojekyll`, refuse to run without it, and verify the live site serves the index, entry, and underscore assets after every push.
+- Pausing or cancelling a queue run mid-chunk no longer checkpoints a truncated blob as `done` (which silently corrupted that chapter in every later ZIP/M4B export); aborted chunks stay pending and cancelled regenerations keep the previous audio.
+- Opus/WebM exports longer than 32.7 seconds no longer carry overflowed block timestamps — the muxer rolls clusters every 5 seconds (SimpleBlock offsets are signed int16), adopts the encoder's real OpusHead as CodecPrivate with CodecDelay/SeekPreRoll, and declares final-frame padding via DiscardPadding.
+- Audiobook number cleanup no longer corrupts common English: "1 in 10" and "3 in the morning" previously became "1 inches 10" / "3 inches the morning" (the rule is default-on and was persisted into EPUB queue chunks). Ambiguous units (`in`, `m`, `g`) now expand only before punctuation or end of line.
+- EPUB imports resolve URI-encoded manifest/NCX/nav hrefs (encoded filenames silently dropped chapters, up to a whole-book "no readable text" failure) and re-parse non-well-formed XHTML chapters as HTML instead of skipping them.
+- M4B export caps AAC candidate sample rates at 48 kHz — on 88.2/96 kHz audio devices the mp4a sample entry (16.16 fixed-point) made muxing throw after the full decode+encode had already run.
+- The queue segment editor no longer silently discards an edited draft when regeneration is refused (busy refusals toast and keep the editor open); queueing a job surfaces storage failures instead of doing nothing.
+- IndexedDB transaction helpers handle commit-time aborts (lazy quota checks) so queue/library writes can no longer hang forever with the quota toast unreachable; blocked-then-successful DB opens close the orphan connection; persisted zombie `generating` chunks demote to `pending` on load instead of showing a perpetual running pill.
+- The v0.15 output-deck tabs actually track the active section now (the active state was hardcoded to Output) with `aria-current`; anchor navigation stops landing under the sticky topbar via scroll margins.
+- Editor toolbar moved above the textarea in DOM order — CSS order reshuffling made keyboard focus jump from the textarea back up to the toolbar (WCAG 2.4.3). The notebook ruling now matches the 26px text pitch and scrolls with the content; the line-number gutter (wrong for soft-wrapped prose) was removed.
+- Browser/PWA `theme-color` follows the active theme instead of staying near-black under a light UI; light-theme accent-on-tint text (nav links, "How it works" chip, dialog speaker chips) darkened to clear WCAG AA.
+- Browser-voice runs clear the previous run's stale "Download all ZIP" link; ZIP/M4B exports are guarded against racing an active generation for the shared status/progress channel; stale progress-reset timers no longer wipe the next run's progress bar.
+- Kitten WAV parsing bounds-checks fmt/data chunks (truncated payloads now fail with the parser's own error instead of a raw RangeError); worker model loads are keyed by device:dtype so overlapping loads cannot resolve against the wrong model; the 300-char hard split no longer cuts surrogate pairs; Hindi danda and fullwidth CJK stops count as sentence boundaries.
+- EPUB/DOCX extraction caps per-entry decompressed size and DOCX only inflates `word/document.xml` (a size-checked crafted archive could previously balloon toward 25 GB in memory); the smoke server's path guard no longer allows `dist*` sibling-directory escapes.
+- Engine status pill shows a warning tint when reporting an unavailable runtime instead of dressing failures in green; disabled buttons no longer light up on hover; Play buttons disable once loaded; warn toasts get a distinct triangle icon and alert role; "1 jobs"/"1 saved clips" pluralization; pitch is no longer promised in the summary strip for engines that ignore it; assorted microcopy and radius-scale cleanup.
+
+### Changed
+- Offline prefetch is idempotent (already-cached assets are skipped instead of re-downloading the 92 MB model) and no longer buffers whole payloads in memory through unconsumed response clones; the service worker serves cached shell assets when the network returns 404 after a deploy.
+- `deleteJob` uses an IndexedDB key-range delete instead of materializing every stored audio blob to prefix-match keys.
+- Tests 177 → 191 (WebM cluster rolling, Opus header adoption, unit-word regressions, unicode chunk boundaries, encoded EPUB hrefs, malformed-XHTML fallback, truncated WAV payloads, queue zombie-status migration).
+
 ## v0.15.0 - 2026-07-09
 
 ### Changed
