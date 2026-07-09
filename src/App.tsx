@@ -103,7 +103,7 @@ import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
-const APP_VERSION = '0.14.0'
+const APP_VERSION = '0.15.0'
 const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000
@@ -2557,91 +2557,94 @@ function App() {
         </section>
 
         <section className="studio-grid" id="studio">
-          <div className="editor-column">
-            <div className="section-heading">
-              <span>Script</span>
-              <span className={overLimit ? 'danger-text' : ''}>
-                {text.length} / {MAX_TEXT_CHARS}
-                {overLimit ? ` (${text.length - MAX_TEXT_CHARS} over)` : ''}
-              </span>
-            </div>
-            <div className="editor-frame">
-              <div className="line-numbers" aria-hidden="true">
-                {lineNumbers.map((lineNumber) => (
-                  <span key={lineNumber}>{lineNumber}</span>
-                ))}
+          <div className="studio-workbench">
+            <div className="editor-column">
+              <div className="section-heading">
+                <span>Script</span>
+                <span className={overLimit ? 'danger-text' : ''}>
+                  {text.length} / {MAX_TEXT_CHARS}
+                  {overLimit ? ` (${text.length - MAX_TEXT_CHARS} over)` : ''}
+                </span>
               </div>
-              <textarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                spellCheck={false}
-                aria-label="Text to synthesize"
-              />
-            </div>
-            <div className="editor-statusbar" aria-label="Editor status">
-              <span>{wordCount} words</span>
-              <span>{text.length} characters</span>
-              <span>{lineCount} lines</span>
-              <span>{editorModeLabel}</span>
-              <span>{cleanupSummary}</span>
-            </div>
-            <div className="editor-actions">
-              <button type="button" onClick={() => setText('')}>
-                <X size={16} aria-hidden="true" />
-                New
-              </button>
-              <button type="button" onClick={() => fileInputRef.current?.click()}>
-                <Upload size={16} aria-hidden="true" />
-                Open
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,.epub,.pdf,.docx,text/plain,application/epub+zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={handleFileUpload}
-                hidden
-              />
-              <select
-                className="pause-select"
-                value={pauseDuration}
-                onChange={(e) => setPauseDuration(Number(e.target.value))}
-                aria-label="Pause duration"
-              >
-                <option value={0.5}>0.5s</option>
-                <option value={1}>1s</option>
-                <option value={2}>2s</option>
-                <option value={5}>5s</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setText((current) => `${current.trimEnd()} [pause ${pauseDuration}s] `)}
-              >
-                <FileText size={16} aria-hidden="true" />
-                Insert pause
-              </button>
-              <div className="url-import">
-                <input
-                  type="url"
-                  value={importUrlValue}
-                  onChange={(e) => setImportUrlValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') importFromUrl(importUrlValue)
-                  }}
-                  placeholder="Paste article URL…"
-                  aria-label="Article URL to import"
+              <div className="editor-frame">
+                <div className="line-numbers" aria-hidden="true">
+                  {lineNumbers.map((lineNumber) => (
+                    <span key={lineNumber}>{lineNumber}</span>
+                  ))}
+                </div>
+                <textarea
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  spellCheck={false}
+                  aria-label="Text to synthesize"
                 />
+              </div>
+              <div className="editor-statusbar" aria-label="Editor status">
+                <span>{wordCount} words</span>
+                <span>{text.length} characters</span>
+                <span>{lineCount} lines</span>
+                <span>{editorModeLabel}</span>
+                <span>{cleanupSummary}</span>
+              </div>
+              <div className="editor-actions">
+                <button type="button" onClick={() => setText('')}>
+                  <X size={16} aria-hidden="true" />
+                  New
+                </button>
+                <button type="button" onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={16} aria-hidden="true" />
+                  Open
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.epub,.pdf,.docx,text/plain,application/epub+zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={handleFileUpload}
+                  hidden
+                />
+                <select
+                  className="pause-select"
+                  value={pauseDuration}
+                  onChange={(e) => setPauseDuration(Number(e.target.value))}
+                  aria-label="Pause duration"
+                >
+                  <option value={0.5}>0.5s</option>
+                  <option value={1}>1s</option>
+                  <option value={2}>2s</option>
+                  <option value={5}>5s</option>
+                </select>
                 <button
                   type="button"
-                  onClick={() => importFromUrl(importUrlValue)}
-                  disabled={importingUrl || !importUrlValue.trim()}
+                  onClick={() => setText((current) => `${current.trimEnd()} [pause ${pauseDuration}s] `)}
                 >
-                  {importingUrl ? <Loader2 size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
-                  Import
+                  <FileText size={16} aria-hidden="true" />
+                  Insert pause
                 </button>
+                <div className="url-import">
+                  <input
+                    type="url"
+                    value={importUrlValue}
+                    onChange={(e) => setImportUrlValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') importFromUrl(importUrlValue)
+                    }}
+                    placeholder="Paste article URL…"
+                    aria-label="Article URL to import"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => importFromUrl(importUrlValue)}
+                    disabled={importingUrl || !importUrlValue.trim()}
+                  >
+                    {importingUrl ? <Loader2 size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
+                    Import
+                  </button>
+                </div>
               </div>
             </div>
 
-            <section className="output-panel output-deck" id="generated-output" aria-label="Generated audio">
+            <div className="workspace-column">
+              <section className="output-panel output-deck" id="generated-output" aria-label="Generated audio">
               <div className="section-heading">
                 <span>Output</span>
                 <span aria-live="polite">{status}</span>
@@ -2700,7 +2703,7 @@ function App() {
               </p>
             </section>
 
-            <div className="workspace-secondary-grid">
+              <div className="workspace-secondary-grid">
             {queueJobs.length > 0 ? (
               <section className="output-panel queue-panel" id="queue-panel" aria-label="Generation queue">
                 <div className="section-heading">
@@ -2834,6 +2837,7 @@ function App() {
                 </div>
               </section>
             )}
+              </div>
             </div>
           </div>
 
