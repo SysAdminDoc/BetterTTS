@@ -108,6 +108,7 @@ const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 
 type Engine = EngineId
 type Theme = 'dark' | 'light'
+type NavSection = 'studio' | 'models' | 'docs'
 
 type QueueSourceChunk = {
   text: string
@@ -184,6 +185,12 @@ function getInitialPiperFlag(): boolean {
   }
 }
 
+function getActiveNavSection(): NavSection {
+  if (typeof window === 'undefined') return 'studio'
+  const hash = window.location.hash.replace(/^#/, '')
+  return hash === 'models' || hash === 'docs' ? hash : 'studio'
+}
+
 function timestamp() {
   return new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
 }
@@ -200,6 +207,20 @@ function importSizeError(file: File): Toast | null {
     tone: 'warn',
     message: `${shortUiLabel(file.name, 56)} is ${formatBytes(file.size)}. Import files must be ${formatBytes(MAX_IMPORT_BYTES)} or smaller.`,
   }
+}
+
+function queueJobStatus(job: QueueJob): 'ready' | 'running' | 'failed' | 'pending' {
+  if (job.chunks.some((chunk) => chunk.status === 'failed')) return 'failed'
+  if (job.chunks.some((chunk) => chunk.status === 'generating')) return 'running'
+  if (job.chunks.length > 0 && job.chunks.every((chunk) => chunk.status === 'done')) return 'ready'
+  return 'pending'
+}
+
+function modelStatusClass(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === 'ready') return 'status-ready'
+  if (normalized === 'fallback' || normalized === 'opt-in' || normalized === 'experimental') return 'status-warn'
+  return 'status-muted'
 }
 
 function cacheStatusText(row: EngineCacheStatus, supported: boolean): string {
@@ -741,6 +762,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 
 function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [activeNavSection, setActiveNavSection] = useState<NavSection>(getActiveNavSection)
   const [engine, setEngine] = useState<Engine>('kokoro')
   const [locale, setLocale] = useState<KokoroLocale>('en-us')
   const [voiceId, setVoiceId] = useState('af_heart')
@@ -875,6 +897,13 @@ function App() {
     document.documentElement.dataset.theme = theme
     try { window.localStorage.setItem('bettertts-theme', theme) } catch { /* storage blocked */ }
   }, [theme])
+
+  useEffect(() => {
+    const syncActiveSection = () => setActiveNavSection(getActiveNavSection())
+    syncActiveSection()
+    window.addEventListener('hashchange', syncActiveSection)
+    return () => window.removeEventListener('hashchange', syncActiveSection)
+  }, [])
 
   useEffect(() => {
     try { window.localStorage.setItem('bettertts-pronunciations', JSON.stringify(pronunciations)) } catch {}
@@ -2386,11 +2415,11 @@ function App() {
             <span>BetterTTS</span>
           </a>
         <nav className="nav-links" aria-label="Primary">
-            <a href="#studio" className="active">
+            <a href="#studio" className={activeNavSection === 'studio' ? 'active' : undefined} aria-current={activeNavSection === 'studio' ? 'location' : undefined}>
               Voice Studio
             </a>
-            <a href="#models">Models</a>
-            <a href="#docs">Docs</a>
+            <a href="#models" className={activeNavSection === 'models' ? 'active' : undefined} aria-current={activeNavSection === 'models' ? 'location' : undefined}>Models</a>
+            <a href="#docs" className={activeNavSection === 'docs' ? 'active' : undefined} aria-current={activeNavSection === 'docs' ? 'location' : undefined}>Docs</a>
             <a href="https://github.com/SysAdminDoc/BetterTTS" target="_blank" rel="noreferrer">
               GitHub <ExternalLink size={14} aria-hidden="true" />
             </a>
@@ -2501,7 +2530,7 @@ function App() {
                 <span>Output deck</span>
                 <span aria-live="polite">{status}</span>
               </div>
-              <div className="surface-tabs output-capabilities" aria-label="Output capabilities">
+              <div className="output-capabilities" aria-label="Available output formats">
                 <span>Audio files</span>
                 <span>ZIP bundles</span>
                 <span>Captions</span>
@@ -2553,13 +2582,15 @@ function App() {
                     const { done, total, pct } = jobProgress(job)
                     const isActive = activeJobId === job.id
                     const doneChunks = job.chunks.filter((chunk) => chunk.status === 'done')
+                    const queueStatus = queueJobStatus(job)
                     return (
                       <div className="result-row" key={job.id}>
                         <div className="result-meta">
-                          <span className="ready-dot" aria-hidden="true" />
+                          <span className={`ready-dot ${queueStatus}`} aria-hidden="true" />
                           <strong>{job.title}</strong>
                           <span>{queueEngineText(job)}</span>
                           <span>{job.format.toUpperCase()}</span>
+                          <span className={`queue-status ${queueStatus}`}>{queueStatus}</span>
                           <span>{done}/{total} chunks</span>
                           <span>{pct}%</span>
                         </div>
@@ -2823,12 +2854,15 @@ function App() {
                   <span>Opus: {opusSupported() ? 'available' : 'unavailable'}</span>
                   <span>M4B: {m4bCapability?.supported ? 'AAC ready' : 'fallback'}</span>
                   <span>Storage: {storageEstimate ?? 'unknown'}</span>
-                  <span title={crossOriginStorage.message}>COS: {crossOriginStorageShortLabel(crossOriginStorage.usable)}</span>
-                  <span title={transformersReadiness.criteria.map((criterion) => `${criterion.label}: ${criterion.met ? 'pass' : 'pending'}`).join(' | ')}>
+                  <span aria-label={`Cross-Origin Storage: ${crossOriginStorage.message}`}>COS: {crossOriginStorageShortLabel(crossOriginStorage.usable)}</span>
+                  <span aria-label={`Transformers readiness: ${transformersReadiness.criteria.map((criterion) => `${criterion.label}: ${criterion.met ? 'pass' : 'pending'}`).join(' | ')}`}>
                     Transformers: {TRANSFORMERS_RUNTIME_VERSION}
                   </span>
-                  <span title={piperPlusSupport.notes.join(' ')}>Piper: {piperPlusSupport.supported ? 'available' : 'unavailable'}</span>
+                  <span aria-label={`Piper-plus support: ${piperPlusSupport.notes.join(' ')}`}>Piper: {piperPlusSupport.supported ? 'available' : 'unavailable'}</span>
                 </div>
+                <small className="diagnostics-detail">
+                  COS: {crossOriginStorage.message} Transformers: {transformersReadiness.readyToSwitch ? 'ready for 4.3.' : 'holding current runtime.'} Piper: {piperPlusSupport.notes.join(' ')}
+                </small>
                 <div className="diagnostics-actions">
                   <button type="button" onClick={handleCopyDiagnostics} disabled={diagnosticsAction !== null}>
                     {diagnosticsAction === 'copy' ? <Loader2 size={13} aria-hidden="true" /> : <SquareCode size={13} aria-hidden="true" />}
@@ -3223,6 +3257,7 @@ function App() {
                       <div className="speaker-row" key={name}>
                         <span>{name}</span>
                         <select
+                          aria-label={`Voice for ${name}`}
                           value={speakerMap[name!] ?? ''}
                           onChange={(e) => setSpeakerMap((prev) => ({ ...prev, [name!]: e.target.value }))}
                         >
@@ -3441,7 +3476,7 @@ function App() {
                 <FileText size={16} aria-hidden="true" />
                 Queue
               </button>
-              {queueDisabledReason && (engine === 'browser' || engine === 'piper') ? <small className="queue-disabled-note">{queueDisabledReason}</small> : null}
+              {queueDisabledReason ? <small className="queue-disabled-note">{queueDisabledReason}</small> : null}
               <button type="button" className="secondary-action" onClick={handleClearOutputs}>
                 <Trash2 size={16} aria-hidden="true" />
                 Clear output
@@ -3482,7 +3517,7 @@ function App() {
                 {MODEL_ROWS.map((row) => (
                   <tr key={row[0]}>
                     {row.map((cell, index) => (
-                      <td key={cell} className={index === 4 ? 'status-cell' : undefined}>
+                      <td key={cell} className={index === 4 ? `status-cell ${modelStatusClass(cell)}` : undefined}>
                         {cell}
                       </td>
                     ))}

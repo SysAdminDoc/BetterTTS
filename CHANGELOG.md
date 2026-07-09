@@ -7,6 +7,7 @@
 - Improved control semantics, selected-state labels, output-clearing feedback, and model/support copy so secondary controls read correctly in assistive technology and no longer resemble inactive tabs.
 - Fixed Opus/WebM native share metadata and ensured stream-preview audio contexts close even when later pitch, background-music, encoding, or ZIP work fails.
 - Removed share-target query/hash payloads from diagnostics location data and expanded diagnostic redaction for secret-like URL path segments.
+- Hardened premium UI accessibility with contrast-safe action tokens, real active-section navigation, visible engine capability text, labelled dialog voice selectors, status-specific indicators, and coarse-pointer touch targets.
 
 ## v0.13.0 - 2026-07-09
 
