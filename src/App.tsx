@@ -106,7 +106,7 @@ import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
-const APP_VERSION = '0.17.0'
+const APP_VERSION = '0.18.0'
 const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000

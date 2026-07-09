@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.18.0 - 2026-07-09
+
+### Added
+- **Native desktop inference (TF-99).** The Electron app can now synthesize Kokoro through native ONNX Runtime: an Electron `utilityProcess` hosts kokoro-js on onnxruntime-node's CPU execution provider (DirectML fails Kokoro's ConvTranspose at op level regardless of dtype), mirroring the browser worker protocol over the platform bridge. Desktop settings gain a "Native engine" toggle; blended and multilingual voices transparently fall back to the browser runtime. Measured on this machine: ~1.0-1.2x realtime on CPU, above the browser WASM path. `npm run desktop:probe-host` runs a real end-to-end synthesis probe without a GUI, and the desktop smoke check now proves the host spawns and reports its EP + runtime versions.
+- **Verified native model packs (TF-98).** Native Kokoro q8 downloads are driven by a manifest pinned to an immutable Hugging Face revision with per-file SHA-256: downloads resume via HTTP Range, stream-hash while writing, install atomically (a verified copy is never replaced until its replacement passes), and record a verification marker. Non-permissive licenses are blocked from default install behind an explicit opt-in flag. Diagnostics report the pack revision, license, and verification state.
+- **Silent-truncation completeness check (TF-129).** Every synthesized sentence is checked against a speech-rate floor (~45 speakable chars/sec, speed-scaled, Indic combining marks counted); implausibly short audio and engine null-returns surface as a post-run warning, diagnostics events, and persistent per-chunk queue warnings with an inline notice pointing at the segment editor.
+- **Codec-boundary matrix tests (TF-128).** WAV/MP3/AAC-config paths run a full sample-rate matrix (22.05-96 kHz) in tests; MP3 now rejects non-MPEG rates before encoding instead of producing undefined lamejs output, and empty inputs fail loudly instead of writing empty files.
+- **kokoro-js splitter freeze guard (TF-127).** hexgrad/kokoro#343 is open and unfixed upstream: `TextSplitterStream` can freeze the event loop synchronously on inputs like `@handle` + newline. patch-package now applies a `Math.max` advance guard to all three dist bundles, with regression tests on the reproducer.
+
+### Changed
+- **Storage quota recovery (TF-132).** A full-storage save now evicts the oldest clips and retries once instead of failing silently forever; the storage meter warns at 90% before saves start failing.
+- **Honest error paths (TF-130).** Voice preview reports its real failure instead of always claiming the model isn't loaded; article import distinguishes timeout / HTTP status / unreadable page / invalid URL; storage estimate/persist failures and declined persistence land in diagnostics; queue jobs show per-chunk failure messages inline; non-quota library save errors are recorded.
+- **Queue self-healing (TF-102).** A native-host crash fails only the in-flight chunk — the host respawns, reloads once, and retries before surfacing the failure, so long audiobook runs continue instead of failing every later chunk.
+- **Keyboard and screen-reader pass (TF-131).** Escape collapses the Advanced, System & diagnostics, and Pronunciations folds and returns focus to their toggles; a successful generation moves focus to the results panel; results, queue, and library are semantic lists that announce item counts.
+
+### Tests
+- 191 → 234 tests across 30 suites (native TTS client protocol, model-pack downloader, codec matrix, completeness heuristic, splitter regression, library eviction).
+
 ## v0.17.0 - 2026-07-09
 
 ### Added

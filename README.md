@@ -1,17 +1,17 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.17.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-191%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-234%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, KittenTTS, and an experimental Piper-plus path run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Desktop app (preview).** A Windows desktop build is in progress on Electron — it reuses this exact studio inside a version-locked Chromium shell (guaranteeing WebCodecs, WebGPU, and SharedArrayBuffer regardless of the system browser) and will add native ONNX Runtime inference (DirectML/CUDA/CPU) and FFmpeg export in later phases. `npm run desktop:dev` to run it, `npm run desktop:dist` to build a Windows installer. The web app above is unaffected.
+> **Desktop app (preview).** A Windows desktop build is in progress on Electron — it reuses this exact studio inside a version-locked Chromium shell (guaranteeing WebCodecs, WebGPU, and SharedArrayBuffer regardless of the system browser) and already synthesizes Kokoro through **native ONNX Runtime** (onnxruntime-node CPU EP in an isolated utility process, with SHA-256-verified model packs pinned to an immutable revision). Enable it via the "Native engine" toggle in the desktop settings. FFmpeg export and more native engines land in later phases. `npm run desktop:dev` to run it, `npm run desktop:dist` to build a Windows installer. The web app above is unaffected.
 
 ---
 
@@ -48,6 +48,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
 - **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
+- **Native desktop inference** — the Electron build runs Kokoro on onnxruntime-node (CPU EP) in an isolated utility process, loading SHA-256-verified model packs pinned to an immutable revision
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
@@ -75,6 +76,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Pronunciation dictionary** — custom word/replacement pairs persisted in localStorage
 - **Generation stats** — elapsed time, chars/s throughput, audio duration, realtime speed factor
 - **Cancel button** — abort generation mid-run, keep partial results
+- **Completeness check** — every sentence is verified against a speech-rate floor; possibly truncated or missing audio is flagged in the output, queue, and diagnostics instead of failing silently
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
 - **EPUB import** — chapter-aware parsing with TOC title extraction, queued for batch generation
 - **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, edit/regenerate completed chunks safely, play completed chunks, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
@@ -85,7 +87,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Installable PWA** with service worker for offline app shell and per-build cache versioning
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds
-- **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap
+- **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
 - **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
 - **Diagnostics export** — copy or download a local JSON support bundle with browser, WebGPU, codec, storage, cache, model-route, and recent sanitized error state
 - **Media Session API** — lock-screen play/pause controls for generated audio
@@ -138,7 +140,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 | Document Import | `pdfjs-dist` for PDF text; `fflate` + XML parsing for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (191 tests across 26 suites) + Playwright smoke |
+| Testing | Vitest (234 tests across 30 suites) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
