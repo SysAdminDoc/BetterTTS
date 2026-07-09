@@ -103,6 +103,9 @@ npm run dev
 # Run tests
 npm test
 
+# Local rendered smoke check
+npm run smoke
+
 # Production build
 npm run build
 ```
@@ -112,6 +115,8 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 ## Troubleshooting
 
 Use **Control console -> Diagnostics -> Copy JSON** when reporting a local browser/runtime issue. The bundle includes app version, browser details, WebGPU adapter status, WebCodecs AAC/Opus support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs.
+
+Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies desktop/mobile rendering, theme switching, diagnostics copy, queue controls, M4B fallback messaging, and unexpected console noise; screenshots and `summary.json` are written to `dist/smoke/`.
 
 ## Tech Stack
 
@@ -126,7 +131,7 @@ Use **Control console -> Diagnostics -> Copy JSON** when reporting a local brows
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (126 assertions across 17 suites) |
+| Testing | Vitest (126 assertions across 17 suites) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

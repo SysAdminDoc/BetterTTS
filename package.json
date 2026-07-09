@@ -10,6 +10,7 @@
     "build": "npm run clean && npm run typecheck && vite build",
     "test": "vitest run",
     "lint": "oxlint",
+    "smoke": "node scripts/smoke.mjs",
     "license:runtime": "node scripts/check-runtime-licenses.mjs",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
@@ -40,6 +41,7 @@
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "oxlint": "^1.71.0",
+    "playwright": "^1.61.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
