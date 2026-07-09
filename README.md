@@ -1,11 +1,11 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.13.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.14.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-159%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, KittenTTS, and an experimental Piper-plus path run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
@@ -136,7 +136,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 | Document Import | `pdfjs-dist` for PDF text; `fflate` + XML parsing for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (159 tests across 22 suites) + Playwright smoke |
+| Testing | Vitest (177 tests across 26 suites) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

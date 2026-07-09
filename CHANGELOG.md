@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.14.0 - 2026-07-09
+
 ### Fixed
 - Added guardrails and visible recovery messages for slow article imports, oversized files, missing queue/library blobs, failed ZIP exports, and failed clip/library delete actions.
 - Improved control semantics, selected-state labels, output-clearing feedback, and model/support copy so secondary controls read correctly in assistive technology and no longer resemble inactive tabs.
