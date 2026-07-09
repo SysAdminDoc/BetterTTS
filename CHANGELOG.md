@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added an offline pack manager in the control console with per-engine cache status, app-shell separation, Kokoro q8 prefetch, and selective cache clearing.
+
 ### Changed
 - Split EPUB parsing and multilingual Kokoro runtime paths into on-demand chunks; the production worker bundle now stays small on first load and the fflate static/dynamic import warning is gone.
 

@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-114%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-117%20passing-53d889.svg)](#)
 
 **Free client-side text-to-speech studio.** Kokoro 82M, Supertonic, and KittenTTS run entirely in your browser — no server, no signup, no usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B — keep everything private.
 
@@ -81,6 +81,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap
+- **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
 - **Media Session API** — lock-screen play/pause controls for generated audio
 - **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
 - **Responsive layout** — works on desktop and mobile
@@ -119,7 +120,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (114 assertions across 15 suites) |
+| Testing | Vitest (117 assertions across 16 suites) |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

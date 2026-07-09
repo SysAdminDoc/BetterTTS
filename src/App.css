@@ -619,6 +619,91 @@ button:disabled {
   font-weight: 650;
 }
 
+.cache-manager {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 46%, var(--surface-1));
+}
+
+.cache-manager-head,
+.cache-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cache-manager-head > span,
+.cache-row > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.cache-manager strong,
+.cache-row strong {
+  color: var(--heading);
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.cache-manager small,
+.cache-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.cache-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.cache-row {
+  min-height: 40px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--control-bg);
+}
+
+.cache-row-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.cache-manager button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cache-manager button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+  color: var(--heading);
+}
+
+.cache-manager button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 select {
   width: 100%;
   height: 42px;
@@ -1348,6 +1433,19 @@ footer {
   .engine-grid,
   .voice-buttons {
     grid-template-columns: 1fr;
+  }
+
+  .cache-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cache-row-actions {
+    width: 100%;
+  }
+
+  .cache-row-actions button {
+    flex: 1 1 0;
   }
 
   .surface-tabs span {

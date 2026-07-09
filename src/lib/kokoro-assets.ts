@@ -7,12 +7,14 @@ export const KOKORO_HF_RESOLVE_PREFIX =
   `https://huggingface.co/${KOKORO_MODEL_ID}/resolve/${KOKORO_MODEL_REVISION}/`
 export const KOKORO_LOCAL_MODEL_PREFIX = `models/${KOKORO_MODEL_ID}/`
 
-const hostedModelPaths = new Set([
+export const SELF_HOSTED_KOKORO_MODEL_PATHS = [
   'config.json',
   'tokenizer.json',
   'tokenizer_config.json',
   'onnx/model_quantized.onnx',
-])
+] as const
+
+const hostedModelPaths = new Set<string>(SELF_HOSTED_KOKORO_MODEL_PATHS)
 const hostedVoicePaths = new Set([...SELF_HOSTED_KOKORO_VOICE_IDS].map((voiceId) => `voices/${voiceId}.bin`))
 const maxHfRetries = 2
 const defaultRetryDelays = [1_000, 2_500]

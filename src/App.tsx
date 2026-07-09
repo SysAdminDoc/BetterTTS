@@ -31,6 +31,14 @@ import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-work
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, m4bSupported } from './lib/m4b.ts'
+import {
+  type EngineCacheStatus,
+  type ModelCacheEngineId,
+  type ModelCacheSummary,
+  clearModelCache,
+  prefetchKokoroQ8Pack,
+  readModelCacheStatus,
+} from './lib/model-cache.ts'
 import { type QueueJob, deleteJob, getChunkBlob, jobProgress, listJobs, saveChunkBlob, saveJob } from './lib/queue.ts'
 import {
   KITTEN_DEFAULT_MODEL,
@@ -41,6 +49,7 @@ import {
   type KittenModelSize,
   type KittenVoiceId,
   clampKittenSpeed,
+  hasKittenWebGpu,
   synthesizeKitten,
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, synthesizeSupertonic } from './lib/supertonic.ts'
@@ -104,6 +113,15 @@ function getInitialTheme(): Theme {
 
 function timestamp() {
   return new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+}
+
+function cacheStatusText(row: EngineCacheStatus, supported: boolean): string {
+  if (!supported) return 'Cache API unavailable'
+  if (row.entryCount === 0) return 'Not cached'
+  const fileLabel = row.entryCount === 1 ? 'file' : 'files'
+  const size = row.sizeBytes > 0 ? formatBytes(row.sizeBytes) : 'size unknown'
+  const unknown = row.unknownSizeCount > 0 ? ` + ${row.unknownSizeCount} unknown` : ''
+  return `${row.entryCount} ${fileLabel} - ${size}${unknown}`
 }
 
 async function getDurationLabel(blob: Blob) {
@@ -366,7 +384,8 @@ function App() {
   const [runtimeLabel, setRuntimeLabel] = useState(
     typeof navigator !== 'undefined' && 'gpu' in navigator ? 'WebGPU fp32' : 'WebAssembly q8',
   )
-  const [modelCached, setModelCached] = useState(false)
+  const [modelCache, setModelCache] = useState<ModelCacheSummary | null>(null)
+  const [cacheAction, setCacheAction] = useState<string | null>(null)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
@@ -406,6 +425,7 @@ function App() {
   const englishKokoro = isEnglishKokoroLocale(locale)
   const blendableVoices = useMemo(() => VOICES.filter((voice) => isEnglishKokoroLocale(voice.locale)), [])
   const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : 'WebGPU fp32 / WebAssembly q8') : runtimeLabel
+  const kittenRuntimeReady = hasKittenWebGpu()
   const speedMin = engine === 'supertonic' ? 0.8 : 0.5
   const speedMax = engine === 'supertonic' ? 1.2 : engine === 'kitten' ? 2 : 1.5
   const lineNumbers = useMemo(() => text.split(/\r?\n/).map((_, index) => index + 1), [text])
@@ -413,13 +433,15 @@ function App() {
   const overLimit = text.length > MAX_TEXT_CHARS
   const wordCount = useMemo(() => text.trim().split(/\s+/).filter(Boolean).length, [text])
   const lineCount = lineNumbers.length
+  const cacheRows = modelCache?.engines ?? []
+  const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
   const engineStatus =
     engine === 'kokoro'
       ? `${selectedKokoroLanguage.label} - ${kokoroRuntimeLabel}${modelCached ? ' - cached' : ''}${storageEstimate ? ` - ${storageEstimate}` : ''}`
       : engine === 'supertonic'
         ? 'English speed engine - 44.1 kHz fp32'
         : engine === 'kitten'
-          ? `${selectedKittenModel.label} - ${selectedKittenModel.params} - WebGPU`
+          ? `${selectedKittenModel.label} - ${selectedKittenModel.params} - ${kittenRuntimeReady ? 'WebGPU available' : 'WebGPU unavailable'}`
           : 'Device-native speech playback'
 
   useEffect(() => {
@@ -452,15 +474,8 @@ function App() {
   }, [engine])
 
   useEffect(() => {
-    if (typeof caches !== 'undefined') {
-      caches
-        .open('transformers-cache')
-        .then((c) => c.keys())
-        .then((keys) => {
-          if (keys.some((k) => k.url.includes('Kokoro') || k.url.includes('Supertonic'))) setModelCached(true)
-        })
-        .catch(() => {})
-    }
+    refreshModelCacheStatus().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -485,6 +500,46 @@ function App() {
         }
       })
       .catch(() => {})
+  }
+
+  async function refreshModelCacheStatus() {
+    const summary = await readModelCacheStatus()
+    setModelCache(summary)
+    return summary
+  }
+
+  async function handlePrefetchKokoroPack() {
+    if (isGenerating) return
+    setCacheAction('prefetch-kokoro')
+    try {
+      const count = await prefetchKokoroQ8Pack(selectedVoice.id, (done, total, path) => {
+        setStatus(`Prefetching Kokoro q8 pack (${done}/${total}) - ${path}`)
+      })
+      await refreshModelCacheStatus()
+      refreshStorageEstimate()
+      setStatus('Ready')
+      showToast({ tone: 'ok', message: `Cached ${count} Kokoro q8 assets for ${selectedVoice.name}.` })
+    } catch (err) {
+      setStatus('Ready')
+      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'Kokoro prefetch failed.' })
+    } finally {
+      setCacheAction(null)
+    }
+  }
+
+  async function handleClearModelCache(engineId: ModelCacheEngineId) {
+    if (isGenerating) return
+    setCacheAction(`clear-${engineId}`)
+    try {
+      const deleted = await clearModelCache(engineId)
+      await refreshModelCacheStatus()
+      refreshStorageEstimate()
+      showToast({ tone: 'ok', message: deleted > 0 ? `Cleared ${deleted} cached ${engineId} entries.` : `No cached ${engineId} entries found.` })
+    } catch (err) {
+      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'Could not clear cache entries.' })
+    } finally {
+      setCacheAction(null)
+    }
   }
 
   useEffect(() => {
@@ -707,6 +762,7 @@ function App() {
     }
 
     const { synthesize } = await ensureEngine(onProgress)
+    refreshModelCacheStatus().catch(() => {})
 
     if (abortRef.current) {
       setStatus('Cancelled')
@@ -872,7 +928,7 @@ function App() {
 
     setProgress(100)
     if (generated.length > 0) {
-      setModelCached(true)
+      refreshModelCacheStatus().catch(() => {})
       if (!persistRequestedRef.current) {
         // Ask the browser to exempt our storage (model cache + clip library)
         // from automatic eviction; Safari ITP purges unpersisted origins.
@@ -1062,7 +1118,7 @@ function App() {
         previewCacheRef.current.set(id, url)
         const player = new Audio(url)
         await player.play()
-        setModelCached(true)
+        refreshModelCacheStatus().catch(() => {})
       }
     } catch {
       showToast({ tone: 'warn', message: 'Preview requires the model to be loaded first.' })
@@ -1787,6 +1843,62 @@ function App() {
               <div className="engine-status">
                 <span className="status-dot" aria-hidden="true" />
                 <span>{engineStatus}</span>
+              </div>
+              <div className="cache-manager" aria-label="Offline pack manager">
+                <div className="cache-manager-head">
+                  <span>
+                    <strong>Offline packs</strong>
+                    <small>Model cache is separate from the app shell.</small>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCacheAction('refresh')
+                      refreshModelCacheStatus()
+                        .then(() => refreshStorageEstimate())
+                        .catch(() => showToast({ tone: 'error', message: 'Could not inspect model cache.' }))
+                        .finally(() => setCacheAction(null))
+                    }}
+                    disabled={cacheAction !== null}
+                  >
+                    {cacheAction === 'refresh' ? <Loader2 size={13} aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
+                    Refresh
+                  </button>
+                </div>
+                {cacheRows.length > 0 ? (
+                  <div className="cache-rows">
+                    {cacheRows.map((row) => (
+                      <div className="cache-row" key={row.id}>
+                        <span>
+                          <strong>{row.label}</strong>
+                          <small>{cacheStatusText(row, modelCache?.supported ?? false)}</small>
+                        </span>
+                        <div className="cache-row-actions">
+                          {row.id === 'kokoro' ? (
+                            <button
+                              type="button"
+                              onClick={handlePrefetchKokoroPack}
+                              disabled={!modelCache?.supported || cacheAction !== null || isGenerating}
+                            >
+                              {cacheAction === 'prefetch-kokoro' ? <Loader2 size={13} aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+                              Prefetch
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => handleClearModelCache(row.id)}
+                            disabled={!modelCache?.supported || row.entryCount === 0 || cacheAction !== null || isGenerating}
+                          >
+                            {cacheAction === `clear-${row.id}` ? <Loader2 size={13} aria-hidden="true" /> : <Trash2 size={13} aria-hidden="true" />}
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="cache-empty">Checking model cache...</p>
+                )}
               </div>
             </fieldset>
 
