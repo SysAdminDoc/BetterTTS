@@ -7,6 +7,7 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
+    "postinstall": "patch-package",
     "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "dev": "vite",
     "typecheck": "tsc -b",
@@ -60,6 +61,7 @@
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "oxlint": "^1.71.0",
+    "patch-package": "^8.0.1",
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
