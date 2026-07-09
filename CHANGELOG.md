@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.17.0 - 2026-07-09
 
 ### Added
 - Native ONNX Runtime probe (`npm run desktop:probe-ort`, `scripts/probe-native-ort.mjs`) — de-risking groundwork for desktop-native inference (ROADMAP TF-99). On this machine onnxruntime-node 1.27 loads the real Kokoro q8 graph; the CPU execution provider runs a clean forward pass (~276 ms / 12-token seq), while DirectML binds but hits a known quantized-ConvTranspose limitation — so native inference will ship CPU-EP-first with fp32-on-DirectML as the GPU follow-up. No app behavior change yet.
 - A Windows installer target (`npm run desktop:dist` → electron-builder NSIS x64); the packaged app was verified to launch and render the studio from its asar.
 - Desktop app scaffold (Electron, Phase 1). `npm run desktop:build` bundles the existing renderer for an Electron shell that serves it over a custom `app://` scheme with COOP/COEP + CSP set in the main process (crossOriginIsolated, no service worker). Security posture: `contextIsolation` on, `nodeIntegration` off, `sandbox` on, and a single narrow `betterttsPlatform` preload bridge. A `src/platform` seam keeps `App.tsx` platform-agnostic and makes the service worker web-only. `npm run desktop:smoke` verifies the studio renders in-shell via a hidden offscreen window (no focus steal). Native ONNX Runtime inference (onnxruntime-node / DirectML) and FFmpeg export land in later phases; see ROADMAP TF-97/99.
+
+### Changed
+- Rebuilt the studio around an image-generated premium desktop concept: persistent Studio/Queue/Library/Models/Diagnostics rail, honest local-session context, a dominant script canvas, compact engine rows, and a fixed two-action generation dock.
+- Output, Queue, and Library are now real tab panels instead of stacked anchor destinations. The empty output state is integrated into a functional transport surface, and Clear output moved from the generation inspector to that transport.
+- Moved offline packs, diagnostics, and the experimental Piper opt-in behind a dedicated System & diagnostics fold so everyday language, voice, and delivery controls remain reachable in the inspector.
+- Replaced the blue-heavy layered palette and decorative gradients with neutral dark/light semantic surfaces, quieter borders, flat selected states, and consistent 4-8px radii.
+
+### Fixed
+- Mobile editor input no longer collapses into a 42px grid track; the toolbar now uses a two-column command grid and the render tabs reflow without overlapping their status heading.
+- Smoke coverage now exercises real workspace tabs and the collapsed diagnostics surface, captures stable dark/light/mobile screenshots after theme transitions settle, and validates the redesigned Electron rail rather than removed summary cards.
 
 ## v0.16.0 - 2026-07-09
 

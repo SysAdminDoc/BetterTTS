@@ -1,6 +1,6 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.16.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.17.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
@@ -35,8 +35,8 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ## Features
 
 ### Studio Interface
-- **Premium workstation UI** with compact app chrome, command summary tiles, editor toolbar, waveform-style output deck, persistent queue/library states, inspector-style engine controls, generation status module, and bottom system rail
-- **Clean dark and light themes** using shared design tokens, 4-8px control radii, visible focus states, and mobile-responsive toolbar collapse
+- **Premium production workspace** with a persistent destination rail, session-aware command bar, dominant script canvas, real Output/Queue/Library tabs, integrated waveform transport, and compact properties inspector
+- **Clean dark and light themes** using neutral semantic design tokens, 4-8px control radii, visible focus states, and a mobile command grid that preserves full editor width
 
 ### Audio Generation
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
