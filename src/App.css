@@ -571,17 +571,23 @@ button:disabled {
 
 .waveform-empty {
   position: absolute;
-  inset: 0;
+  top: 50%;
+  left: 50%;
   z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 9px;
   color: var(--muted);
+  max-width: calc(100% - 20px);
+  padding: 0 10px;
+  background: var(--editor-bg);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
+  transform: translate(-50%, -50%);
   text-transform: none;
+  white-space: nowrap;
 }
 
 .output-session-card .waveform-empty,
@@ -598,7 +604,7 @@ button:disabled {
 .output-transport {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 34px auto minmax(80px, 1fr) auto;
+  grid-template-columns: 34px auto minmax(80px, 1fr) auto 34px;
   align-items: center;
   gap: 12px;
   padding-top: 2px;
@@ -613,6 +619,10 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface-1);
   color: var(--heading);
+}
+
+.output-transport .output-clear {
+  color: var(--muted);
 }
 
 .output-transport strong,
@@ -2098,7 +2108,7 @@ footer {
   }
 
   .output-transport {
-    grid-template-columns: 34px auto minmax(54px, 1fr) auto;
+    grid-template-columns: 34px auto minmax(44px, 1fr) auto 34px;
     gap: 8px;
   }
 

@@ -2782,6 +2782,16 @@ function App() {
                   <strong>{results.length > 0 ? results[0].duration : '00:00'}</strong>
                   <span className="transport-track" aria-hidden="true" />
                   <span>{engine === 'browser' ? 'Device' : activeSampleRate}</span>
+                  <button
+                    type="button"
+                    className="output-clear"
+                    onClick={handleClearOutputs}
+                    disabled={results.length === 0 && zipUrl === null}
+                    aria-label="Clear generated output"
+                    title="Clear generated output"
+                  >
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
                 </div>
               </div>
               {results.length === 0 ? (
@@ -3023,18 +3033,6 @@ function App() {
                   <small>Native speech playback when Kokoro cannot run.</small>
                 </button>
               </div>
-              <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
-                <input
-                  id="experimental-piper"
-                  type="checkbox"
-                  checked={experimentalPiperEnabled}
-                  onChange={(event) => setExperimentalPiperEnabled(event.target.checked)}
-                />
-                <span>
-                  <strong>Enable experimental Piper-plus</strong>
-                  <small>{piperPlusSupport.supported ? 'Lazy-loads piper-plus, ONNX Runtime, WASM G2P, and a Tsukuyomi-chan model only when selected.' : 'Requires WebAssembly and IndexedDB support.'}</small>
-                </span>
-              </label>
               <div className={`engine-status ${engineStatusTone}`}>
                 <span className="status-dot" aria-hidden="true" />
                 <span>{engineStatus}</span>
@@ -3052,6 +3050,18 @@ function App() {
               </button>
               {showSystemTools ? (
               <div className="system-tools-section">
+                <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
+                  <input
+                    id="experimental-piper"
+                    type="checkbox"
+                    checked={experimentalPiperEnabled}
+                    onChange={(event) => setExperimentalPiperEnabled(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Enable experimental Piper-plus</strong>
+                    <small>{piperPlusSupport.supported ? 'Loads the Piper runtime and Tsukuyomi-chan model only when selected.' : 'Requires WebAssembly and IndexedDB support.'}</small>
+                  </span>
+                </label>
                 <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>
@@ -3745,10 +3755,6 @@ function App() {
                 Queue
               </button>
               {queueDisabledReason ? <small className="queue-disabled-note">{queueDisabledReason}</small> : null}
-              <button type="button" className="secondary-action" onClick={handleClearOutputs}>
-                <Trash2 size={16} aria-hidden="true" />
-                Clear output
-              </button>
             </div>
           </aside>
         </section>

@@ -220,6 +220,9 @@ async function runSmoke() {
     await desktop.page.getByRole('button', { name: /Switch to/ }).click()
     const afterTheme = await desktop.page.evaluate(() => document.documentElement.dataset.theme)
     if (!afterTheme || afterTheme === beforeTheme) throw new Error(`Theme toggle did not change theme; got ${afterTheme}`)
+    if (afterTheme !== 'light') await desktop.page.getByRole('button', { name: /Switch to light theme/ }).click()
+    await desktop.page.waitForTimeout(250)
+    await desktop.page.screenshot({ path: join(smokeDir, 'desktop-light.png'), fullPage: false })
 
     await desktop.page.getByRole('button', { name: 'System & diagnostics' }).click()
     await desktop.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
@@ -277,6 +280,7 @@ async function runSmoke() {
     await libraryPanel.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByText(/Resumed at/).waitFor({ timeout: 20000 })
+    await desktop.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
     await desktop.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
     await desktop.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
     if ((await desktop.page.evaluate(() => document.documentElement.dataset.theme)) === 'light') await desktop.page.getByRole('button', { name: /Switch to dark theme/ }).click()
@@ -320,6 +324,7 @@ async function runSmoke() {
     if (!(await m4bButton.isDisabled())) throw new Error('M4B button should be disabled in unsupported AAC smoke state')
     await mobile.page.getByRole('button', { name: 'System & diagnostics' }).click()
     await mobile.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
+    await mobile.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
     await mobile.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
     await mobile.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
     if ((await mobile.page.evaluate(() => document.documentElement.dataset.theme)) === 'dark') await mobile.page.getByRole('button', { name: /Switch to light theme/ }).click()
@@ -340,7 +345,7 @@ async function runSmoke() {
     const summary = {
       ok: true,
       url: baseUrl,
-      screenshots: ['dist/smoke/desktop.png', 'dist/smoke/mobile.png'],
+      screenshots: ['dist/smoke/desktop.png', 'dist/smoke/desktop-light.png', 'dist/smoke/mobile.png'],
       allowedConsoleMessages: allMessages,
     }
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
