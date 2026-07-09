@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.12.0 - 2026-07-09
+
+### Changed
+- Reworked the main studio into a premium workstation interface with compact top chrome, runtime status, editor toolbar, output deck tabs, persistent queue/library empty states, inspector-style engine controls, a clearer generation module, and a bottom system rail.
+- Refined dark and light theme tokens, table surfaces, empty states, mobile toolbar collapse, toast placement, and responsive queue/library layout for a more consistent professional product feel.
+
+### Fixed
+- Added an explicit captions track fallback for generated audio elements so local lint is clean and result playback keeps an accessibility-compatible media structure.
+
 ## v0.11.0 - 2026-07-09
 
 ### Added

@@ -51,7 +51,7 @@ import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
-const APP_VERSION = '0.11.0'
+const APP_VERSION = '0.12.0'
 const MAX_TEXT_CHARS = 5000
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 

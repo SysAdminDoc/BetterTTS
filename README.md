@@ -1,6 +1,6 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.12.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-GitHub%20Pages-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
@@ -31,6 +31,10 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 | Offline capable | **Yes (PWA)** | No | No | No |
 
 ## Features
+
+### Studio Interface
+- **Premium workstation UI** with a compact topbar, editor toolbar, output deck, persistent queue/library empty states, inspector-style engine controls, generation status module, and bottom system rail
+- **Clean dark and light themes** using shared design tokens, 4-8px control radii, visible focus states, and mobile-responsive toolbar collapse
 
 ### Audio Generation
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
@@ -213,7 +217,7 @@ Word timestamps are available as an opt-in Kokoro mode using `onnx-community/Kok
 
 ## Roadmap
 
-The active ROADMAP is drained as of v0.11.0. New items should come from a fresh research or audit pass.
+The active ROADMAP contains research-driven follow-ups from the 2026-07-09 post-v0.11.0 research pass. ROADMAP.md is gitignored and tracks only incomplete local work.
 
 ## Contributing
 
