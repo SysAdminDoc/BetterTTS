@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
-import { extname, join, normalize } from 'node:path'
+import { extname, join, normalize, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { zipSync } from 'fflate'
 
@@ -361,7 +361,8 @@ async function resolveRequestPath(rawUrl) {
   if (!relativePath || relativePath.endsWith('/')) relativePath = `${relativePath}index.html`
 
   const candidate = normalize(join(distDir, decodeURIComponent(relativePath)))
-  if (!candidate.startsWith(normalize(distDir))) throw new ResponseError(403)
+  const distRoot = normalize(distDir)
+  if (candidate !== distRoot && !candidate.startsWith(distRoot + sep)) throw new ResponseError(403)
 
   try {
     const info = await stat(candidate)
