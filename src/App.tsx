@@ -49,7 +49,7 @@ import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
-import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './lib/library.ts'
+import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
@@ -868,6 +868,7 @@ function App() {
   const [zipExportingJobId, setZipExportingJobId] = useState<string | null>(null)
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
+  const storagePressureWarnedRef = useRef(false)
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1073,9 +1074,16 @@ function App() {
       .then(({ usage, quota }) => {
         if (usage != null && quota != null && quota > 0) {
           setStorageEstimate(`${formatBytes(usage)} of ${formatBytes(quota)} used`)
+          // Warn before the quota wall, not after saves start failing.
+          if (usage / quota > 0.9 && !storagePressureWarnedRef.current) {
+            storagePressureWarnedRef.current = true
+            showToast({ tone: 'warn', message: `Storage is ${Math.round((usage / quota) * 100)}% full — new clips will evict the oldest saved ones.` })
+          }
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        recordDiagnosticEvent('warn', err, 'storage.estimate')
+      })
   }
 
   async function refreshModelCacheStatus() {
@@ -1659,15 +1667,30 @@ function App() {
       generated.push(result)
       zipFiles[filename] = blob
       setResults([...generated])
-      saveClip(
-        { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration, cues: result.cues },
-        blob,
-      )
+      const clipRecord: ClipRecord = { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration, cues: result.cues }
+      saveClip(clipRecord, blob)
         .then(() => enforceLibraryCap())
-        .catch((err: unknown) => {
-          if (!warnedQuota && err instanceof DOMException && err.name === 'QuotaExceededError') {
-            warnedQuota = true
-            showToast({ tone: 'warn', message: 'Storage is full — clip not saved. Clear the library or delete old clips.' })
+        .catch(async (err: unknown) => {
+          if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+            // Recover instead of failing silently: evict oldest clips to make
+            // room, then retry this save once.
+            try {
+              const { evicted } = await freeLibrarySpace(Math.max(blob.size * 2, 32 * 1024 * 1024))
+              if (evicted > 0) {
+                await saveClip(clipRecord, blob)
+                listClips().then(setLibrary).catch(() => {})
+                showToast({ tone: 'warn', message: `Storage was full — freed ${evicted} old clip${evicted === 1 ? '' : 's'} to save this one.` })
+                return
+              }
+            } catch (recoveryErr) {
+              recordDiagnosticEvent('warn', recoveryErr, 'library.quota-recovery')
+            }
+            if (!warnedQuota) {
+              warnedQuota = true
+              showToast({ tone: 'error', message: 'Storage is full and nothing could be freed — clip not saved. Export it manually and clear space.' })
+            }
+          } else {
+            recordDiagnosticEvent('warn', err, 'library.save')
           }
         })
     }
@@ -1698,7 +1721,15 @@ function App() {
         // Ask the browser to exempt our storage (model cache + clip library)
         // from automatic eviction; Safari ITP purges unpersisted origins.
         persistRequestedRef.current = true
-        navigator.storage?.persist?.().catch(() => {})
+        navigator.storage?.persist?.()
+          .then((granted) => {
+            if (granted === false) {
+              recordDiagnosticEvent('warn', 'Persistent storage was declined — cached models and clips may be evicted under storage pressure.', 'storage.persist')
+            }
+          })
+          .catch((err) => {
+            recordDiagnosticEvent('warn', err, 'storage.persist')
+          })
       }
     }
     listClips().then(setLibrary).catch(() => {})
@@ -1907,8 +1938,12 @@ function App() {
         await player.play()
         refreshModelCacheStatus().catch(() => {})
       }
-    } catch {
-      showToast({ tone: 'warn', message: 'Preview requires the model to be loaded first.' })
+    } catch (err) {
+      // Report the real failure — "load the model first" hid OOM/network/WASM
+      // errors behind a misleading hint.
+      recordDiagnosticEvent('warn', err, 'voice.preview')
+      const detail = err instanceof Error && err.message ? shortUiLabel(err.message, 90) : ''
+      showToast({ tone: 'warn', message: detail ? `Preview failed: ${detail}` : 'Preview failed — try loading the model with Generate first.' })
     } finally {
       setPreviewingVoice(null)
     }
@@ -2010,12 +2045,20 @@ function App() {
           : { tone: 'ok', message: `Imported "${title}".` },
       )
     } catch (err) {
-      showToast({
-        tone: 'warn',
-        message: err instanceof DOMException && err.name === 'AbortError'
-          ? 'Article import timed out. Paste the text instead.'
-          : 'Could not read that page — most sites block cross-origin reads. Paste the article text instead.',
-      })
+      // Tell the user what actually failed — timeout, HTTP status, unreadable
+      // page, and CORS blocks are different problems with different fixes.
+      recordDiagnosticEvent('warn', err, 'article.import')
+      let message = 'Could not read that page — most sites block cross-origin reads. Paste the article text instead.'
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        message = 'Article import timed out. Paste the text instead.'
+      } else if (err instanceof Error && /^HTTP \d+$/.test(err.message)) {
+        message = `The site answered ${err.message} for that URL. Check the address or paste the text instead.`
+      } else if (err instanceof Error && err.message === 'No readable text found') {
+        message = 'No readable article text found on that page. Paste the text instead.'
+      } else if (err instanceof Error && (err.message === 'Unsupported protocol' || err instanceof TypeError && /Invalid URL/i.test(err.message))) {
+        message = 'That does not look like a valid http(s) URL.'
+      }
+      showToast({ tone: 'warn', message })
     } finally {
       window.clearTimeout(timeout)
       setImportingUrl(false)
@@ -2876,6 +2919,7 @@ function App() {
                     const isActive = activeJobId === job.id
                     const doneChunks = job.chunks.filter((chunk) => chunk.status === 'done')
                     const queueStatus = queueJobStatus(job)
+                    const failedChunks = job.chunks.filter((chunk) => chunk.status === 'failed')
                     return (
                       <div className="result-row queue-job-row" key={job.id}>
                         <div className="result-meta">
@@ -2887,6 +2931,17 @@ function App() {
                           <span>{done}/{total} chunks</span>
                           <span>{pct}%</span>
                         </div>
+                        {failedChunks.length > 0 ? (
+                          <div className="capability-strip warn" role="status">
+                            <Info size={15} aria-hidden="true" />
+                            <span>
+                              {failedChunks.length === 1
+                                ? `Chunk ${failedChunks[0].index + 1} failed: ${shortUiLabel(failedChunks[0].error ?? 'Unknown error', 120)}`
+                                : `${failedChunks.length} chunks failed — first at chunk ${failedChunks[0].index + 1}: ${shortUiLabel(failedChunks[0].error ?? 'Unknown error', 100)}`}
+                              {' '}Resume retries failed chunks.
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="result-actions">
                           {pct < 100 && !isActive ? (
                             <button type="button" onClick={() => resumeJob(job.id)} disabled={isGenerating}>

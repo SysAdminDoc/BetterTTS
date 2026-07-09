@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, getClipBlob, listClips, saveClip } from './library.ts'
+import { type ClipRecord, clearLibrary, deleteClip, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, saveClip } from './library.ts'
 
 function record(id: string, createdAt: number): ClipRecord {
   return {
@@ -89,5 +89,21 @@ describe('library', () => {
     await saveClip({ ...record('a', 1), size: 10 }, new Blob(['a']))
     expect(await enforceLibraryCap(1000)).toBe(0)
     expect((await listClips()).length).toBe(1)
+  })
+
+  it('freeLibrarySpace evicts oldest-first until the target is reached', async () => {
+    await saveClip({ ...record('old', 1), size: 50 }, new Blob(['old']))
+    await saveClip({ ...record('mid', 2), size: 50 }, new Blob(['mid']))
+    await saveClip({ ...record('new', 3), size: 50 }, new Blob(['new']))
+
+    const { evicted, freedBytes } = await freeLibrarySpace(80)
+    expect(evicted).toBe(2)
+    expect(freedBytes).toBe(100)
+    expect((await listClips()).map((c) => c.id)).toEqual(['new'])
+    expect(await getClipBlob('old')).toBeNull()
+  })
+
+  it('freeLibrarySpace reports zero when the library is already empty', async () => {
+    expect(await freeLibrarySpace(1000)).toEqual({ evicted: 0, freedBytes: 0 })
   })
 })

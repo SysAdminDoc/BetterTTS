@@ -120,6 +120,21 @@ export async function clearLibrary(): Promise<void> {
 
 export const LIBRARY_MAX_BYTES = 200 * 1024 * 1024
 
+// Evict oldest clips until at least targetBytes have been freed (or nothing is
+// left to evict). Returns what was actually evicted so the caller can decide
+// whether retrying a failed save is worthwhile.
+export async function freeLibrarySpace(targetBytes: number): Promise<{ evicted: number; freedBytes: number }> {
+  const clips = await listClips()
+  let freedBytes = 0
+  let evicted = 0
+  for (let i = clips.length - 1; i >= 0 && freedBytes < targetBytes; i--) {
+    await deleteClip(clips[i].id)
+    freedBytes += clips[i].size
+    evicted++
+  }
+  return { evicted, freedBytes }
+}
+
 // Evict oldest clips once the library exceeds the byte cap, so auto-saving
 // every generation can never silently fill the origin's storage quota.
 export async function enforceLibraryCap(maxBytes = LIBRARY_MAX_BYTES): Promise<number> {
