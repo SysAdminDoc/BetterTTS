@@ -1339,23 +1339,60 @@ ul.queue-chunk-list > li {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+  margin: 0;
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.35;
 }
 
-.diagnostics-facts span {
+.diagnostics-facts div {
   min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-0);
+}
+
+.diagnostics-facts dt {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.diagnostics-facts dd {
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
+  color: var(--heading);
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .diagnostics-detail {
   display: block;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.diagnostics-technical {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.diagnostics-technical summary {
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.diagnostics-technical summary:hover {
+  color: var(--heading);
 }
 
 .diagnostics-actions {
@@ -1758,6 +1795,28 @@ select:focus-visible {
   text-decoration: none;
 }
 
+.trust-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 22px;
+  padding: 0;
+  list-style: none;
+}
+
+.trust-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.trust-list svg {
+  margin-top: 2px;
+  color: var(--success);
+}
+
 .lower-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.85fr);
@@ -1815,23 +1874,6 @@ tr:last-child td {
 
 .status-cell {
   font-weight: 720;
-}
-
-pre {
-  overflow: auto;
-  max-width: 100%;
-  margin: 16px 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--editor-bg);
-}
-
-code {
-  display: block;
-  padding: 16px;
-  color: var(--heading);
-  font: 13px/1.55 var(--mono);
-  white-space: pre;
 }
 
 footer {
@@ -1958,6 +2000,10 @@ footer {
 }
 
 .fatal-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 40px;
   padding: 0 20px;
   border: 1px solid var(--accent-action);

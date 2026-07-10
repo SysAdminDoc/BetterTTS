@@ -771,6 +771,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo) {
+    recordDiagnosticEvent('error', error, 'react.error-boundary')
     console.error(error, info.componentStack)
   }
 
@@ -778,12 +779,13 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     if (this.state.error) {
       return (
         <main className="fatal-shell">
-          <section className="fatal-panel">
+          <section className="fatal-panel" role="alert" aria-labelledby="fatal-title">
             <AlertCircle size={32} aria-hidden="true" />
-            <h1>Something went wrong</h1>
-            <p>{this.state.error.message}</p>
+            <h1 id="fatal-title">BetterTTS needs to restart</h1>
+            <p>An unexpected interface error interrupted this session. Reload to recover; saved clips and queued jobs remain on this device.</p>
             <button type="button" onClick={() => window.location.reload()}>
-              Reload page
+              <RefreshCw size={16} aria-hidden="true" />
+              Reload BetterTTS
             </button>
           </section>
         </main>
@@ -1279,21 +1281,35 @@ function App() {
   }
 
   useEffect(() => {
-    listClips().then(setLibrary).catch(() => {})
+    listClips().then(setLibrary).catch((error) => {
+      recordDiagnosticEvent('error', error, 'library.initial-load')
+      showToast({ tone: 'error', message: 'Saved clips could not be loaded. Reload BetterTTS; existing audio has not been removed.' })
+    })
     listJobs().then((jobs) => {
       setQueueJobs(jobs)
       const incomplete = jobs.find((j) => j.chunks.some((c) => c.status === 'pending'))
       if (incomplete) {
-        showToast({ tone: 'ok', message: `Resumable job: "${incomplete.title}" (${jobProgress(incomplete).pct}% done). Open the queue panel to resume.` })
+        showToast({
+          tone: 'ok',
+          message: `"${incomplete.title}" is ${jobProgress(incomplete).pct}% complete and ready to resume.`,
+          action: { label: 'Open queue', run: () => openWorkspacePanel('queue-panel') },
+        })
       }
-    }).catch(() => {})
+    }).catch((error) => {
+      recordDiagnosticEvent('error', error, 'queue.initial-load')
+      showToast({ tone: 'error', message: 'Queued jobs could not be loaded. Reload BetterTTS; existing jobs have not been removed.' })
+    })
     refreshStorageEstimate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     const onUpdateReady = () =>
-      showToast({ tone: 'ok', message: 'A new version is ready — refresh the page to update.' })
+      showToast({
+        tone: 'ok',
+        message: 'A new version is ready. Saved clips and queued jobs will remain available.',
+        action: { label: 'Refresh now', run: () => window.location.reload() },
+      })
     window.addEventListener('bettertts-update-ready', onUpdateReady)
     return () => window.removeEventListener('bettertts-update-ready', onUpdateReady)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1370,6 +1386,17 @@ function App() {
       setToast((current) => (current?.message === nextToast.message ? null : current))
       toastTimerRef.current = null
     }, nextToast.action ? 8500 : 5500)
+  }
+
+  function openWorkspacePanel(target: typeof WORKSPACE_TABS[number][0]) {
+    setActiveWorkspaceHash(target)
+    setActiveNavSection('studio')
+    window.history.replaceState(null, '', `#${target}`)
+    window.requestAnimationFrame(() => {
+      const panel = document.getElementById(target)
+      panel?.scrollIntoView({ block: 'start' })
+      panel?.focus({ preventScroll: true })
+    })
   }
 
   async function runToastAction(action: NonNullable<Toast['action']>) {
@@ -2817,6 +2844,10 @@ function App() {
             className={activeWorkspaceHash === 'queue-panel' ? 'rail-link active' : 'rail-link'}
             aria-current={activeWorkspaceHash === 'queue-panel' ? 'page' : undefined}
             title={queueSummaryLabel}
+            onClick={(event) => {
+              event.preventDefault()
+              openWorkspacePanel('queue-panel')
+            }}
           >
             <FileText size={20} aria-hidden="true" />
             <span>Queue</span>
@@ -2827,6 +2858,10 @@ function App() {
             className={activeWorkspaceHash === 'library-panel' ? 'rail-link active' : 'rail-link'}
             aria-current={activeWorkspaceHash === 'library-panel' ? 'page' : undefined}
             title={librarySummaryLabel}
+            onClick={(event) => {
+              event.preventDefault()
+              openWorkspacePanel('library-panel')
+            }}
           >
             <Download size={20} aria-hidden="true" />
             <span>Library</span>
@@ -2969,11 +3004,7 @@ function App() {
                       aria-controls={target}
                       tabIndex={isActive ? 0 : -1}
                       onKeyDown={handleWorkspaceTabKeyDown}
-                      onClick={() => {
-                        setActiveWorkspaceHash(target)
-                        setActiveNavSection('studio')
-                        window.history.replaceState(null, '', `#${target}`)
-                      }}
+                      onClick={() => openWorkspacePanel(target)}
                     >
                       {label}
                       {target === 'queue-panel' && queueJobs.length > 0 ? <small>{queueJobs.length}</small> : null}
@@ -3061,7 +3092,7 @@ function App() {
 
               <div className="workspace-secondary-grid">
             {queueJobs.length > 0 ? (
-              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue">
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue" tabIndex={-1}>
                 <div className="section-heading">
                   <span>Queue ({queueJobs.length})</span>
                 </div>
@@ -3177,20 +3208,20 @@ function App() {
                 </ul>
               </section>
             ) : (
-              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue">
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue" tabIndex={-1}>
                 <div className="section-heading">
                   <span>Queue (0)</span>
                 </div>
                 <div className="compact-empty">
                   <FileText size={28} aria-hidden="true" />
                   <strong>Queue is empty</strong>
-                  <span>Add long-form jobs when you need resumable chapter output.</span>
+                  <span>Use Queue in Properties to create a resumable long-form or chapter export.</span>
                 </div>
               </section>
             )}
 
             {library.length > 0 ? (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library">
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library" tabIndex={-1}>
                 <div className="section-heading">
                   <span>Library ({library.length})</span>
                   <button
@@ -3228,14 +3259,14 @@ function App() {
                 </ul>
               </section>
             ) : (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library">
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library" tabIndex={-1}>
                 <div className="section-heading">
                   <span>Library (0)</span>
                 </div>
                 <div className="compact-empty">
                   <Download size={28} aria-hidden="true" />
                   <strong>No saved clips</strong>
-                  <span>Saved clips appear here with download actions.</span>
+                  <span>Generated clips saved on this device appear here with playback and export controls.</span>
                 </div>
               </section>
             )}
@@ -3408,20 +3439,24 @@ function App() {
                     <small>Local support bundle. No script text or imported URLs.</small>
                   </span>
                 </div>
-                <div className="diagnostics-facts">
-                  <span>WebGPU: {runtimeLabel}</span>
-                  <span>Opus: {opusSupported() ? 'available' : 'unavailable'}</span>
-                  <span>M4B: {m4bCapability?.supported ? 'AAC ready' : 'fallback'}</span>
-                  <span>Storage: {storageEstimate ?? 'unknown'}</span>
-                  <span aria-label={`Cross-Origin Storage: ${crossOriginStorage.message}`}>COS: {crossOriginStorageShortLabel(crossOriginStorage.usable)}</span>
-                  <span aria-label={`Transformers readiness: ${transformersReadiness.criteria.map((criterion) => `${criterion.label}: ${criterion.met ? 'pass' : 'pending'}`).join(' | ')}`}>
-                    Transformers: {TRANSFORMERS_RUNTIME_VERSION}
-                  </span>
-                  <span aria-label={`Piper-plus support: ${piperPlusSupport.notes.join(' ')}`}>Piper: {piperPlusSupport.supported ? 'available' : 'unavailable'}</span>
-                </div>
-                <small className="diagnostics-detail">
-                  COS: {crossOriginStorage.message} Transformers: {transformersReadiness.readyToSwitch ? 'ready for 4.3.' : 'holding current runtime.'} Piper: {piperPlusSupport.notes.join(' ')}
-                </small>
+                <dl className="diagnostics-facts">
+                  <div><dt>Runtime</dt><dd title={runtimeLabel}>{runtimeLabel}</dd></div>
+                  <div><dt>Opus export</dt><dd>{opusSupported() ? 'Available' : 'Unavailable'}</dd></div>
+                  <div><dt>M4B export</dt><dd>{m4bCapability?.supported ? 'AAC ready' : 'ZIP fallback'}</dd></div>
+                  <div><dt>Storage</dt><dd title={storageEstimate ?? 'Unknown'}>{storageEstimate ?? 'Unknown'}</dd></div>
+                  <div><dt>Storage mode</dt><dd title={crossOriginStorage.message}>{crossOriginStorageShortLabel(crossOriginStorage.usable)}</dd></div>
+                  <div>
+                    <dt>Transformers</dt>
+                    <dd title={transformersReadiness.criteria.map((criterion) => `${criterion.label}: ${criterion.met ? 'pass' : 'pending'}`).join(' | ')}>{TRANSFORMERS_RUNTIME_VERSION}</dd>
+                  </div>
+                  <div><dt>Piper-plus</dt><dd title={piperPlusSupport.notes.join(' ')}>{piperPlusSupport.supported ? 'Available' : 'Unavailable'}</dd></div>
+                </dl>
+                <details className="diagnostics-technical">
+                  <summary>Runtime details</summary>
+                  <small className="diagnostics-detail">
+                    Storage isolation: {crossOriginStorage.message} Transformers upgrade: {transformersReadiness.readyToSwitch ? 'ready for 4.3.' : 'holding current runtime.'} Piper-plus: {piperPlusSupport.notes.join(' ')}
+                  </small>
+                </details>
                 <div className="diagnostics-actions">
                   <button type="button" onClick={handleCopyDiagnostics} disabled={diagnosticsAction !== null}>
                     {diagnosticsAction === 'copy' ? <Loader2 size={13} aria-hidden="true" /> : <SquareCode size={13} aria-hidden="true" />}
@@ -4068,9 +4103,9 @@ function App() {
         </section>
 
         <section className="technical-note" id="docs">
-          <span>How it works</span>
+          <span>Local-first by design</span>
           <p>
-            Kokoro 82M and Supertonic run locally in your browser via Transformers.js; KittenTTS runs through its WebGPU shader engine; experimental Piper-plus runs through WASM and ONNX Runtime when enabled. English Kokoro WASM q8 loads from this site first; multilingual voice bins, timestamped Kokoro, Supertonic, KittenTTS weights, Piper-plus model assets, and Kokoro WebGPU fp32 remain HF-hosted. No server involved.
+            BetterTTS synthesizes on this device. The web edition uses WebGPU or WebAssembly; the desktop edition can use a verified native CPU model pack. Models download only when first needed and remain cached for reuse.
           </p>
           <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank" rel="noreferrer">
             Model card <ExternalLink size={15} aria-hidden="true" />
@@ -4086,6 +4121,7 @@ function App() {
               </a>
             </div>
             <table>
+              <caption className="sr-only">Available local speech engines and models</caption>
               <thead>
                 <tr>
                   <th>Model</th>
@@ -4107,12 +4143,13 @@ function App() {
                 ))}
               </tbody>
             </table>
-            <p>Kokoro voices are wired for English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Kokoro Japanese and Chinese remain unavailable until a browser-safe G2P path is available; Piper-plus covers additional languages in the browser.</p>
+            <p>Kokoro voices are wired for English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Kokoro Japanese and Chinese remain unavailable until a browser-safe G2P path is available; Piper-plus covers additional languages on device.</p>
             <div className="runtime-license-panel" aria-label="Runtime licenses">
               <div className="section-heading">
                 <span>Runtime licenses</span>
               </div>
               <table>
+                <caption className="sr-only">Licenses for runtime components</caption>
                 <thead>
                   <tr>
                     <th>Component</th>
@@ -4134,17 +4171,16 @@ function App() {
 
           <div className="hosting-panel">
             <div className="section-heading">
-              <span>Hosting on GitHub Pages</span>
-              <SquareCode size={18} aria-hidden="true" />
+              <span>Privacy &amp; portability</span>
+              <Info size={18} aria-hidden="true" />
             </div>
-            <p>BetterTTS builds to plain static files. No backend, no database, no GitHub Actions.</p>
-            <pre>
-              <code>{`npm install
-npm run deploy
-# Builds, syncs model assets, and publishes dist/ to gh-pages`}</code>
-            </pre>
-            <a href="https://docs.github.com/pages" target="_blank" rel="noreferrer">
-              GitHub Pages docs <ExternalLink size={15} aria-hidden="true" />
+            <ul className="trust-list">
+              <li><Check size={16} aria-hidden="true" /><span>No account, telemetry, or cloud render queue.</span></li>
+              <li><Check size={16} aria-hidden="true" /><span>Scripts, generated audio, diagnostics, and imported text stay on this device.</span></li>
+              <li><Check size={16} aria-hidden="true" /><span>Saved clips, queue jobs, and model caches remain under your control.</span></li>
+            </ul>
+            <a href="https://github.com/SysAdminDoc/BetterTTS#readme" target="_blank" rel="noreferrer">
+              Project documentation <ExternalLink size={15} aria-hidden="true" />
             </a>
           </div>
         </section>

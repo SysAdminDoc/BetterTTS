@@ -227,8 +227,13 @@ async function runSmoke() {
 
     await desktop.page.getByRole('button', { name: 'System & diagnostics' }).click()
     await desktop.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'diagnostics-light.png'), fullPage: false })
     await desktop.page.getByRole('button', { name: 'Copy JSON' }).click()
     await desktop.page.getByText('Diagnostics copied to clipboard.').waitFor({ timeout: 20000 })
+    await desktop.page.evaluate(() => window.dispatchEvent(new Event('bettertts-update-ready')))
+    await desktop.page.getByRole('button', { name: 'Refresh now' }).waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('button', { name: /Switch to dark theme/ }).click()
 
     console.log('Checking experimental Piper-plus controls...')
     await desktop.page.getByRole('checkbox', { name: 'Enable experimental Piper-plus' }).check()
@@ -266,6 +271,8 @@ async function runSmoke() {
     await desktop.page.getByRole('tab', { name: /Queue/ }).click()
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'queue-dark.png'), fullPage: false })
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })
     const queueChunks = desktop.page.getByLabel('Smoke queue completed chunks')
     await queueChunks.getByRole('button', { name: 'Play' }).first().click()
@@ -283,6 +290,7 @@ async function runSmoke() {
     await chunkEditor.getByRole('button', { name: 'Regenerate' }).waitFor({ timeout: 20000 })
     await chunkEditor.getByRole('button', { name: 'Cancel' }).click()
     await queue.getByRole('button', { name: 'Remove queue job Smoke queue' }).click()
+    await queue.getByText('Queue is empty').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await queue.getByText('Smoke queue').waitFor({ timeout: 20000 })
 
@@ -290,14 +298,18 @@ async function runSmoke() {
     await desktop.page.getByRole('tab', { name: /Library/ }).click()
     const libraryPanel = desktop.page.getByLabel('Clip library')
     await libraryPanel.scrollIntoViewIfNeeded()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'library-dark.png'), fullPage: false })
     await libraryPanel.getByRole('button', { name: 'Play' }).click()
     await libraryPanel.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByText(/Resumed at/).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Remove Smoke library clip' }).click()
+    await libraryPanel.getByText('No saved clips').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Clear library' }).click()
+    await libraryPanel.getByText('No saved clips').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
     await desktop.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
@@ -311,6 +323,12 @@ async function runSmoke() {
     })
     await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'desktop.png'), fullPage: false })
+    await desktop.page.getByRole('link', { name: 'Models', exact: true }).click()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'models-dark.png'), fullPage: false })
+    await desktop.page.getByRole('link', { name: 'Docs', exact: true }).click()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'docs-dark.png'), fullPage: false })
     await desktopContext.close()
 
     console.log('Checking mobile fallback state...')
@@ -372,7 +390,16 @@ async function runSmoke() {
     const summary = {
       ok: true,
       url: baseUrl,
-      screenshots: ['dist/smoke/desktop.png', 'dist/smoke/desktop-light.png', 'dist/smoke/mobile.png'],
+      screenshots: [
+        'dist/smoke/desktop.png',
+        'dist/smoke/desktop-light.png',
+        'dist/smoke/mobile.png',
+        'dist/smoke/queue-dark.png',
+        'dist/smoke/library-dark.png',
+        'dist/smoke/diagnostics-light.png',
+        'dist/smoke/models-dark.png',
+        'dist/smoke/docs-dark.png',
+      ],
       allowedConsoleMessages: allMessages,
     }
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
