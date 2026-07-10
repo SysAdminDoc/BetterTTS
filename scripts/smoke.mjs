@@ -187,7 +187,7 @@ async function openSeededApp(context, jobId) {
   await page.getByText('BetterTTS').first().waitFor({ timeout: 20000 })
   await seedCompletedQueueJob(page, jobId)
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
+  await page.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
   return { page, messages }
 }
 
@@ -198,10 +198,11 @@ async function runSmoke() {
   mkdirSync(smokeDir, { recursive: true })
   console.log(`Starting smoke server at ${baseUrl}`)
   const server = await startStaticServer()
+  let browser
   try {
     console.log('Running Chromium smoke checks...')
 
-    const browser = await chromium.launch({ headless: true })
+    browser = await chromium.launch({ headless: true })
     const desktopContext = await browser.newContext({
       acceptDownloads: true,
       viewport: { width: 1440, height: 950 },
@@ -252,6 +253,16 @@ async function runSmoke() {
     await desktop.page.getByText('Import supports .txt, .epub, .pdf, and .docx files.').waitFor({ timeout: 20000 })
 
     console.log('Checking queue playback controls...')
+    const outputTab = desktop.page.getByRole('tab', { name: /Output/ })
+    await outputTab.focus()
+    await outputTab.press('ArrowRight')
+    if (await desktop.page.getByRole('tab', { name: /Queue/ }).getAttribute('aria-selected') !== 'true') {
+      throw new Error('ArrowRight did not select the next render workspace tab')
+    }
+    await desktop.page.getByRole('tab', { name: /Queue/ }).press('ArrowLeft')
+    if (await outputTab.getAttribute('aria-selected') !== 'true') {
+      throw new Error('ArrowLeft did not restore the previous render workspace tab')
+    }
     await desktop.page.getByRole('tab', { name: /Queue/ }).click()
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
@@ -291,7 +302,7 @@ async function runSmoke() {
     await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
     await desktop.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
     await desktop.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-    await desktop.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
+    await desktop.page.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
     if ((await desktop.page.evaluate(() => document.documentElement.dataset.theme)) === 'light') await desktop.page.getByRole('button', { name: /Switch to dark theme/ }).click()
     await desktop.page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
@@ -325,6 +336,15 @@ async function runSmoke() {
       })
     })
     const mobile = await openSeededApp(mobileContext, 'smoke-unsupported')
+    const mobileWorkspaceNav = mobile.page.getByRole('navigation', { name: 'Workspace' })
+    for (const destination of ['Studio', 'Queue', 'Library', 'Models', 'Diagnostics', 'Docs']) {
+      if (!(await mobileWorkspaceNav.getByRole('link', { name: new RegExp(`^${destination}`) }).isVisible())) {
+        throw new Error(`Mobile workspace destination is not visible: ${destination}`)
+      }
+    }
+    if (!(await mobile.page.locator('.editor-actions').getByRole('button', { name: 'Generate audio' }).isVisible())) {
+      throw new Error('Mobile editor-level Generate audio action is not visible')
+    }
     await mobile.page.getByRole('tab', { name: /Queue/ }).click()
     const fallbackText = await mobile.page.locator('.capability-strip').innerText()
     if (!fallbackText.includes('chaptered ZIP fallback')) throw new Error(`Missing M4B fallback copy: ${fallbackText}`)
@@ -335,7 +355,7 @@ async function runSmoke() {
     await mobile.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
     await mobile.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
     await mobile.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-    await mobile.page.getByRole('button', { name: 'Generate audio' }).waitFor({ timeout: 20000 })
+    await mobile.page.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
     if ((await mobile.page.evaluate(() => document.documentElement.dataset.theme)) === 'dark') await mobile.page.getByRole('button', { name: /Switch to light theme/ }).click()
     await mobile.page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
@@ -345,8 +365,6 @@ async function runSmoke() {
     await mobile.page.waitForTimeout(200)
     await mobile.page.screenshot({ path: join(smokeDir, 'mobile.png'), fullPage: false })
     await mobileContext.close()
-    await browser.close()
-
     const allMessages = [...desktop.messages, ...mobile.messages]
     const unexpected = allMessages.filter((msg) => !allowedConsole.some((allowed) => msg.includes(allowed)))
     if (unexpected.length > 0) throw new Error(`Unexpected console messages:\n${unexpected.join('\n')}`)
@@ -360,6 +378,8 @@ async function runSmoke() {
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
     console.log(JSON.stringify(summary, null, 2))
   } finally {
+    await browser?.close().catch(() => undefined)
+    server.closeAllConnections()
     await new Promise((resolve) => server.close(resolve))
   }
 }

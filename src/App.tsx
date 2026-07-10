@@ -25,7 +25,7 @@ import {
   Waves,
   X,
 } from 'lucide-react'
-import { Component, type ChangeEvent, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, type ChangeEvent, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   collectDiagnostics,
@@ -144,13 +144,31 @@ type Toast = {
   }
 }
 
-const STARTER_TEXT = `Welcome to BetterTTS — free text-to-speech that runs entirely in your browser.
+const STARTER_TEXT = `Welcome to BetterTTS — private text-to-speech that runs entirely on your device.
 
-No server, no signup, unlimited use — up to 5,000 characters per run. Your text never leaves this device.
+No account, no cloud processing, no usage caps — up to 5,000 characters per run. Your text and audio stay on this device.
 
-Pick a voice from the control console, then click Generate audio. The Kokoro 82M neural model will synthesize your text into natural-sounding speech.
+Choose an engine and voice in Properties, then select Generate audio. BetterTTS will synthesize your script locally.
 
 Download as WAV, MP3, or Opus when you're done.`
+
+const WORKSPACE_TABS = [['generated-output', 'Output'], ['queue-panel', 'Queue'], ['library-panel', 'Library']] as const
+
+function handleWorkspaceTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  const tabs = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
+  const currentIndex = tabs.indexOf(event.currentTarget)
+  if (currentIndex < 0 || tabs.length === 0) return
+
+  event.preventDefault()
+  const nextIndex = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? tabs.length - 1
+      : (currentIndex + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + tabs.length) % tabs.length
+  tabs[nextIndex].focus()
+  tabs[nextIndex].click()
+}
 
 const MODEL_ROWS = [
   ['Kokoro 82M', 'Kokoro local', '82M', 'EN / ES / FR / HI / IT / PT', 'Ready'],
@@ -1821,7 +1839,7 @@ function App() {
       showToast({ tone: 'warn', message: `Audio ready, but ${flaggedSentences} sentence${flaggedSentences === 1 ? ' was' : 's were'} flagged as possibly truncated or missing — details in Diagnostics.` })
     } else {
       setStatus('Local audio ready')
-      showToast({ tone: 'ok', message: opts.successMessage ?? 'Audio generated locally in your browser.' })
+      showToast({ tone: 'ok', message: opts.successMessage ?? 'Audio generated locally on this device.' })
     }
     if (!abortRef.current && generated.length > 0) {
       // Land keyboard/screen-reader focus on the fresh results instead of
@@ -1999,6 +2017,11 @@ function App() {
       generatingRef.current = false
       setIsGenerating(false)
     }
+  }
+
+  function cancelGeneration() {
+    abortRef.current = true
+    setStatus('Cancelling…')
   }
 
   async function previewVoice(id: string, sampleText = kokoroLanguageForVoice(id).previewText) {
@@ -2751,7 +2774,8 @@ function App() {
   }
 
   return (
-      <main className="app-shell">
+      <div className="app-shell">
+        <a className="skip-link" href="#script-editor">Skip to script editor</a>
         <header className="topbar">
           <a className="brand" href="#studio" aria-label="BetterTTS home">
             <span className="brand-mark" aria-hidden="true">
@@ -2765,7 +2789,7 @@ function App() {
           </div>
           <div className="topbar-status" aria-label="Runtime status">
             <span className="status-dot" aria-hidden="true" />
-            <span>No backend</span>
+            <span>No cloud</span>
             <span>100% local</span>
           </div>
           <button
@@ -2827,6 +2851,7 @@ function App() {
           </a>
         </nav>
 
+        <main className="app-content">
         <section className="studio-grid" id="studio">
           <div className="studio-workbench">
             <div className="editor-column">
@@ -2898,9 +2923,18 @@ function App() {
                     Import
                   </button>
                 </div>
+                <button
+                  type="button"
+                  className={isGenerating ? 'mobile-generate cancel' : 'mobile-generate'}
+                  onClick={isGenerating ? cancelGeneration : handleGenerate}
+                >
+                  {isGenerating ? <X size={17} aria-hidden="true" /> : <Waves size={17} aria-hidden="true" />}
+                  {isGenerating ? 'Cancel generation' : 'Generate audio'}
+                </button>
               </div>
               <div className="editor-frame">
                 <textarea
+                  id="script-editor"
                   value={text}
                   onChange={(event) => setText(event.target.value)}
                   spellCheck={false}
@@ -2923,7 +2957,7 @@ function App() {
                   <span aria-live="polite">{status}</span>
                 </div>
                 <div className="workspace-tabs" role="tablist" aria-label="Render workspace">
-                {([['generated-output', 'Output'], ['queue-panel', 'Queue'], ['library-panel', 'Library']] as const).map(([target, label]) => {
+                {WORKSPACE_TABS.map(([target, label]) => {
                   const isActive = activeWorkspaceHash === target || (target === 'generated-output' && !['queue-panel', 'library-panel'].includes(activeWorkspaceHash))
                   return (
                     <button
@@ -2933,6 +2967,8 @@ function App() {
                       className={isActive ? 'active' : undefined}
                       aria-selected={isActive}
                       aria-controls={target}
+                      tabIndex={isActive ? 0 : -1}
+                      onKeyDown={handleWorkspaceTabKeyDown}
                       onClick={() => {
                         setActiveWorkspaceHash(target)
                         setActiveNavSection('studio')
@@ -3019,7 +3055,7 @@ function App() {
               )}
               <p className="privacy-note">
                 <Info size={16} aria-hidden="true" />
-                100% private — your text and audio never leave this browser. Model files are cached locally after first use.
+                100% private — your text and audio stay on this device. Model files are cached locally after first use.
               </p>
             </section>
 
@@ -4004,10 +4040,7 @@ function App() {
                 <button
                   type="button"
                   className="generate-button cancel"
-                  onClick={() => {
-                    abortRef.current = true
-                    setStatus('Cancelling…')
-                  }}
+                  onClick={cancelGeneration}
                 >
                   <X size={18} aria-hidden="true" />
                   Cancel
@@ -4115,6 +4148,7 @@ npm run deploy
             </a>
           </div>
         </section>
+        </main>
 
         <footer>
           <div className="system-rail" aria-label="System status">
@@ -4159,7 +4193,7 @@ npm run deploy
             ) : null}
           </div>
         ) : null}
-      </main>
+      </div>
   )
 }
 
