@@ -1,6 +1,6 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.19.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)

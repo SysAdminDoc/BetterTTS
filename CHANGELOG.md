@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.19.0 - 2026-07-09
+
+### Added
+- **Recoverable destructive actions.** Removing a queue job or saved clip, and clearing the clip library, now offers an Undo action backed by complete IndexedDB snapshots; queue chunk audio and clip blobs are restored atomically.
+- **Complete mobile workspace.** A compact six-destination rail keeps Studio, Queue, Library, Models, Diagnostics, and Docs available on small screens, while a full-width Generate action now sits beside the mobile script workflow.
+
+### Changed
+- **Local-first product shell.** Starter copy, status text, model documentation, privacy guidance, fatal recovery, metadata, and README content now describe the web and Windows editions consistently without browser-only or developer-facing deployment language.
+- **Navigation and accessibility.** The shell has a skip link and main landmark, workspace tabs use roving focus with arrow/Home/End navigation, panel actions restore focus, tables have captions, and diagnostics use semantic term/value facts with advanced details collapsed by default.
+- **Actionable recovery feedback.** Update-ready and resumable-job notices now include direct actions; initial queue/library load failures are recorded and surfaced instead of failing silently; fatal recovery explains that saved work remains local.
+- **Theme and responsive polish.** Browser chrome colors now derive from the same semantic theme tokens as the interface, mobile URL import is compact, and the editor-level primary action spans the available width.
+- **Lean verified Windows package.** The x64 installer excludes renderer dependencies already bundled by Vite, native binaries for other operating systems/architectures, probe model caches, and smoke captures. The installer dropped from 395.1 MB to 226.7 MB; an opt-in packaged smoke now loads the verified q8 model through the trimmed native host before release.
+
+### Tests
+- 234 -> 238 tests across 29 files, with regression coverage for queue/library snapshot restoration and damaged clip records.
+- Playwright smoke coverage now verifies keyboard tabs, mobile navigation, update actions, Queue/Library empty states and Undo flows, and eight rendered views across both themes; failure teardown reliably closes Chromium and the local server.
+
 ## v0.18.0 - 2026-07-09
 
 ### Added

@@ -38,7 +38,7 @@ describe('collectDiagnostics', () => {
     recordDiagnosticEvent('warn', 'AAC unavailable')
 
     const bundle = await collectDiagnostics({
-      appVersion: '0.18.0',
+      appVersion: '0.19.0',
       selection: {
         engine: 'kokoro',
         engineStatus: 'English US - WebAssembly q8',
@@ -99,7 +99,7 @@ describe('collectDiagnostics', () => {
     })
 
     expect(bundle.generatedAt).toBe('2026-07-09T00:00:00.000Z')
-    expect(bundle.app.version).toBe('0.18.0')
+    expect(bundle.app.version).toBe('0.19.0')
     expect(bundle.app.location).toBe('https://example.test/BetterTTS/')
     expect(bundle.browser).toMatchObject({ userAgent: 'UnitTest', hardwareConcurrency: 8, deviceMemoryGb: 16 })
     expect(bundle.capabilities.webGpu.status).toBe('no adapter available')
