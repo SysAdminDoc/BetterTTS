@@ -12,6 +12,7 @@ const SETTINGS_KEYS = [
   'bettertts-backend',
   'bettertts-playback-v1',
   'bettertts-experimental-piper',
+  'bettertts-current-text',
 ] as const
 
 type BackupAsset = {

@@ -25,12 +25,25 @@ export type DesktopUpdaterBridge = {
   onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void
 }
 
+export type DesktopProjectResult = {
+  canceled: boolean
+  name?: string
+  bytes?: Uint8Array
+}
+
+export type DesktopProjectBridge = {
+  save: (bytes: Uint8Array, suggestedName: string, saveAs?: boolean) => Promise<DesktopProjectResult>
+  open: () => Promise<DesktopProjectResult>
+  forget: () => Promise<DesktopProjectResult>
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
   versions: { electron: string; chrome: string; node: string }
   nativeTts?: NativeTtsBridge
   updater?: DesktopUpdaterBridge
+  projects?: DesktopProjectBridge
 }
 
 declare global {
@@ -64,4 +77,9 @@ export function getNativeTtsBridge(): NativeTtsBridge | null {
 export function getDesktopUpdaterBridge(): DesktopUpdaterBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.updater ?? null
+}
+
+export function getDesktopProjectBridge(): DesktopProjectBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.projects ?? null
 }

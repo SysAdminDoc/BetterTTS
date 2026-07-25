@@ -12,6 +12,7 @@
 - Added checked-in raw/gzip budgets for the initial shell and every heavy lazy asset group. Production builds fail on regressions, browser smoke rejects eager engine/parser loads and records time to interactive, and the pinned native probe enforces time to first audio plus real-time factor.
 - Added an opt-in real-engine release lane that uses the same immutable Apache-2.0 Kokoro q8 revision in Chromium and the packaged Windows app, decodes generated WAVs, validates cues, cancellation and partial-queue resume, records timing/RTF, and removes its temporary native model cache.
 - Added an unsigned Windows static-update path with Pages-hosted `latest.yml`, versioned GitHub Release installer/blockmap assets, six-hour and manual checks, explicit download/restart actions, sanitized failure recovery, packaged bridge/UI smoke coverage, checksum validation, and a live deployment gate.
+- Added portable `.bettertts` desktop projects with atomic saves, checksum-validated open/restore, crash-resumable queue and clip assets, debounced autosave, browser-backup migration, and project-wide title/script/filename search.
 
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.

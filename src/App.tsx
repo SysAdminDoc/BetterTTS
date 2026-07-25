@@ -50,7 +50,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { getDesktopUpdaterBridge } from './platform/index.ts'
+import { getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -873,6 +873,9 @@ function App() {
   const [cacheAction, setCacheAction] = useState<string | null>(null)
   const [diagnosticsAction, setDiagnosticsAction] = useState<'copy' | 'download' | null>(null)
   const [backupAction, setBackupAction] = useState<'download' | 'inspect' | 'restore' | null>(null)
+  const [projectAction, setProjectAction] = useState<'open' | 'save' | 'save-as' | 'autosave' | null>(null)
+  const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
+  const [projectSearch, setProjectSearch] = useState('')
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
@@ -901,6 +904,8 @@ function App() {
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
+  const projectSaveInFlightRef = useRef(false)
+  const projectAutosaveQueuedRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
@@ -978,6 +983,20 @@ function App() {
   const transformersReadiness = useMemo(() => transformersUpgradeReadiness(), [])
   const piperPlusSupport = useMemo(() => piperPlusRuntimeSupport(), [])
   const desktopUpdater = useMemo(() => getDesktopUpdaterBridge(), [])
+  const desktopProjects = useMemo(() => getDesktopProjectBridge(), [])
+  const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
+  const visibleQueueJobs = useMemo(() => normalizedProjectSearch
+    ? queueJobs.filter((job) =>
+      job.title.toLocaleLowerCase().includes(normalizedProjectSearch)
+      || job.chunks.some((chunk) => chunk.text.toLocaleLowerCase().includes(normalizedProjectSearch)),
+    )
+    : queueJobs, [normalizedProjectSearch, queueJobs])
+  const visibleLibrary = useMemo(() => normalizedProjectSearch
+    ? library.filter((clip) =>
+      clip.label.toLocaleLowerCase().includes(normalizedProjectSearch)
+      || clip.filename.toLocaleLowerCase().includes(normalizedProjectSearch),
+    )
+    : library, [library, normalizedProjectSearch])
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
     : engine === 'piper'
@@ -1386,6 +1405,7 @@ function App() {
       const preview = await restorePortableBackup(pendingBackup.file)
       setLibrary(await listClips())
       setQueueJobs(await listJobs())
+      setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
       setPendingBackup(null)
       await refreshStorageEstimate()
       showToast({ tone: 'ok', message: `Restored ${preview.clips} clips and ${preview.jobs} jobs.` })
@@ -1394,6 +1414,69 @@ function App() {
       showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not restore backup.' })
     } finally {
       setBackupAction(null)
+    }
+  }
+
+  async function createProjectBytes(): Promise<{ bytes: Uint8Array; preview: BackupPreview }> {
+    const { createPortableBackup } = await import('./lib/backup.ts')
+    const project = await createPortableBackup()
+    return { bytes: new Uint8Array(await project.blob.arrayBuffer()), preview: project.preview }
+  }
+
+  async function handleSaveProject(saveAs = false) {
+    if (!desktopProjects || projectAction || projectSaveInFlightRef.current) return
+    setProjectAction(saveAs ? 'save-as' : 'save')
+    projectSaveInFlightRef.current = true
+    try {
+      const project = await createProjectBytes()
+      const suggestedName = queueJobs[0]?.title || activeProjectName?.replace(/\.bettertts$/i, '') || 'Untitled project'
+      const saved = await desktopProjects.save(project.bytes, suggestedName, saveAs)
+      if (!saved.canceled && saved.name) {
+        setActiveProjectName(saved.name)
+        showToast({
+          tone: 'ok',
+          message: `${saved.name} saved atomically with ${project.preview.clips} clips and ${project.preview.jobs} jobs.`,
+        })
+      }
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'project.save')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not save the project.' })
+    } finally {
+      projectSaveInFlightRef.current = false
+      setProjectAction(null)
+    }
+  }
+
+  async function handleOpenProject() {
+    if (!desktopProjects || projectAction || isGenerating) return
+    setProjectAction('open')
+    projectSaveInFlightRef.current = true
+    try {
+      const opened = await desktopProjects.open()
+      if (opened.canceled || !opened.bytes || !opened.name) return
+      const file = new File([opened.bytes as Uint8Array<ArrayBuffer>], opened.name, {
+        type: 'application/vnd.bettertts.backup+zip',
+      })
+      const { inspectPortableBackup, restorePortableBackup } = await import('./lib/backup.ts')
+      const preview = await inspectPortableBackup(file)
+      await restorePortableBackup(file)
+      setLibrary(await listClips())
+      setQueueJobs(await listJobs())
+      setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
+      setActiveProjectName(opened.name)
+      setProjectSearch('')
+      await refreshStorageEstimate()
+      showToast({
+        tone: 'ok',
+        message: `Opened ${opened.name}: ${preview.clips} clips and ${preview.jobs} resumable jobs.`,
+      })
+    } catch (error) {
+      await desktopProjects.forget().catch(() => undefined)
+      recordDiagnosticEvent('error', error, 'project.open')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not open the project.' })
+    } finally {
+      projectSaveInFlightRef.current = false
+      setProjectAction(null)
     }
   }
 
@@ -1419,6 +1502,37 @@ function App() {
     refreshStorageEstimate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    try { window.localStorage.setItem('bettertts-current-text', text) } catch {}
+  }, [text])
+
+  useEffect(() => {
+    if (!desktopProjects || !activeProjectName) return
+    const timer = window.setTimeout(async () => {
+      if (projectSaveInFlightRef.current) {
+        projectAutosaveQueuedRef.current = true
+        return
+      }
+      projectSaveInFlightRef.current = true
+      setProjectAction('autosave')
+      try {
+        do {
+          projectAutosaveQueuedRef.current = false
+          const project = await createProjectBytes()
+          const saved = await desktopProjects.save(project.bytes, activeProjectName, false)
+          if (saved.canceled) throw new Error('Project autosave was canceled.')
+        } while (projectAutosaveQueuedRef.current)
+      } catch (error) {
+        recordDiagnosticEvent('warn', error, 'project.autosave')
+        showToast({ tone: 'warn', message: 'Project autosave failed. Local crash recovery remains available; use Save as to choose a writable location.' })
+      } finally {
+        projectSaveInFlightRef.current = false
+        setProjectAction(null)
+      }
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [activeProjectName, desktopProjects, library, queueJobs, text])
 
   useEffect(() => {
     const onUpdateReady = () =>
@@ -3342,7 +3456,7 @@ function App() {
                   <span>{m4bCapabilityText(m4bCapability)}</span>
                 </div>
                 <ul className="result-list" aria-label="Queued jobs">
-                  {queueJobs.map((job) => {
+                {visibleQueueJobs.map((job) => {
                     const { done, total, pct } = jobProgress(job)
                     const isActive = activeJobId === job.id
                     const doneChunks = job.chunks.filter((chunk) => chunk.status === 'done')
@@ -3474,7 +3588,7 @@ function App() {
                   </button>
                 </div>
                 <ul className="result-list" aria-label="Saved clips">
-                  {library.map((clip) => (
+                  {visibleLibrary.map((clip) => (
                     <li key={clip.id}>
                       <LibraryClipRow
                         clip={clip}
@@ -3674,6 +3788,51 @@ function App() {
                   <p className="cache-empty">Checking model cache…</p>
                 )}
               </div>
+                {desktopProjects ? (
+                  <div className="diagnostics-panel backup-panel" aria-label="Desktop project">
+                    <div className="cache-manager-head">
+                      <span>
+                        <strong>{activeProjectName ?? 'Desktop project'}</strong>
+                        <small>
+                          {activeProjectName
+                            ? 'Autosaves editor, queue, settings, and audio after local commits.'
+                            : 'Open or create a portable .bettertts project. Opening replaces current local workspace data.'}
+                        </small>
+                      </span>
+                      {projectAction === 'autosave' ? <small role="status">Saving…</small> : null}
+                    </div>
+                    {activeProjectName ? (
+                      <label className="project-search">
+                        <span>Search project text and clips</span>
+                        <input
+                          type="search"
+                          value={projectSearch}
+                          onChange={(event) => setProjectSearch(event.target.value)}
+                          placeholder="Title, script text, or filename"
+                        />
+                        {normalizedProjectSearch ? (
+                          <small role="status">{visibleQueueJobs.length} jobs and {visibleLibrary.length} clips match.</small>
+                        ) : null}
+                      </label>
+                    ) : null}
+                    <div className="diagnostics-actions">
+                      <button type="button" onClick={handleOpenProject} disabled={projectAction !== null || isGenerating}>
+                        {projectAction === 'open' ? <Loader2 size={13} aria-hidden="true" /> : <Upload size={13} aria-hidden="true" />}
+                        Open project
+                      </button>
+                      <button type="button" onClick={() => handleSaveProject(false)} disabled={projectAction !== null || isGenerating}>
+                        {projectAction === 'save' ? <Loader2 size={13} aria-hidden="true" /> : <FilePlus2 size={13} aria-hidden="true" />}
+                        {activeProjectName ? 'Save now' : 'Create project'}
+                      </button>
+                      {activeProjectName ? (
+                        <button type="button" onClick={() => handleSaveProject(true)} disabled={projectAction !== null || isGenerating}>
+                          {projectAction === 'save-as' ? <Loader2 size={13} aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+                          Save as
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="diagnostics-panel backup-panel" aria-label="Local data backup">
                   <div className="cache-manager-head">
                     <span>

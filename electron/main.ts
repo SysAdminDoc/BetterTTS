@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { readFile, writeFile } from 'node:fs/promises'
-import { extname, join, normalize, sep } from 'node:path'
+import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { basename, extname, join, normalize, sep } from 'node:path'
+import { readProjectFile, writeProjectFile } from './project-files.mjs'
 
 // In dev the renderer is served by Vite; in production it is served from the
 // packaged dist/ over a custom app:// scheme so we control the response headers
@@ -108,8 +109,10 @@ function registerAppProtocol(): void {
 const NATIVE_TTS_CHANNEL = 'bettertts:native-tts'
 const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
 const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
+const PROJECT_CHANNEL = 'bettertts:project'
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
+let activeProjectPath: string | null = null
 
 function sendToSubscriber(message: unknown): void {
   if (ttsHostSubscriber && !ttsHostSubscriber.isDestroyed()) {
@@ -227,6 +230,53 @@ ipcMain.on(UPDATE_ACTION_CHANNEL, (event, action: unknown) => {
   } else if (action === 'install' && updateDownloaded) {
     autoUpdater.quitAndInstall(false, true)
   }
+})
+
+ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner || !request || typeof request !== 'object') throw new Error('Invalid project request.')
+  const message = request as { action?: string; bytes?: Uint8Array; suggestedName?: string; saveAs?: boolean }
+  if (message.action === 'forget') {
+    if (IS_SMOKE && activeProjectPath) await unlink(activeProjectPath).catch(() => undefined)
+    activeProjectPath = null
+    return { canceled: false }
+  }
+  if (message.action === 'open') {
+    if (IS_SMOKE && activeProjectPath) {
+      return { canceled: false, name: basename(activeProjectPath), bytes: await readProjectFile(activeProjectPath) }
+    }
+    const choice = await dialog.showOpenDialog(owner, {
+      title: 'Open BetterTTS project',
+      properties: ['openFile'],
+      filters: [{ name: 'BetterTTS project', extensions: ['bettertts'] }],
+    })
+    if (choice.canceled || !choice.filePaths[0]) return { canceled: true }
+    const path = choice.filePaths[0]
+    const bytes = await readProjectFile(path)
+    activeProjectPath = path
+    return { canceled: false, name: basename(path), bytes }
+  }
+  if (message.action === 'save') {
+    if (!message.bytes) throw new Error('Project data is missing.')
+    let path = message.saveAs ? null : activeProjectPath
+    if (IS_SMOKE) path = join(app.getPath('temp'), `bettertts-project-smoke-${process.pid}.bettertts`)
+    if (!path) {
+      const safeName = [...(message.suggestedName ?? 'Untitled project')]
+        .map((character) => character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character)
+        .join('')
+        .slice(0, 80)
+      const choice = await dialog.showSaveDialog(owner, {
+        title: message.saveAs ? 'Save BetterTTS project as' : 'Save BetterTTS project',
+        defaultPath: `${safeName || 'Untitled project'}.bettertts`,
+        filters: [{ name: 'BetterTTS project', extensions: ['bettertts'] }],
+      })
+      if (choice.canceled || !choice.filePath) return { canceled: true }
+      path = choice.filePath
+    }
+    activeProjectPath = await writeProjectFile(path, message.bytes)
+    return { canceled: false, name: basename(activeProjectPath) }
+  }
+  throw new Error('Unsupported project action.')
 })
 
 // Ask the host for its runtime info without loading any model — used by the
@@ -412,9 +462,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -429,10 +479,29 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       toggle?.click()
       await new Promise((resolve) => setTimeout(resolve, 50))
       const panel = document.querySelector('[aria-label="Desktop updates"]')
+      const projectPanel = document.querySelector('[aria-label="Desktop project"]')
+      projectPanel?.scrollIntoView({ block: 'center' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
       return {
         panel: !!panel,
         checkAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Check now')),
+        projectPanel: !!projectPanel,
+        projectActions: Array.from(projectPanel?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
       }
+    })()`)
+    const systemImage = await win.webContents.capturePage()
+    await writeFile(join(app.getAppPath(), 'dist-electron', 'system-smoke.png'), systemImage.toPNG())
+    result.systemScreenshot = 'dist-electron/system-smoke.png'
+
+    result.projectIo = await win.webContents.executeJavaScript(`(async () => {
+      const projects = window.betterttsPlatform?.projects
+      if (!projects) return null
+      const source = new Uint8Array([0x50, 0x4b, 3, 4, 5])
+      const saved = await projects.save(source, 'Smoke project')
+      const opened = await projects.open()
+      const bytes = opened.bytes ? Array.from(opened.bytes) : []
+      await projects.forget()
+      return { saved: !saved.canceled && saved.name?.endsWith('.bettertts'), opened: !opened.canceled, bytes }
     })()`)
 
     try {
@@ -472,8 +541,14 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.generate &&
       Boolean(probe.platform) &&
       probe.platform?.updater === true &&
+      probe.platform?.projects === true &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
+      Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
+      ((result.updaterUi as { projectActions?: string[] } | undefined)?.projectActions?.some((label) => label?.includes('Create project')) ?? false) &&
+      Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.saved) &&
+      Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.opened) &&
+      JSON.stringify((result.projectIo as { bytes?: number[] } | undefined)?.bytes) === '[80,75,3,4,5]' &&
       Boolean(result.nativeHost) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)

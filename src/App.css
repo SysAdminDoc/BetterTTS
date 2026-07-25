@@ -1294,6 +1294,22 @@ ul.queue-chunk-list > li {
   line-height: 1.35;
 }
 
+.project-search {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.project-search > span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.project-search input {
+  min-width: 0;
+  width: 100%;
+}
+
 .cache-rows {
   display: grid;
   gap: 6px;

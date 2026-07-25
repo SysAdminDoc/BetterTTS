@@ -93,9 +93,10 @@ describe('portable backup', () => {
     await saveJob(job)
     await saveChunkBlob(job.id, 0, new Blob(['queue-audio'], { type: 'audio/wav' }))
     window.localStorage.setItem('bettertts-theme', 'light')
+    window.localStorage.setItem('bettertts-current-text', 'Draft project text')
 
     const backup = await createPortableBackup()
-    expect(backup.preview).toMatchObject({ clips: 1, jobs: 1, settings: 1 })
+    expect(backup.preview).toMatchObject({ clips: 1, jobs: 1, settings: 2 })
     await clearLibrary()
     await deleteJob(job.id)
     window.localStorage.clear()
@@ -108,6 +109,7 @@ describe('portable backup', () => {
     expect((await listJobs())[0].chunks[0].text).toBe('Private queued text.')
     expect(await (await getChunkBlob(job.id, 0))!.text()).toBe('queue-audio')
     expect(window.localStorage.getItem('bettertts-theme')).toBe('light')
+    expect(window.localStorage.getItem('bettertts-current-text')).toBe('Draft project text')
   })
 
   it('rejects files without a manifest before changing local state', async () => {
