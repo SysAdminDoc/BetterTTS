@@ -222,6 +222,123 @@ async function openSeededApp(context, jobId) {
   return { page, messages }
 }
 
+async function assertThemeContrast(page, themeName) {
+  const results = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement)
+    const resolveColor = (value) => {
+      const probe = document.createElement('span')
+      probe.style.color = value
+      document.body.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number)
+      if (!channels || channels.length !== 3) throw new Error(`Could not resolve color: ${value}`)
+      return channels
+    }
+    const luminance = (channels) => {
+      const linear = channels.map((channel) => {
+        const value = channel / 255
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+    const ratio = (foreground, background) => {
+      const a = luminance(resolveColor(root.getPropertyValue(foreground)))
+      const b = luminance(resolveColor(root.getPropertyValue(background)))
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+    return [
+      ['body text', ratio('--text', '--surface-0')],
+      ['muted text', ratio('--muted', '--surface-0')],
+      ['headings', ratio('--heading', '--surface-0')],
+      ['accent text', ratio('--accent-text', '--surface-1')],
+      ['primary actions', ratio('--accent-action-contrast', '--accent-action')],
+    ]
+  })
+  const failures = results.filter(([, ratio]) => ratio < 4.5)
+  if (failures.length > 0) {
+    throw new Error(`${themeName} contrast failures: ${failures.map(([name, ratio]) => `${name} ${ratio.toFixed(2)}:1`).join(', ')}`)
+  }
+}
+
+async function assertAccessibilityStructure(page) {
+  const structure = await page.evaluate(() => {
+    const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map((heading) => ({
+      level: Number(heading.tagName.slice(1)),
+      text: heading.textContent?.trim() ?? '',
+    }))
+    const tabProblems = Array.from(document.querySelectorAll('[role="tab"]')).flatMap((tab) => {
+      const targetId = tab.getAttribute('aria-controls')
+      const target = targetId ? document.getElementById(targetId) : null
+      if (!tab.id) return [`Tab "${tab.textContent?.trim()}" has no id`]
+      if (!target || target.getAttribute('role') !== 'tabpanel') return [`Tab "${tab.id}" has no tabpanel`]
+      const labelledBy = target.getAttribute('aria-labelledby')?.split(/\s+/) ?? []
+      return labelledBy.includes(tab.id) ? [] : [`Panel "${targetId}" is not labelled by "${tab.id}"`]
+    })
+    return {
+      headings,
+      mainCount: document.querySelectorAll('main').length,
+      navigationCount: document.querySelectorAll('nav[aria-label="Workspace"]').length,
+      tabProblems,
+    }
+  })
+  if (structure.mainCount !== 1 || structure.navigationCount !== 1) {
+    throw new Error(`Expected one main and one workspace navigation landmark; got ${structure.mainCount}/${structure.navigationCount}`)
+  }
+  if (structure.headings.filter(({ level }) => level === 1).length !== 1) {
+    throw new Error(`Expected one h1; got ${JSON.stringify(structure.headings)}`)
+  }
+  for (let index = 1; index < structure.headings.length; index += 1) {
+    if (structure.headings[index].level > structure.headings[index - 1].level + 1) {
+      throw new Error(`Heading level skipped: ${JSON.stringify(structure.headings)}`)
+    }
+  }
+  for (const expected of ['Script', 'Render monitor', 'Generated audio', 'Generation queue', 'Clip library', 'Properties', 'Model library', 'Runtime licenses', 'Privacy & portability']) {
+    if (!structure.headings.some(({ text }) => text.startsWith(expected))) {
+      throw new Error(`Missing semantic heading: ${expected}`)
+    }
+  }
+  if (structure.tabProblems.length > 0) throw new Error(structure.tabProblems.join('; '))
+
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  })
+  await page.keyboard.press('Tab')
+  if (!(await page.locator('.skip-link').evaluate((element) => element === document.activeElement))) {
+    throw new Error('Keyboard traversal did not start at the skip link')
+  }
+  await page.keyboard.press('Enter')
+  if (!(await page.getByLabel('Text to synthesize').evaluate((element) => element === document.activeElement))) {
+    throw new Error('Skip link did not focus the script editor')
+  }
+  const themeButton = page.getByRole('button', { name: /Switch to/ })
+  await themeButton.focus()
+  const focusStyle = await themeButton.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { style: style.outlineStyle, width: Number.parseFloat(style.outlineWidth) }
+  })
+  if (focusStyle.style === 'none' || focusStyle.width < 2) throw new Error(`Focus indicator is not visible: ${JSON.stringify(focusStyle)}`)
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const reducedMotion = await themeButton.evaluate((element) => ({
+    matches: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    transitionMs: getComputedStyle(element).transitionDuration.split(',').map((value) => Number.parseFloat(value) * (value.includes('ms') ? 1 : 1000)),
+  }))
+  if (!reducedMotion.matches || reducedMotion.transitionMs.some((duration) => duration > 1)) {
+    throw new Error(`Reduced-motion styles are not effective: ${JSON.stringify(reducedMotion)}`)
+  }
+
+  await page.emulateMedia({ reducedMotion: 'no-preference', forcedColors: 'active' })
+  const forcedColors = await themeButton.evaluate((element) => ({
+    matches: matchMedia('(forced-colors: active)').matches,
+    outline: getComputedStyle(element).outlineStyle,
+  }))
+  if (!forcedColors.matches || forcedColors.outline === 'none') {
+    throw new Error(`Forced-colors focus indicator is not effective: ${JSON.stringify(forcedColors)}`)
+  }
+  await page.emulateMedia({ reducedMotion: 'no-preference', forcedColors: 'none' })
+}
+
 async function runSmoke() {
   console.log('Building production app...')
   runChecked('npm', ['run', 'build'])
@@ -247,12 +364,17 @@ async function runSmoke() {
     if (!bodyLower.includes('script') || !bodyLower.includes('properties')) throw new Error('App shell did not render expected content')
     if (/Vite Error|Internal Server Error|Failed to compile/i.test(body)) throw new Error('Framework error overlay detected')
 
+    console.log('Checking semantic structure, keyboard access, and display preferences...')
+    await assertAccessibilityStructure(desktop.page)
+    await assertThemeContrast(desktop.page, await desktop.page.evaluate(() => document.documentElement.dataset.theme ?? 'initial'))
+
     console.log('Checking theme and diagnostics...')
     const beforeTheme = await desktop.page.evaluate(() => document.documentElement.dataset.theme)
     await desktop.page.getByRole('button', { name: /Switch to/ }).click()
     const afterTheme = await desktop.page.evaluate(() => document.documentElement.dataset.theme)
     if (!afterTheme || afterTheme === beforeTheme) throw new Error(`Theme toggle did not change theme; got ${afterTheme}`)
     if (afterTheme !== 'light') await desktop.page.getByRole('button', { name: /Switch to light theme/ }).click()
+    await assertThemeContrast(desktop.page, 'light')
     await desktop.page.waitForTimeout(250)
     await desktop.page.screenshot({ path: join(smokeDir, 'desktop-light.png'), fullPage: false })
 

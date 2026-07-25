@@ -318,6 +318,13 @@ footer {
   text-transform: uppercase;
 }
 
+.section-heading > :is(h2, h3) {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
 .workspace-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1767,7 +1774,8 @@ select:focus-visible {
   background: var(--surface-0);
 }
 
-.technical-note span {
+.technical-note > :is(span, h2) {
+  margin: 0;
   padding: 7px 10px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -2040,6 +2048,22 @@ footer {
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .rail-link.active,
+  .workspace-tabs button.active,
+  .engine-card.selected,
+  .voice-buttons button.selected {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .status-dot,
+  .ready-dot {
+    border: 1px solid CanvasText;
+    background: CanvasText;
   }
 }
 

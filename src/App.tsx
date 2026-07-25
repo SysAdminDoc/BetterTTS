@@ -3082,12 +3082,13 @@ function App() {
           </a>
         </nav>
 
-        <main className="app-content">
-        <section className="studio-grid" id="studio">
+        <main className="app-content" aria-labelledby="app-title">
+        <h1 id="app-title" className="sr-only">BetterTTS local speech studio</h1>
+        <section className="studio-grid" id="studio" aria-labelledby="script-heading">
           <div className="studio-workbench">
             <div className="editor-column">
               <div className="section-heading">
-                <span>Script</span>
+                <h2 id="script-heading">Script</h2>
                 <span className={overLimit ? 'danger-text' : ''}>
                   {text.length} / {MAX_TEXT_CHARS}
                   {overLimit ? ` (${text.length - MAX_TEXT_CHARS} over)` : ''}
@@ -3194,7 +3195,7 @@ function App() {
             <div className="workspace-column">
               <div className="workspace-header">
                 <div className="section-heading">
-                  <span>Render monitor</span>
+                  <h2>Render monitor</h2>
                   <span aria-live="polite">{status}</span>
                 </div>
                 <div className="workspace-tabs" role="tablist" aria-label="Render workspace">
@@ -3205,6 +3206,7 @@ function App() {
                       type="button"
                       role="tab"
                       key={target}
+                      id={`${target}-tab`}
                       className={isActive ? 'active' : undefined}
                       aria-selected={isActive}
                       aria-controls={target}
@@ -3224,10 +3226,11 @@ function App() {
                 className={`output-panel output-deck workspace-panel ${!['queue-panel', 'library-panel'].includes(activeWorkspaceHash) ? 'active' : ''}`}
                 id="generated-output"
                 role="tabpanel"
-                aria-label="Generated audio"
+                aria-labelledby="generated-output-tab generated-output-heading"
                 ref={outputPanelRef}
                 tabIndex={-1}
               >
+              <h3 id="generated-output-heading" className="sr-only">Generated audio</h3>
               <div className="output-session-card">
                 <div>
                   <span>Current output</span>
@@ -3298,9 +3301,9 @@ function App() {
 
               <div className="workspace-secondary-grid">
             {queueJobs.length > 0 ? (
-              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue" tabIndex={-1}>
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-labelledby="queue-panel-tab queue-heading" tabIndex={-1}>
                 <div className="section-heading">
-                  <span>Queue ({queueJobs.length})</span>
+                  <h3 id="queue-heading">Generation queue ({queueJobs.length})</h3>
                 </div>
                 <div className={`capability-strip ${m4bCapabilityTone(m4bCapability)}`}>
                   <Info size={15} aria-hidden="true" />
@@ -3414,9 +3417,9 @@ function App() {
                 </ul>
               </section>
             ) : (
-              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-label="Generation queue" tabIndex={-1}>
+              <section className={`output-panel queue-panel workspace-panel ${activeWorkspaceHash === 'queue-panel' ? 'active' : ''}`} id="queue-panel" role="tabpanel" aria-labelledby="queue-panel-tab queue-heading" tabIndex={-1}>
                 <div className="section-heading">
-                  <span>Queue (0)</span>
+                  <h3 id="queue-heading">Generation queue (0)</h3>
                 </div>
                 <div className="compact-empty">
                   <FileText size={28} aria-hidden="true" />
@@ -3427,9 +3430,9 @@ function App() {
             )}
 
             {library.length > 0 ? (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library" tabIndex={-1}>
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-labelledby="library-panel-tab library-heading" tabIndex={-1}>
                 <div className="section-heading">
-                  <span>Library ({library.length})</span>
+                  <h3 id="library-heading">Clip library ({library.length})</h3>
                   <button
                     type="button"
                     className="heading-action"
@@ -3465,9 +3468,9 @@ function App() {
                 </ul>
               </section>
             ) : (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-label="Clip library" tabIndex={-1}>
+              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-labelledby="library-panel-tab library-heading" tabIndex={-1}>
                 <div className="section-heading">
-                  <span>Library (0)</span>
+                  <h3 id="library-heading">Clip library (0)</h3>
                 </div>
                 <div className="compact-empty">
                   <Download size={28} aria-hidden="true" />
@@ -3480,10 +3483,10 @@ function App() {
             </div>
           </div>
 
-          <aside className="settings-panel" aria-label="Voice settings">
+          <aside className="settings-panel" aria-labelledby="properties-heading">
             <div className="settings-scroll">
             <div className="section-heading">
-              <span>Properties</span>
+              <h2 id="properties-heading">Properties</h2>
               <span>v{APP_VERSION}</span>
             </div>
             <div className="inspector-summary" aria-label="Current render settings">
@@ -3569,7 +3572,8 @@ function App() {
                 <ChevronDown size={15} aria-hidden="true" className={showSystemTools ? 'chevron-open' : ''} />
               </button>
               {showSystemTools ? (
-              <div className="system-tools-section" role="group" aria-label="System and diagnostics" ref={systemToolsSectionRef}>
+              <div className="system-tools-section" role="group" aria-labelledby="diagnostics-heading" ref={systemToolsSectionRef}>
+                <h3 id="diagnostics-heading" className="sr-only">System and diagnostics</h3>
                 <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
                   <input
                     id="experimental-piper"
@@ -4350,8 +4354,8 @@ function App() {
           </aside>
         </section>
 
-        <section className="technical-note" id="docs">
-          <span>Local-first by design</span>
+        <section className="technical-note" id="docs" aria-labelledby="docs-heading">
+          <h2 id="docs-heading">Local-first by design</h2>
           <p>
             BetterTTS synthesizes on this device. The web edition uses WebGPU or WebAssembly; the desktop edition can use a verified native CPU model pack. Models download only when first needed and remain cached for reuse.
           </p>
@@ -4360,10 +4364,10 @@ function App() {
           </a>
         </section>
 
-        <section className="lower-grid">
-          <div className="model-panel" id="models">
+        <section className="lower-grid" aria-label="Models and privacy">
+          <div className="model-panel" id="models" role="region" aria-labelledby="models-heading">
             <div className="section-heading">
-              <span>Model library</span>
+              <h2 id="models-heading">Model library</h2>
               <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank" rel="noreferrer">
                 View model
               </a>
@@ -4392,9 +4396,9 @@ function App() {
               </tbody>
             </table>
             <p>Kokoro voices are wired for English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Kokoro Japanese and Chinese remain unavailable until a browser-safe G2P path is available; Piper-plus covers additional languages on device.</p>
-            <div className="runtime-license-panel" aria-label="Runtime licenses">
+            <div className="runtime-license-panel" role="region" aria-labelledby="licenses-heading">
               <div className="section-heading">
-                <span>Runtime licenses</span>
+                <h3 id="licenses-heading">Runtime licenses</h3>
               </div>
               <table>
                 <caption className="sr-only">Licenses for runtime components</caption>
@@ -4417,9 +4421,9 @@ function App() {
             </div>
           </div>
 
-          <div className="hosting-panel">
+          <div className="hosting-panel" role="region" aria-labelledby="privacy-heading">
             <div className="section-heading">
-              <span>Privacy &amp; portability</span>
+              <h2 id="privacy-heading">Privacy &amp; portability</h2>
               <Info size={18} aria-hidden="true" />
             </div>
             <ul className="trust-list">
