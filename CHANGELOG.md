@@ -6,6 +6,9 @@
 - Patched the production Transformers/ONNX dependency graph to adm-zip 0.6.0 and sharp 0.35.0, and added runtime plus packaged-asar security gates with expiring, owner-labelled exception support.
 - Added crafted DOCX and EPUB archive regressions proving declared multi-gigabyte expansions are rejected before fflate inflates user-controlled entries.
 
+### Added
+- Added versioned portable browser backups for clip audio, generation queues, and local settings. Backups are checksum-validated and quota-preflighted before a replace-and-restore operation, with rollback to the prior local state if any write fails.
+
 ### Tests
 - Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.
 

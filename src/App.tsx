@@ -41,6 +41,7 @@ import {
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
+import type { BackupPreview } from './lib/backup.ts'
 import { queueExportSizeError } from './lib/export-guards.ts'
 import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
@@ -867,6 +868,8 @@ function App() {
   const [modelCache, setModelCache] = useState<ModelCacheSummary | null>(null)
   const [cacheAction, setCacheAction] = useState<string | null>(null)
   const [diagnosticsAction, setDiagnosticsAction] = useState<'copy' | 'download' | null>(null)
+  const [backupAction, setBackupAction] = useState<'download' | 'inspect' | 'restore' | null>(null)
+  const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
@@ -898,6 +901,7 @@ function App() {
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
   const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
   const systemToolsSectionRef = useRef<HTMLDivElement | null>(null)
+  const backupInputRef = useRef<HTMLInputElement | null>(null)
   const pronunciationsToggleRef = useRef<HTMLButtonElement | null>(null)
   const pronunciationsSectionRef = useRef<HTMLDivElement | null>(null)
 
@@ -1278,6 +1282,63 @@ function App() {
       showToast({ tone: 'error', message: err instanceof Error ? err.message : 'Could not export diagnostics.' })
     } finally {
       setDiagnosticsAction(null)
+    }
+  }
+
+  async function handleDownloadBackup() {
+    if (backupAction) return
+    setBackupAction('download')
+    try {
+      const { createPortableBackup } = await import('./lib/backup.ts')
+      const { blob, preview } = await createPortableBackup()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `bettertts-backup-${timestamp()}.bettertts-backup`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      showToast({ tone: 'ok', message: `Backup saved: ${preview.clips} clips and ${preview.jobs} jobs.` })
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'backup.export')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not create backup.' })
+    } finally {
+      setBackupAction(null)
+    }
+  }
+
+  async function handleBackupFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || backupAction) return
+    setBackupAction('inspect')
+    try {
+      const { inspectPortableBackup } = await import('./lib/backup.ts')
+      const preview = await inspectPortableBackup(file)
+      setPendingBackup({ file, preview })
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'backup.inspect')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not inspect backup.' })
+    } finally {
+      setBackupAction(null)
+    }
+  }
+
+  async function handleRestoreBackup() {
+    if (!pendingBackup || backupAction) return
+    setBackupAction('restore')
+    try {
+      const { restorePortableBackup } = await import('./lib/backup.ts')
+      const preview = await restorePortableBackup(pendingBackup.file)
+      setLibrary(await listClips())
+      setQueueJobs(await listJobs())
+      setPendingBackup(null)
+      await refreshStorageEstimate()
+      showToast({ tone: 'ok', message: `Restored ${preview.clips} clips and ${preview.jobs} jobs.` })
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'backup.restore')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not restore backup.' })
+    } finally {
+      setBackupAction(null)
     }
   }
 
@@ -3433,6 +3494,48 @@ function App() {
                   <p className="cache-empty">Checking model cache…</p>
                 )}
               </div>
+                <div className="diagnostics-panel backup-panel" aria-label="Local data backup">
+                  <div className="cache-manager-head">
+                    <span>
+                      <strong>Backup & restore</strong>
+                      <small>Portable local archive. Includes queued text, settings, and saved audio.</small>
+                    </span>
+                  </div>
+                  <input
+                    ref={backupInputRef}
+                    type="file"
+                    accept=".bettertts-backup,application/zip,application/vnd.bettertts.backup+zip"
+                    hidden
+                    onChange={handleBackupFile}
+                  />
+                  {pendingBackup ? (
+                    <div className="capability-strip warn" role="status">
+                      <Info size={15} aria-hidden="true" />
+                      <span>
+                        Ready to replace local data with {pendingBackup.preview.clips} clips, {pendingBackup.preview.jobs} jobs, and {formatBytes(pendingBackup.preview.audioBytes)} audio.
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="diagnostics-actions">
+                    <button type="button" onClick={handleDownloadBackup} disabled={backupAction !== null || isGenerating}>
+                      {backupAction === 'download' ? <Loader2 size={13} aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+                      Download backup
+                    </button>
+                    <button type="button" onClick={() => backupInputRef.current?.click()} disabled={backupAction !== null || isGenerating}>
+                      {backupAction === 'inspect' ? <Loader2 size={13} aria-hidden="true" /> : <Upload size={13} aria-hidden="true" />}
+                      Choose backup
+                    </button>
+                    {pendingBackup ? (
+                      <>
+                        <button type="button" onClick={handleRestoreBackup} disabled={backupAction !== null || isGenerating}>
+                          {backupAction === 'restore' ? <Loader2 size={13} aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
+                          Replace & restore
+                        </button>
+                        <button type="button" onClick={() => setPendingBackup(null)} disabled={backupAction !== null}>Cancel</button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="diagnostics-panel" aria-label="Diagnostics export">
                 <div className="cache-manager-head">
                   <span>
