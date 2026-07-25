@@ -50,6 +50,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
+import { getDesktopUpdaterBridge } from './platform/index.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -186,6 +187,7 @@ const RUNTIME_LICENSE_ROWS = [
   ['BetterTTS app code', 'MIT', 'App shell, UI, queue, exports'],
   ['kokoro-js, Kokoro ONNX, Transformers.js, phonemizer', 'Apache-2.0', 'Kokoro, timestamps, English phonemization'],
   ['ephone / eSpeak NG WASM', 'GPL-3.0-or-later', 'Loaded only for multilingual Kokoro voices: ES / FR / HI / IT / PT-BR'],
+  ['electron-updater', 'MIT', 'Opt-in Windows update download and restart install'],
   ['KittenTTS browser wrapper', 'MIT', 'Kitten model weights are Apache-2.0'],
   ['piper-plus, @piper-plus/g2p, onnxruntime-web', 'MIT', 'Experimental Piper-plus engine; lazy package/WASM/model path'],
   ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
@@ -975,6 +977,7 @@ function App() {
   const crossOriginStorage = useMemo(() => detectCrossOriginStorage(), [])
   const transformersReadiness = useMemo(() => transformersUpgradeReadiness(), [])
   const piperPlusSupport = useMemo(() => piperPlusRuntimeSupport(), [])
+  const desktopUpdater = useMemo(() => getDesktopUpdaterBridge(), [])
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
     : engine === 'piper'
@@ -1060,6 +1063,35 @@ function App() {
     window.addEventListener('hashchange', syncActiveSection)
     return () => window.removeEventListener('hashchange', syncActiveSection)
   }, [])
+
+  useEffect(() => {
+    if (!desktopUpdater) return
+    return desktopUpdater.onStatus((update) => {
+      if (update.state === 'checking' && update.manual) {
+        showToast({ tone: 'ok', message: 'Checking for desktop updates…' })
+      } else if (update.state === 'available') {
+        showToast({
+          tone: 'ok',
+          message: `BetterTTS v${update.version ?? 'new'} is available. The installer is downloaded only when you choose.`,
+          action: { label: 'Download update', run: () => desktopUpdater.download() },
+        })
+      } else if (update.state === 'downloading') {
+        showToast({ tone: 'ok', message: `Downloading update… ${update.percent ?? 0}%` })
+      } else if (update.state === 'downloaded') {
+        showToast({
+          tone: 'ok',
+          message: `BetterTTS v${update.version ?? 'new'} is ready. Saved projects and local model caches are preserved.`,
+          action: { label: 'Restart & install', run: () => desktopUpdater.install() },
+        })
+      } else if (update.state === 'not-available' && update.manual) {
+        showToast({ tone: 'ok', message: 'BetterTTS is up to date.' })
+      } else if (update.state === 'error') {
+        recordDiagnosticEvent('warn', update.message ?? 'Desktop update failed', 'desktop.update')
+        if (update.manual) showToast({ tone: 'warn', message: 'The update check could not complete. Keep using this version and try again later.' })
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopUpdater])
 
   useEffect(() => {
     let refreshTimer: number | null = null
@@ -3684,6 +3716,20 @@ function App() {
                     ) : null}
                   </div>
                 </div>
+                {desktopUpdater ? (
+                  <div className="diagnostics-panel" aria-label="Desktop updates">
+                    <div className="cache-manager-head">
+                      <span>
+                        <strong>Desktop updates</strong>
+                        <small>Checks the static BetterTTS feed. Downloads and restart installs require your action.</small>
+                      </span>
+                      <button type="button" onClick={() => desktopUpdater.check()}>
+                        <RefreshCw size={13} aria-hidden="true" />
+                        Check now
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="diagnostics-panel" aria-label="Diagnostics export">
                 <div className="cache-manager-head">
                   <span>

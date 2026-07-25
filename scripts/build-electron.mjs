@@ -12,7 +12,7 @@ const common = {
   target: 'node20',
   format: 'cjs',
   // Electron and Node built-ins are provided by the runtime, never bundled.
-  external: ['electron'],
+  external: ['electron', 'electron-updater'],
   sourcemap: dev,
   minify: !dev,
   logLevel: 'info',

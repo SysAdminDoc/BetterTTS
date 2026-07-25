@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { readFile, writeFile } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 
@@ -105,6 +106,8 @@ function registerAppProtocol(): void {
 // inference never touches the renderer or main thread. Main only relays
 // structured-cloneable messages between the renderer and the host.
 const NATIVE_TTS_CHANNEL = 'bettertts:native-tts'
+const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
+const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
 
@@ -151,6 +154,79 @@ ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
     return
   }
   ensureTtsHost().postMessage(message)
+})
+
+type UpdateStatus = {
+  state: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  version?: string
+  percent?: number
+  message?: string
+  manual?: boolean
+}
+
+let updateDownloadAvailable = false
+let updateDownloaded = false
+let manualUpdateCheck = false
+
+function broadcastUpdateStatus(status: UpdateStatus): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(UPDATE_STATUS_CHANNEL, status)
+  }
+}
+
+function safeUpdateError(error: Error): string {
+  return error.message
+    .replaceAll(process.cwd(), '<app>')
+    .replace(/https?:\/\/\S+/gi, '<update feed>')
+    .slice(0, 220)
+}
+
+function configureUpdater(): void {
+  if (!app.isPackaged || IS_SMOKE) return
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowDowngrade = false
+  autoUpdater.allowPrerelease = false
+  autoUpdater.on('checking-for-update', () => broadcastUpdateStatus({ state: 'checking', manual: manualUpdateCheck }))
+  autoUpdater.on('update-available', (info) => {
+    updateDownloadAvailable = true
+    manualUpdateCheck = false
+    broadcastUpdateStatus({ state: 'available', version: info.version })
+  })
+  autoUpdater.on('update-not-available', (info) => {
+    updateDownloadAvailable = false
+    broadcastUpdateStatus({ state: 'not-available', version: info.version, manual: manualUpdateCheck })
+    manualUpdateCheck = false
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    broadcastUpdateStatus({ state: 'downloading', percent: Math.round(progress.percent) })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    updateDownloaded = true
+    broadcastUpdateStatus({ state: 'downloaded', version: info.version })
+  })
+  autoUpdater.on('error', (error) => {
+    broadcastUpdateStatus({ state: 'error', message: safeUpdateError(error), manual: manualUpdateCheck })
+    manualUpdateCheck = false
+  })
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => undefined)
+  }, 5000)
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => undefined)
+  }, 6 * 60 * 60 * 1000).unref()
+}
+
+ipcMain.on(UPDATE_ACTION_CHANNEL, (event, action: unknown) => {
+  if (!app.isPackaged || IS_SMOKE || !BrowserWindow.fromWebContents(event.sender)) return
+  if (action === 'check') {
+    manualUpdateCheck = true
+    autoUpdater.checkForUpdates().catch(() => undefined)
+  } else if (action === 'download' && updateDownloadAvailable) {
+    autoUpdater.downloadUpdate().catch(() => undefined)
+  } else if (action === 'install' && updateDownloaded) {
+    autoUpdater.quitAndInstall(false, true)
+  }
 })
 
 // Ask the host for its runtime info without loading any model — used by the
@@ -336,9 +412,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -347,6 +423,17 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
     } catch {
       /* capture is best-effort on a hidden window */
     }
+
+    result.updaterUi = await win.webContents.executeJavaScript(`(async () => {
+      const toggle = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('System & diagnostics'))
+      toggle?.click()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const panel = document.querySelector('[aria-label="Desktop updates"]')
+      return {
+        panel: !!panel,
+        checkAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Check now')),
+      }
+    })()`)
 
     try {
       const nativeHost = (await probeTtsHostInfo()) as { runtime?: unknown }
@@ -384,6 +471,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.railItems >= 5 &&
       probe.generate &&
       Boolean(probe.platform) &&
+      probe.platform?.updater === true &&
+      Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
+      Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
       Boolean(result.nativeHost) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)
@@ -407,6 +497,7 @@ app.whenReady().then(() => {
   else registerAppProtocol()
 
   const win = createWindow()
+  configureUpdater()
   if (IS_SMOKE) void runSmoke(win)
 
   app.on('activate', () => {

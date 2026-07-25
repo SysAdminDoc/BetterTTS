@@ -10,11 +10,27 @@ export type NativeTtsBridge = {
   onMessage: (listener: (message: unknown) => void) => () => void
 }
 
+export type DesktopUpdateStatus = {
+  state: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  version?: string
+  percent?: number
+  message?: string
+  manual?: boolean
+}
+
+export type DesktopUpdaterBridge = {
+  check: () => void
+  download: () => void
+  install: () => void
+  onStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
   versions: { electron: string; chrome: string; node: string }
   nativeTts?: NativeTtsBridge
+  updater?: DesktopUpdaterBridge
 }
 
 declare global {
@@ -43,4 +59,9 @@ export function isDesktop(): boolean {
 export function getNativeTtsBridge(): NativeTtsBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.nativeTts ?? null
+}
+
+export function getDesktopUpdaterBridge(): DesktopUpdaterBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.updater ?? null
 }

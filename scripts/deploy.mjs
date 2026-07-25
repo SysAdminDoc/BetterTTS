@@ -4,7 +4,7 @@
 // touched. Never use `git clean -fdx` in a deploy flow: -x deletes gitignored
 // files (it destroyed local working docs once on 2026-07-08).
 import { execSync } from 'node:child_process'
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,10 +12,17 @@ const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts })
 
 const repoRoot = process.cwd()
 const distDir = join(repoRoot, 'dist')
+const includeUpdates = process.argv.includes('--include-updates')
+const stageUpdatesOnly = process.argv.includes('--stage-updates-only')
 
+if (stageUpdatesOnly) {
+  stageDesktopUpdates()
+  process.exit(0)
+}
 run('npm run build')
 run('node scripts/sync-kokoro-assets.mjs')
 run('node scripts/sync-piper-assets.mjs')
+if (includeUpdates) stageDesktopUpdates()
 
 if (!existsSync(join(distDir, 'index.html'))) {
   console.error('dist/index.html missing after build — aborting deploy')
@@ -75,6 +82,7 @@ async function verifyLiveDeploy() {
   if (underscoreChunk) probes.push(`assets/${underscoreChunk}`)
   const entryChunk = assets.find((name) => /^index-.*\.js$/.test(name))
   if (entryChunk) probes.push(`assets/${entryChunk}`)
+  if (includeUpdates) probes.push(`updates/latest.yml?v=${Date.now()}`)
 
   const deadline = Date.now() + 4 * 60 * 1000
   let lastFailure = ''
@@ -95,4 +103,29 @@ async function verifyLiveDeploy() {
   }
   console.error(`Live verification FAILED after 4 minutes: ${lastFailure}`)
   process.exit(1)
+}
+
+function stageDesktopUpdates() {
+  const releaseDir = join(repoRoot, 'release')
+  const metadataPath = join(releaseDir, 'latest.yml')
+  if (!existsSync(metadataPath)) throw new Error('release/latest.yml is missing. Run npm run desktop:dist first.')
+  const metadata = readFileSync(metadataPath, 'utf8')
+  const versionMatch = metadata.match(/^version:\s*['"]?([^'"\r\n]+)['"]?/m)
+  const installerMatch = metadata.match(/^path:\s*['"]?([^'"\r\n]+)['"]?/m)
+  const packageVersion = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).version
+  if (versionMatch?.[1]?.trim() !== packageVersion) {
+    throw new Error(`Update metadata version ${versionMatch?.[1] ?? 'missing'} does not match package ${packageVersion}.`)
+  }
+  const installerName = installerMatch?.[1]?.trim()
+  if (!installerName) throw new Error('release/latest.yml has no installer path.')
+  const updateDir = join(distDir, 'updates')
+  rmSync(updateDir, { recursive: true, force: true })
+  mkdirSync(updateDir, { recursive: true })
+  for (const name of ['latest.yml', installerName, `${installerName}.blockmap`]) {
+    const source = join(releaseDir, name)
+    if (!existsSync(source)) throw new Error(`Required update artifact is missing: ${source}`)
+    const target = join(updateDir, name)
+    cpSync(source, target)
+  }
+  console.log(`Staged unsigned desktop update v${packageVersion} in dist/updates/.`)
 }

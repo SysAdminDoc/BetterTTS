@@ -7,6 +7,7 @@ const expectedLicenses = [
   ['@mozilla/readability', 'Apache-2.0'],
   ['@piper-plus/g2p', 'MIT'],
   ['ephone', 'GPL-3.0-or-later'],
+  ['electron-updater', 'MIT'],
   ['fflate', 'MIT'],
   ['kitten-tts-webgpu', 'MIT'],
   ['kokoro-js', 'Apache-2.0'],

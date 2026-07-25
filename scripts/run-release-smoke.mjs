@@ -34,6 +34,16 @@ try {
   const browserReport = JSON.parse(readFileSync(join(root, 'dist', 'smoke', 'real-engine.json'), 'utf8'))
 
   run('npm', ['run', 'desktop:dist'])
+  const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  const updateMetadata = readFileSync(join(root, 'release', 'latest.yml'), 'utf8')
+  const packagedUpdateConfig = readFileSync(join(root, 'release', 'win-unpacked', 'resources', 'app-update.yml'), 'utf8')
+  if (
+    !updateMetadata.includes(`version: ${packageVersion}`)
+    || !/^sha512:\s*\S+/m.test(updateMetadata)
+    || !packagedUpdateConfig.includes('https://sysadmindoc.github.io/BetterTTS/updates/')
+  ) {
+    throw new Error('Packaged static update metadata is missing, stale, or incomplete.')
+  }
   const packagedExecutable = resolve(root, 'release', 'win-unpacked', process.platform === 'win32' ? 'BetterTTS.exe' : 'BetterTTS')
   if (!existsSync(packagedExecutable)) throw new Error(`Packaged executable not found: ${packagedExecutable}`)
   const packagedEnv = {

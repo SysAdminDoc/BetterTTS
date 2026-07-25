@@ -11,7 +11,7 @@
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro through **native ONNX Runtime** in an isolated utility process. Native model packs are pinned to immutable revisions and SHA-256 verified before use. Enable **Native engine (desktop)** under Properties -> System & diagnostics. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro through **native ONNX Runtime** in an isolated utility process. Native model packs are pinned to immutable revisions and SHA-256 verified before use. Enable **Native engine (desktop)** under Properties -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -204,6 +204,8 @@ npm run deploy
 
 The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
 
+To rebuild the unsigned Windows installer and publish its version-matched `latest.yml`, installer, and blockmap under the static `/updates/` feed, run `npm run deploy:updates`. Staging aborts if metadata and package versions differ or an artifact is missing.
+
 ## Voice Catalog
 
 41 Kokoro voices spanning American English, British English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. English voices keep the detailed quality grades from Kokoro's VOICES metadata:
@@ -261,6 +263,7 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | BetterTTS app code | MIT | App shell, UI, queue, exports |
 | `kokoro-js`, Kokoro ONNX, Transformers.js, `phonemizer` | Apache-2.0 | Kokoro, timestamps, English phonemization |
 | `ephone` / eSpeak NG WASM | GPL-3.0-or-later | Loaded only for multilingual Kokoro voices: Spanish, French, Hindi, Italian, Brazilian Portuguese |
+| `electron-updater` | MIT | Opt-in Windows update download and restart install |
 | `kitten-tts-webgpu` | MIT | KittenTTS browser runtime; Kitten model weights are Apache-2.0 |
 | `piper-plus`, `@piper-plus/g2p`, `onnxruntime-web` | MIT | Experimental Piper-plus engine; Tsukuyomi-chan model assets load on demand |
 | Supertonic ONNX model | OpenRAIL | HF-hosted English speed engine |

@@ -6,6 +6,11 @@ directories:
   output: release
   buildResources: build
 
+electronUpdaterCompatibility: ">=2.16"
+publish:
+  provider: generic
+  url: https://sysadmindoc.github.io/BetterTTS/updates/
+
 # The renderer (dist/) and the compiled main/preload/tts-host (dist-electron/)
 # ship alongside the production node_modules the native inference host resolves
 # at runtime (kokoro-js → @huggingface/transformers → onnxruntime-node).

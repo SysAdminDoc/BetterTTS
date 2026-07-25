@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const NATIVE_TTS_CHANNEL = 'bettertts:native-tts'
+const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
+const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -22,6 +24,24 @@ const bridge = {
       ipcRenderer.on(NATIVE_TTS_CHANNEL, handler)
       return () => {
         ipcRenderer.removeListener(NATIVE_TTS_CHANNEL, handler)
+      }
+    },
+  },
+  updater: {
+    check(): void {
+      ipcRenderer.send(UPDATE_ACTION_CHANNEL, 'check')
+    },
+    download(): void {
+      ipcRenderer.send(UPDATE_ACTION_CHANNEL, 'download')
+    },
+    install(): void {
+      ipcRenderer.send(UPDATE_ACTION_CHANNEL, 'install')
+    },
+    onStatus(listener: (status: unknown) => void): () => void {
+      const handler = (_event: unknown, status: unknown) => listener(status)
+      ipcRenderer.on(UPDATE_STATUS_CHANNEL, handler)
+      return () => {
+        ipcRenderer.removeListener(UPDATE_STATUS_CHANNEL, handler)
       }
     },
   },
