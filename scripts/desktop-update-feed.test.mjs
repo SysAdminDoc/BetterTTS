@@ -25,7 +25,7 @@ describe('desktop update feed', () => {
       installerName: 'BetterTTS Setup 0.20.0.exe',
     })
     expect(result.assetUrl).toBe(
-      'https://github.com/SysAdminDoc/BetterTTS/releases/download/v0.20.0/BetterTTS%20Setup%200.20.0.exe',
+      'https://github.com/SysAdminDoc/BetterTTS/releases/download/v0.20.0/BetterTTS.Setup.0.20.0.exe',
     )
     expect(result.metadata).toContain(`- url: ${result.assetUrl}`)
     expect(result.metadata).toContain(`path: ${result.assetUrl}`)

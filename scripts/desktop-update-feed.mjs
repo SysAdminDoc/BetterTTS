@@ -50,7 +50,9 @@ export function buildStaticUpdateMetadata(metadata, {
   if (!installerName || installerName !== basename(installerName)) {
     throw new Error(`Unsafe release asset name: ${installerName}`)
   }
-  const assetUrl = `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(installerName)}`
+  // GitHub normalizes spaces in uploaded release asset names to dots.
+  const releaseAssetName = installerName.replaceAll(' ', '.')
+  const assetUrl = `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(releaseAssetName)}`
   const rewritten = metadata
     .replace(/^(\s*-\s+url:\s*).+$/m, `$1${assetUrl}`)
     .replace(/^path:\s*.+$/m, `path: ${assetUrl}`)
