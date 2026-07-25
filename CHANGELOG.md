@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.20.0 - 2026-07-25
 
 ### Security
 - Patched the production Transformers/ONNX dependency graph to adm-zip 0.6.0 and sharp 0.35.0, and added runtime plus packaged-asar security gates with expiring, owner-labelled exception support.
