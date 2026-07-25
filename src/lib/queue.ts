@@ -1,4 +1,5 @@
 import type { AudioFormat } from './encode.ts'
+import { publishStoreChange } from './coordination.ts'
 import type { Cue } from './subtitles.ts'
 import type { KokoroLocale, VoiceId } from './voices.ts'
 
@@ -108,6 +109,7 @@ export async function saveJob(job: QueueJob): Promise<void> {
   const tx = db.transaction(JOBS_STORE, 'readwrite')
   tx.objectStore(JOBS_STORE).put(migrateQueueJob(job))
   await txDone(tx)
+  publishStoreChange('queue', 'write', job.id)
 }
 
 export async function listJobs(): Promise<QueueJob[]> {
@@ -142,6 +144,7 @@ export async function deleteJob(id: string): Promise<void> {
   // avoids materializing every stored audio blob just to prefix-match keys.
   tx.objectStore(CHUNKS_STORE).delete(IDBKeyRange.bound(`${id}:`, `${id}:￿`))
   await txDone(tx)
+  publishStoreChange('queue', 'delete', id)
 }
 
 export async function deleteJobWithSnapshot(id: string): Promise<QueueJobSnapshot | null> {
@@ -159,6 +162,7 @@ export async function deleteJobWithSnapshot(id: string): Promise<QueueJobSnapsho
   jobs.delete(id)
   chunks.delete(range)
   await done
+  if (rawJob) publishStoreChange('queue', 'delete', id)
 
   if (!rawJob) return null
   return {
@@ -180,6 +184,7 @@ export async function restoreQueueJob(snapshot: QueueJobSnapshot): Promise<void>
     chunks.put(entry.blob, `${snapshot.job.id}:${entry.chunkIndex}`)
   }
   await txDone(tx)
+  publishStoreChange('queue', 'restore', snapshot.job.id)
 }
 
 export async function saveChunkBlob(jobId: string, chunkIndex: number, blob: Blob): Promise<void> {
@@ -199,6 +204,7 @@ export async function commitQueueChunk(job: QueueJob, chunkIndex: number, blob: 
   tx.objectStore(CHUNKS_STORE).put(blob, `${job.id}:${chunkIndex}`)
   tx.objectStore(JOBS_STORE).put(migrateQueueJob(job))
   await txDone(tx)
+  publishStoreChange('queue', 'write', job.id)
 }
 
 export async function getChunkBlob(jobId: string, chunkIndex: number): Promise<Blob | null> {

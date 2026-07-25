@@ -11,6 +11,7 @@
 
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
+- Queue generation, regeneration, and deletion now use cross-tab leases with crash-expiring fallback locks; queue and library mutations propagate to other open tabs through BroadcastChannel with a storage-event fallback.
 
 ### Tests
 - Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.

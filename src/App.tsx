@@ -42,6 +42,7 @@ import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, for
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
+import { subscribeToStoreChanges, withJobLease } from './lib/coordination.ts'
 import { queueExportSizeError } from './lib/export-guards.ts'
 import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
@@ -1055,6 +1056,24 @@ function App() {
     syncActiveSection()
     window.addEventListener('hashchange', syncActiveSection)
     return () => window.removeEventListener('hashchange', syncActiveSection)
+  }, [])
+
+  useEffect(() => {
+    let refreshTimer: number | null = null
+    const unsubscribe = subscribeToStoreChanges((change) => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        const refresh = change.store === 'library'
+          ? listClips().then(setLibrary)
+          : listJobs().then(setQueueJobs)
+        refresh.catch((error) => recordDiagnosticEvent('warn', error, `coordination.${change.store}`))
+        refreshTimer = null
+      }, 40)
+    })
+    return () => {
+      unsubscribe()
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer)
+    }
   }, [])
 
   useEffect(() => {
@@ -2435,6 +2454,13 @@ function App() {
 
   async function resumeJob(jobId: string) {
     if (generatingRef.current) return
+    const lease = await withJobLease(jobId, () => resumeJobWithLease(jobId))
+    if (!lease.acquired) {
+      showToast({ tone: 'warn', message: 'This queue job is active in another BetterTTS tab. That tab owns generation until it pauses or closes.' })
+    }
+  }
+
+  async function resumeJobWithLease(jobId: string) {
     const jobs = await listJobs()
     const job = jobs.find((j) => j.id === jobId)
     if (!job) return
@@ -2513,6 +2539,15 @@ function App() {
       showToast({ tone: 'warn', message: 'Another generation is running — your edit is kept, try again when it finishes.' })
       return false
     }
+    const lease = await withJobLease(jobId, () => regenerateQueueChunkWithLease(jobId, chunkIndex, nextText, nextTitle))
+    if (!lease.acquired) {
+      showToast({ tone: 'warn', message: 'This queue job is active in another BetterTTS tab. Pause it there before regenerating a segment.' })
+      return false
+    }
+    return lease.value
+  }
+
+  async function regenerateQueueChunkWithLease(jobId: string, chunkIndex: number, nextText: string, nextTitle?: string): Promise<boolean> {
     const cleanText = nextText.trim()
     if (!cleanText) {
       showToast({ tone: 'warn', message: 'Segment text cannot be empty.' })
@@ -2748,7 +2783,12 @@ function App() {
 
   async function removeQueueJob(jobId: string, title: string) {
     try {
-      const snapshot = await deleteJobWithSnapshot(jobId)
+      const lease = await withJobLease(jobId, () => deleteJobWithSnapshot(jobId))
+      if (!lease.acquired) {
+        showToast({ tone: 'warn', message: 'This queue job is active in another BetterTTS tab. Pause it there before removing it.' })
+        return
+      }
+      const snapshot = lease.value
       if (!snapshot) throw new Error('Queue job not found.')
       setQueueJobs((prev) => prev.filter((job) => job.id !== jobId))
       showToast({

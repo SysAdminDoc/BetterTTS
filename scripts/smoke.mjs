@@ -275,6 +275,17 @@ async function runSmoke() {
     await desktop.page.screenshot({ path: join(smokeDir, 'queue-dark.png'), fullPage: false })
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })
     const queueChunks = desktop.page.getByLabel('Smoke queue completed chunks')
+    const companionMessages = []
+    const companion = await desktopContext.newPage()
+    companion.on('console', (msg) => {
+      if (['error', 'warning'].includes(msg.type())) companionMessages.push(`${msg.type()}: ${msg.text()}`)
+    })
+    companion.on('pageerror', (err) => companionMessages.push(`pageerror: ${err.message}`))
+    await companion.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+    await companion.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
+    await companion.getByRole('tab', { name: /Queue/ }).click()
+    await companion.getByLabel('Generation queue').getByText('Smoke queue').waitFor({ timeout: 20000 })
+
     await queueChunks.getByRole('button', { name: 'Play' }).first().click()
     await queueChunks.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await queueChunks.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
@@ -282,6 +293,18 @@ async function runSmoke() {
     await queueChunks.getByRole('button', { name: 'Edit' }).first().click()
     const chunkEditor = queueChunks.locator('.queue-chunk-editor').first()
     await chunkEditor.getByLabel('Chapter title').fill('Smoke revised chapter')
+    await companion.evaluate(async () => {
+      navigator.locks.request('bettertts-job:smoke-default', { mode: 'exclusive' }, async () => {
+        window.__betterttsSmokeLeaseHeld = true
+        await new Promise((resolve) => {
+          window.__betterttsSmokeReleaseLease = resolve
+        })
+      })
+      while (!window.__betterttsSmokeLeaseHeld) await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+    await chunkEditor.getByRole('button', { name: 'Save title' }).click()
+    await desktop.page.getByText(/active in another BetterTTS tab/).waitFor({ timeout: 20000 })
+    await companion.evaluate(() => window.__betterttsSmokeReleaseLease?.())
     await chunkEditor.getByRole('button', { name: 'Save title' }).click()
     await desktop.page.getByText('Chapter metadata updated.').waitFor({ timeout: 20000 })
     await queueChunks.getByText('Smoke revised chapter').waitFor({ timeout: 20000 })
@@ -291,8 +314,11 @@ async function runSmoke() {
     await chunkEditor.getByRole('button', { name: 'Cancel' }).click()
     await queue.getByRole('button', { name: 'Remove queue job Smoke queue' }).click()
     await queue.getByText('Queue is empty').waitFor({ timeout: 20000 })
+    await companion.getByLabel('Generation queue').getByText('Queue is empty').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await queue.getByText('Smoke queue').waitFor({ timeout: 20000 })
+    await companion.getByLabel('Generation queue').getByText('Smoke queue').waitFor({ timeout: 20000 })
+    await companion.close()
 
     console.log('Checking library playback controls...')
     await desktop.page.getByRole('tab', { name: /Library/ }).click()
@@ -383,7 +409,7 @@ async function runSmoke() {
     await mobile.page.waitForTimeout(200)
     await mobile.page.screenshot({ path: join(smokeDir, 'mobile.png'), fullPage: false })
     await mobileContext.close()
-    const allMessages = [...desktop.messages, ...mobile.messages]
+    const allMessages = [...desktop.messages, ...companionMessages, ...mobile.messages]
     const unexpected = allMessages.filter((msg) => !allowedConsole.some((allowed) => msg.includes(allowed)))
     if (unexpected.length > 0) throw new Error(`Unexpected console messages:\n${unexpected.join('\n')}`)
 

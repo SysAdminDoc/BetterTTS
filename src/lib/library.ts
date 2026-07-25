@@ -1,4 +1,5 @@
 import type { Cue } from './subtitles.ts'
+import { publishStoreChange } from './coordination.ts'
 
 export type ClipRecord = {
   id: string
@@ -88,6 +89,7 @@ export async function saveClip(record: ClipRecord, blob: Blob): Promise<void> {
   tx.objectStore(CLIPS_STORE).put(record)
   tx.objectStore(BLOBS_STORE).put(blob, record.id)
   await txDone(tx)
+  publishStoreChange('library', 'write', record.id)
 }
 
 export async function listClips(): Promise<ClipRecord[]> {
@@ -120,6 +122,7 @@ export async function deleteClip(id: string): Promise<void> {
   tx.objectStore(CLIPS_STORE).delete(id)
   tx.objectStore(BLOBS_STORE).delete(id)
   await txDone(tx)
+  publishStoreChange('library', 'delete', id)
 }
 
 export async function deleteClipWithSnapshot(id: string): Promise<ClipSnapshot | null> {
@@ -137,6 +140,7 @@ export async function deleteClipWithSnapshot(id: string): Promise<ClipSnapshot |
     blobs.delete(id)
   }
   await done
+  if (record) publishStoreChange('library', 'delete', id)
   return record ? { record, blob: blob ?? null } : null
 }
 
@@ -146,6 +150,7 @@ export async function clearLibrary(): Promise<void> {
   tx.objectStore(CLIPS_STORE).clear()
   tx.objectStore(BLOBS_STORE).clear()
   await txDone(tx)
+  publishStoreChange('library', 'clear')
 }
 
 export async function clearLibraryWithSnapshot(): Promise<ClipSnapshot[]> {
@@ -162,6 +167,7 @@ export async function clearLibraryWithSnapshot(): Promise<ClipSnapshot[]> {
   clips.clear()
   blobs.clear()
   await done
+  publishStoreChange('library', 'clear')
 
   const recordsById = new Map(records.map((record) => [record.id, record]))
   return blobKeys.flatMap((key, index) => {
@@ -182,6 +188,7 @@ export async function restoreClipSnapshots(snapshots: ClipSnapshot[]): Promise<v
     if (snapshot.blob) blobs.put(snapshot.blob, snapshot.record.id)
   }
   await txDone(tx)
+  publishStoreChange('library', 'restore')
 }
 
 export const LIBRARY_MAX_BYTES = 200 * 1024 * 1024
