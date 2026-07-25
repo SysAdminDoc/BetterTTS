@@ -140,7 +140,11 @@ function ensureTtsHost(): UtilityProcess {
 
 ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
   ttsHostSubscriber = event.sender
-  if (message && typeof message === 'object' && (message as { type?: string }).type === 'reset') {
+  if (
+    message
+    && typeof message === 'object'
+    && ['reset', 'cancel-all', 'cancel'].includes((message as { type?: string }).type ?? '')
+  ) {
     const host = ttsHost
     ttsHost = null
     host?.kill()

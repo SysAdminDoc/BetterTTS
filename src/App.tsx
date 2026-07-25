@@ -47,8 +47,8 @@ import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, p
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
 import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
-import { generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
-import { generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
+import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
+import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -77,7 +77,7 @@ import {
   resetPiperPlusSession,
   synthesizePiperPlus,
 } from './lib/piper-plus.ts'
-import { type QueueEngine, type QueueJob, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveChunkBlob, saveJob } from './lib/queue.ts'
+import { type QueueEngine, type QueueJob, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
   clearPlaybackState,
@@ -100,7 +100,7 @@ import {
   hasKittenWebGpu,
   synthesizeKitten,
 } from './lib/kitten.ts'
-import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
+import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
 import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
@@ -936,6 +936,7 @@ function App() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const abortRef = useRef(false)
+  const generationAbortRef = useRef<AbortController | null>(null)
   const generatingRef = useRef(false)
 
   // A run scheduled 700 ms after the previous one ends must not have its
@@ -1520,7 +1521,13 @@ function App() {
   }
 
   type LoadedEngine = {
-    synthesize: (text: string, voice: string, speed: number, voiceBin?: Float32Array) => Promise<SynthesizedAudio | null>
+    synthesize: (
+      text: string,
+      voice: string,
+      speed: number,
+      voiceBin?: Float32Array,
+      signal?: AbortSignal,
+    ) => Promise<SynthesizedAudio | null>
   }
 
   type LoadedQueueEngine = LoadedEngine & {
@@ -1544,23 +1551,23 @@ function App() {
       const packSuffix = runtime.modelPack?.verified ? ' · verified pack' : ''
       setRuntimeLabel(`Native ORT ${runtime.ep.toUpperCase()} q8 · onnxruntime-node ${runtime.ortVersion}${packSuffix}`)
       return {
-        synthesize: async (text, voice, spd, bin) => {
+        synthesize: async (text, voice, spd, bin, signal) => {
           if (needsDirectKokoroPath(voice, bin)) {
             // Blended and multilingual voices still route through the browser
             // runtime — the native host covers the standard English path first.
             await loadKokoroWorker('wasm', 'q8', onProgress)
-            return { samples: await generateWorker(text, voice, spd, bin), sampleRate: KOKORO_SAMPLE_RATE }
+            return { samples: await generateWorker(text, voice, spd, bin, signal), sampleRate: KOKORO_SAMPLE_RATE }
           }
           try {
-            return { samples: await generateNative(text, voice, spd), sampleRate: KOKORO_SAMPLE_RATE }
+            return { samples: await generateNative(text, voice, spd, signal), sampleRate: KOKORO_SAMPLE_RATE }
           } catch (err) {
             // A host crash fails only the in-flight chunk; the process respawns
             // lazily, so reload once and retry before surfacing the failure —
             // long queue runs self-heal instead of failing every later chunk.
-            if (err instanceof Error && /crashed|not loaded/i.test(err.message)) {
+            if (err instanceof Error && err.name !== 'AbortError' && /crashed|not loaded/i.test(err.message)) {
               recordDiagnosticEvent('warn', err, 'native.synthesize-retry')
               await loadNativeKokoro(onProgress)
-              return { samples: await generateNative(text, voice, spd), sampleRate: KOKORO_SAMPLE_RATE }
+              return { samples: await generateNative(text, voice, spd, signal), sampleRate: KOKORO_SAMPLE_RATE }
             }
             throw err
           }
@@ -1579,8 +1586,8 @@ function App() {
         setRuntimeLabel('WebAssembly q8')
       }
       return {
-        synthesize: async (text, voice, spd, bin) => ({
-          samples: await generateWorker(text, voice, spd, bin),
+        synthesize: async (text, voice, spd, bin, signal) => ({
+          samples: await generateWorker(text, voice, spd, bin, signal),
           sampleRate: KOKORO_SAMPLE_RATE,
         }),
       }
@@ -1770,7 +1777,13 @@ function App() {
         }
         for (const sentence of seg.sentences) {
           if (abortRef.current) break
-          const audio = await synthesize(applyPronunciations(sentence), job.voice, speed, job.voiceBin)
+          const audio = await synthesize(
+            applyPronunciations(sentence),
+            job.voice,
+            speed,
+            job.voiceBin,
+            generationAbortRef.current?.signal,
+          )
           if (audio) {
             if (audio.sampleRate !== outputSampleRate) throw new Error('Generated chunks used mixed sample rates.')
             const completeness = checkSynthesisCompleteness(sentence, audio.samples.length / outputSampleRate, speed)
@@ -1839,6 +1852,7 @@ function App() {
       }
       const ext = formatExtension(audioFormat)
       const blob = await encodeAudio(processed, outputSampleRate, audioFormat, mp3Bitrate)
+      if (abortRef.current) break
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
       const result = await buildResult(blob, job.label, filename)
       if (cues.length > 0) {
@@ -1847,35 +1861,46 @@ function App() {
         result.vttUrl = rememberUrl(URL.createObjectURL(new Blob([toVTT(cues)], { type: 'text/vtt' })))
       }
 
+      const clipRecord: ClipRecord = { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration, cues: result.cues }
+      try {
+        await saveClip(clipRecord, blob)
+        await enforceLibraryCap()
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+          // Recover instead of failing silently: evict oldest clips to make
+          // room, then retry this atomic record+blob save once.
+          try {
+            const { evicted } = await freeLibrarySpace(Math.max(blob.size * 2, 32 * 1024 * 1024))
+            if (evicted > 0) {
+              await saveClip(clipRecord, blob)
+              showToast({ tone: 'warn', message: `Storage was full — freed ${evicted} old clip${evicted === 1 ? '' : 's'} to save this one.` })
+            } else {
+              throw err
+            }
+          } catch (recoveryErr) {
+            recordDiagnosticEvent('warn', recoveryErr, 'library.quota-recovery')
+            if (!warnedQuota) {
+              warnedQuota = true
+              showToast({ tone: 'error', message: 'Storage is full and nothing could be freed — this output is available to export but was not added to the library.' })
+            }
+          }
+        } else {
+          recordDiagnosticEvent('warn', err, 'library.save')
+          showToast({ tone: 'warn', message: 'Audio was generated but could not be committed to the local library. Export it before leaving this page.' })
+        }
+      }
+
+      if (abortRef.current) {
+        for (const url of [result.url, result.srtUrl, result.vttUrl]) {
+          if (url) URL.revokeObjectURL(url)
+        }
+        break
+      }
+      // Present the output only after its atomic library save has either
+      // committed or returned a visible recovery error.
       generated.push(result)
       zipFiles[filename] = blob
       setResults([...generated])
-      const clipRecord: ClipRecord = { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration, cues: result.cues }
-      saveClip(clipRecord, blob)
-        .then(() => enforceLibraryCap())
-        .catch(async (err: unknown) => {
-          if (err instanceof DOMException && err.name === 'QuotaExceededError') {
-            // Recover instead of failing silently: evict oldest clips to make
-            // room, then retry this save once.
-            try {
-              const { evicted } = await freeLibrarySpace(Math.max(blob.size * 2, 32 * 1024 * 1024))
-              if (evicted > 0) {
-                await saveClip(clipRecord, blob)
-                listClips().then(setLibrary).catch(() => {})
-                showToast({ tone: 'warn', message: `Storage was full — freed ${evicted} old clip${evicted === 1 ? '' : 's'} to save this one.` })
-                return
-              }
-            } catch (recoveryErr) {
-              recordDiagnosticEvent('warn', recoveryErr, 'library.quota-recovery')
-            }
-            if (!warnedQuota) {
-              warnedQuota = true
-              showToast({ tone: 'error', message: 'Storage is full and nothing could be freed — clip not saved. Export it manually and clear space.' })
-            }
-          } else {
-            recordDiagnosticEvent('warn', err, 'library.save')
-          }
-        })
     }
 
     if (audioCtx) {
@@ -2074,6 +2099,8 @@ function App() {
     setIsSpeaking(false)
     clearProgressResetTimer()
     abortRef.current = false
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
     setGenStats(null)
     generatingRef.current = true
     setIsGenerating(true)
@@ -2093,6 +2120,11 @@ function App() {
         await generateBrowser(chunks)
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        setStatus('Cancelled')
+        showToast({ tone: 'warn', message: 'Generation cancelled.' })
+        return
+      }
       const message = error instanceof Error ? error.message : 'Generation failed.'
       setStatus('Generation failed')
       showToast({ tone: 'error', message })
@@ -2105,11 +2137,21 @@ function App() {
       }, 700)
       generatingRef.current = false
       setIsGenerating(false)
+      if (generationAbortRef.current === generationController) generationAbortRef.current = null
     }
   }
 
   function cancelGeneration() {
+    if (abortRef.current) return
     abortRef.current = true
+    generationAbortRef.current?.abort()
+    cancelWorkerGeneration()
+    if (nativeAvailable) cancelNativeGeneration()
+    resetKokoroSession()
+    resetTimestampedKokoroSession()
+    resetSupertonicSession()
+    resetPiperPlusSession()
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     setStatus('Cancelling…')
   }
 
@@ -2350,7 +2392,11 @@ function App() {
         aborted = true
         break
       }
-      const audio = await synthesize(sentence, job.voice, job.speed)
+      const audio = await synthesize(sentence, job.voice, job.speed, undefined, generationAbortRef.current?.signal)
+      if (abortRef.current) {
+        aborted = true
+        break
+      }
       if (audio) {
         if (checkSynthesisCompleteness(sentence, audio.samples.length / sampleRate, job.speed).suspect) flagged += 1
         const startSec = sampleOffset / sampleRate
@@ -2375,8 +2421,10 @@ function App() {
     if (aborted) return null
     if (parts.length === 0) throw new Error('No audio produced')
     const raw = concatFloat32Arrays(parts)
+    const blob = await encodeAudio(raw, sampleRate, job.format, job.bitrate)
+    if (abortRef.current) return null
     return {
-      blob: await encodeAudio(raw, sampleRate, job.format, job.bitrate),
+      blob,
       duration: `${(raw.length / sampleRate).toFixed(1)}s`,
       cues: cues.length > 0 ? cues : undefined,
       warning: flagged > 0
@@ -2396,6 +2444,8 @@ function App() {
     setActiveJobId(jobId)
     clearProgressResetTimer()
     abortRef.current = false
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
 
     try {
       const onProgress = (info: { status?: string; file?: string; loaded?: number; total?: number }) => {
@@ -2415,17 +2465,22 @@ function App() {
           if (!replacement) {
             chunk.status = 'pending'
           } else {
-            await saveChunkBlob(jobId, chunk.index, replacement.blob)
             chunk.duration = replacement.duration
             chunk.cues = replacement.cues
             chunk.warning = replacement.warning
             chunk.status = 'done'
+            await commitQueueChunk(job, chunk.index, replacement.blob)
           }
         } catch (err) {
-          chunk.status = 'failed'
-          chunk.error = err instanceof Error ? err.message : 'Failed'
+          if (abortRef.current || (err instanceof Error && err.name === 'AbortError')) {
+            chunk.status = 'pending'
+            chunk.error = undefined
+          } else {
+            chunk.status = 'failed'
+            chunk.error = err instanceof Error ? err.message : 'Failed'
+          }
         }
-        await saveJob(job)
+        if (chunk.status !== 'done') await saveJob(job)
         setQueueJobs((prev) => prev.map((j) => (j.id === jobId ? { ...job } : j)))
         const { pct } = jobProgress(job)
         setStatus(`Queue: ${pct}% done`)
@@ -2438,13 +2493,18 @@ function App() {
         showToast({ tone: 'ok', message: `Job "${job.title}" complete.` })
       }
     } catch (err) {
-      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'The queue run failed.' })
+      if (abortRef.current || (err instanceof Error && err.name === 'AbortError')) {
+        showToast({ tone: 'warn', message: 'Queue paused — resume anytime.' })
+      } else {
+        showToast({ tone: 'error', message: err instanceof Error ? err.message : 'The queue run failed.' })
+      }
     } finally {
       generatingRef.current = false
       setIsGenerating(false)
       setActiveJobId(null)
       setProgress(null)
       setStatus('Ready')
+      if (generationAbortRef.current === generationController) generationAbortRef.current = null
     }
   }
 
@@ -2489,6 +2549,8 @@ function App() {
     setActiveJobId(jobId)
     clearProgressResetTimer()
     abortRef.current = false
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
     setStatus(`Regenerating chunk ${chunkIndex + 1}`)
     setProgress(5)
 
@@ -2506,7 +2568,6 @@ function App() {
         showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
         return false
       }
-      await saveChunkBlob(jobId, chunkIndex, replacement.blob)
       const nextJob = replaceQueueChunk(job, chunkIndex, {
         text: cleanText,
         status: 'done',
@@ -2515,12 +2576,16 @@ function App() {
         duration: replacement.duration,
         cues: replacement.cues,
       })
-      await saveJob(nextJob)
+      await commitQueueChunk(nextJob, chunkIndex, replacement.blob)
       setQueueJobs((prev) => prev.map((item) => (item.id === jobId ? nextJob : item)))
       setProgress(100)
       showToast({ tone: 'ok', message: `Chunk ${chunkIndex + 1} regenerated. ZIP/M4B exports will use the replacement audio.` })
       return true
     } catch (err) {
+      if (abortRef.current || (err instanceof Error && err.name === 'AbortError')) {
+        showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
+        return false
+      }
       showToast({ tone: 'error', message: err instanceof Error ? `${err.message} Old audio kept.` : 'Regeneration failed. Old audio kept.' })
       return false
     } finally {
@@ -2530,6 +2595,7 @@ function App() {
       setActiveJobId(null)
       setProgress(null)
       setStatus('Ready')
+      if (generationAbortRef.current === generationController) generationAbortRef.current = null
     }
   }
 
@@ -3210,7 +3276,7 @@ function App() {
                             </button>
                           ) : null}
                           {isActive ? (
-                            <button type="button" onClick={() => { abortRef.current = true }}>
+                            <button type="button" onClick={cancelGeneration}>
                               <X size={16} aria-hidden="true" />
                               Pause
                             </button>

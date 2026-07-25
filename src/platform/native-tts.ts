@@ -41,7 +41,11 @@ type HostMessage =
 
 let subscribed = false
 let nextId = 0
-const pending = new Map<number, { resolve: (samples: Float32Array) => void; reject: (err: Error) => void }>()
+const pending = new Map<number, {
+  resolve: (samples: Float32Array) => void
+  reject: (err: Error) => void
+  cleanup: () => void
+}>()
 let progressCallback: ((info: ProgressInfo) => void) | null = null
 let loadPromise: Promise<NativeRuntimeInfo> | null = null
 let loadKey = ''
@@ -61,8 +65,15 @@ function rejectAll(err: Error) {
   loadKey = ''
   for (const waiter of loadWaiters.values()) waiter.reject(err)
   loadWaiters.clear()
-  for (const entry of pending.values()) entry.reject(err)
+  for (const entry of pending.values()) {
+    entry.cleanup()
+    entry.reject(err)
+  }
   pending.clear()
+}
+
+function cancellationError(): DOMException {
+  return new DOMException('Generation cancelled.', 'AbortError')
 }
 
 function handleMessage(message: HostMessage) {
@@ -84,11 +95,15 @@ function handleMessage(message: HostMessage) {
     // Structured clone across the bridge can arrive as a plain typed-array view;
     // normalize so downstream buffer math sees a real Float32Array.
     const samples = message.samples instanceof Float32Array ? message.samples : new Float32Array(message.samples)
-    pending.get(message.id)?.resolve(samples)
+    const entry = pending.get(message.id)
     pending.delete(message.id)
+    entry?.cleanup()
+    entry?.resolve(samples)
   } else if (message.type === 'generateError') {
-    pending.get(message.id)?.reject(new Error(message.message))
+    const entry = pending.get(message.id)
     pending.delete(message.id)
+    entry?.cleanup()
+    entry?.reject(new Error(message.message))
   } else if (message.type === 'crashed') {
     runtimeInfo = null
     rejectAll(new Error('The native inference host crashed. Generate again to restart it.'))
@@ -123,7 +138,8 @@ export function loadNativeKokoro(onProgress: (info: ProgressInfo) => void): Prom
   return loadPromise
 }
 
-export function generateNative(text: string, voice: string, speed: number): Promise<Float32Array> {
+export function generateNative(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<Float32Array> {
+  if (signal?.aborted) return Promise.reject(cancellationError())
   let bridge: ReturnType<typeof getNativeTtsBridge>
   try {
     bridge = ensureSubscription()
@@ -132,9 +148,27 @@ export function generateNative(text: string, voice: string, speed: number): Prom
   }
   const id = nextId++
   return new Promise<Float32Array>((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    const onAbort = () => {
+      const entry = pending.get(id)
+      if (!entry) return
+      pending.delete(id)
+      entry.cleanup()
+      bridge!.post({ type: 'cancel', id })
+      reject(cancellationError())
+    }
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    pending.set(id, { resolve, reject, cleanup })
     bridge!.post({ type: 'generate', text, voice, speed, id })
   })
+}
+
+export function cancelNativeGeneration() {
+  const bridge = getNativeTtsBridge()
+  if (!bridge && pending.size === 0) return
+  bridge?.post({ type: 'cancel-all' })
+  runtimeInfo = null
+  rejectAll(cancellationError())
 }
 
 export function resetNativeTts() {

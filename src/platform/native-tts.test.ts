@@ -125,4 +125,26 @@ describe('native-tts client', () => {
     expect(bridge.sent).toContainEqual({ type: 'reset' })
     expect(mod.getNativeRuntimeInfo()).toBeNull()
   })
+
+  it('cancels an in-flight request with AbortError and asks main to stop the host', async () => {
+    const bridge = installFakeBridge()
+    const mod = await loadModule()
+    const controller = new AbortController()
+    const generation = mod.generateNative('hello', 'af_heart', 1, controller.signal)
+    controller.abort()
+
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' })
+    expect(bridge.sent).toContainEqual({ type: 'cancel', id: 0 })
+  })
+
+  it('rejects all pending requests when global cancellation releases the host', async () => {
+    const bridge = installFakeBridge()
+    const mod = await loadModule()
+    const generation = mod.generateNative('hello', 'af_heart', 1)
+    mod.cancelNativeGeneration()
+    mod.cancelNativeGeneration()
+
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' })
+    expect(bridge.sent.filter((message) => JSON.stringify(message) === '{"type":"cancel-all"}')).toHaveLength(2)
+  })
 })

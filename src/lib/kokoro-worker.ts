@@ -3,7 +3,11 @@ import type { WorkerRequest, WorkerResponse } from '../worker/tts.worker.ts'
 
 let worker: Worker | null = null
 let nextId = 0
-const pending = new Map<number, { resolve: (samples: Float32Array) => void; reject: (err: Error) => void }>()
+const pending = new Map<number, {
+  resolve: (samples: Float32Array) => void
+  reject: (err: Error) => void
+  cleanup: () => void
+}>()
 let progressCallback: ((info: ProgressInfo) => void) | null = null
 let loadPromise: Promise<void> | null = null
 let loadKey = ''
@@ -16,8 +20,15 @@ function rejectAll(err: Error) {
   loadKey = ''
   for (const waiter of loadWaiters.values()) waiter.reject(err)
   loadWaiters.clear()
-  for (const entry of pending.values()) entry.reject(err)
+  for (const entry of pending.values()) {
+    entry.cleanup()
+    entry.reject(err)
+  }
   pending.clear()
+}
+
+function cancellationError(): DOMException {
+  return new DOMException('Generation cancelled.', 'AbortError')
 }
 
 function getWorker(): Worker {
@@ -39,11 +50,20 @@ function getWorker(): Worker {
       }
       waiter?.reject(new Error(msg.message))
     } else if (msg.type === 'generated') {
-      pending.get(msg.id)?.resolve(msg.samples)
+      const entry = pending.get(msg.id)
       pending.delete(msg.id)
+      entry?.cleanup()
+      entry?.resolve(msg.samples)
     } else if (msg.type === 'generateError') {
-      pending.get(msg.id)?.reject(new Error(msg.message))
+      const entry = pending.get(msg.id)
       pending.delete(msg.id)
+      entry?.cleanup()
+      entry?.reject(new Error(msg.message))
+    } else if (msg.type === 'cancelled') {
+      const entry = pending.get(msg.id)
+      pending.delete(msg.id)
+      entry?.cleanup()
+      entry?.reject(cancellationError())
     }
   })
   worker.addEventListener('error', () => {
@@ -70,11 +90,28 @@ export function loadKokoroWorker(
   return loadPromise
 }
 
-export function generateWorker(text: string, voice: string, speed: number, voiceBin?: Float32Array): Promise<Float32Array> {
+export function generateWorker(
+  text: string,
+  voice: string,
+  speed: number,
+  voiceBin?: Float32Array,
+  signal?: AbortSignal,
+): Promise<Float32Array> {
+  if (signal?.aborted) return Promise.reject(cancellationError())
   const w = getWorker()
   const id = nextId++
   return new Promise<Float32Array>((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    const onAbort = () => {
+      const entry = pending.get(id)
+      if (!entry) return
+      pending.delete(id)
+      entry.cleanup()
+      w.postMessage({ type: 'cancel', id } satisfies WorkerRequest)
+      reject(cancellationError())
+    }
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    pending.set(id, { resolve, reject, cleanup })
     // Clone voice bin for transfer — the caller may reuse the original across
     // multiple chunks in one generation run.
     const binCopy = voiceBin ? new Float32Array(voiceBin) : undefined
@@ -82,6 +119,16 @@ export function generateWorker(text: string, voice: string, speed: number, voice
     const transfer = binCopy ? [binCopy.buffer as ArrayBuffer] : []
     w.postMessage(msg, { transfer })
   })
+}
+
+export function cancelWorkerGeneration() {
+  if (!worker && pending.size === 0) return
+  for (const id of pending.keys()) {
+    worker?.postMessage({ type: 'cancel', id } satisfies WorkerRequest)
+  }
+  worker?.terminate()
+  worker = null
+  rejectAll(cancellationError())
 }
 
 export function resetWorker() {

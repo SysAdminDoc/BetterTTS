@@ -8,6 +8,7 @@ type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrai
 export type WorkerRequest =
   | { type: 'load'; device: 'webgpu' | 'wasm'; dtype: 'fp32' | 'q8' }
   | { type: 'generate'; text: string; voice: string; speed: number; id: number; voiceBin?: Float32Array }
+  | { type: 'cancel'; id: number }
 
 export type WorkerResponse =
   | { type: 'progress'; info: ProgressInfo }
@@ -15,12 +16,19 @@ export type WorkerResponse =
   | { type: 'loadError'; message: string; key: string }
   | { type: 'generated'; samples: Float32Array; id: number }
   | { type: 'generateError'; message: string; id: number }
+  | { type: 'cancelled'; id: number }
 
 let tts: KokoroInstance | null = null
 let loadedKey = ''
+const cancelledIds = new Set<number>()
 
 self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data
+
+  if (msg.type === 'cancel') {
+    cancelledIds.add(msg.id)
+    return
+  }
 
   if (msg.type === 'load') {
     const key = `${msg.device}:${msg.dtype}`
@@ -49,6 +57,10 @@ self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
   }
 
   if (msg.type === 'generate') {
+    if (cancelledIds.delete(msg.id)) {
+      self.postMessage({ type: 'cancelled', id: msg.id } satisfies WorkerResponse)
+      return
+    }
     if (!tts) {
       self.postMessage({ type: 'generateError', message: 'Model not loaded', id: msg.id } satisfies WorkerResponse)
       return
@@ -65,7 +77,9 @@ self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
         samples = audio.audio
       }
 
-      if (samples) {
+      if (cancelledIds.delete(msg.id)) {
+        self.postMessage({ type: 'cancelled', id: msg.id } satisfies WorkerResponse)
+      } else if (samples) {
         self.postMessage(
           { type: 'generated', samples, id: msg.id } satisfies WorkerResponse,
           { transfer: [samples.buffer as ArrayBuffer] },
@@ -74,7 +88,11 @@ self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
         self.postMessage({ type: 'generateError', message: 'No audio produced', id: msg.id } satisfies WorkerResponse)
       }
     } catch (err) {
-      self.postMessage({ type: 'generateError', message: err instanceof Error ? err.message : 'Generation failed', id: msg.id } satisfies WorkerResponse)
+      if (cancelledIds.delete(msg.id)) {
+        self.postMessage({ type: 'cancelled', id: msg.id } satisfies WorkerResponse)
+      } else {
+        self.postMessage({ type: 'generateError', message: err instanceof Error ? err.message : 'Generation failed', id: msg.id } satisfies WorkerResponse)
+      }
     }
   }
 })

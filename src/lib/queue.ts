@@ -189,6 +189,18 @@ export async function saveChunkBlob(jobId: string, chunkIndex: number, blob: Blo
   await txDone(tx)
 }
 
+export async function commitQueueChunk(job: QueueJob, chunkIndex: number, blob: Blob): Promise<void> {
+  const chunk = job.chunks.find((entry) => entry.index === chunkIndex)
+  if (!chunk || chunk.status !== 'done') {
+    throw new Error('Queue audio can only be committed with a completed chunk record.')
+  }
+  const db = await openDB()
+  const tx = db.transaction([JOBS_STORE, CHUNKS_STORE], 'readwrite')
+  tx.objectStore(CHUNKS_STORE).put(blob, `${job.id}:${chunkIndex}`)
+  tx.objectStore(JOBS_STORE).put(migrateQueueJob(job))
+  await txDone(tx)
+}
+
 export async function getChunkBlob(jobId: string, chunkIndex: number): Promise<Blob | null> {
   const db = await openDB()
   return new Promise((resolve, reject) => {

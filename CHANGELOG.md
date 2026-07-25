@@ -9,6 +9,9 @@
 ### Added
 - Added versioned portable browser backups for clip audio, generation queues, and local settings. Backups are checksum-validated and quota-preflighted before a replace-and-restore operation, with rollback to the prior local state if any write fails.
 
+### Fixed
+- Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
+
 ### Tests
 - Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.
 

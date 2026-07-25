@@ -34,6 +34,8 @@ export type NativeRuntimeInfo = {
 export type HostRequest =
   | { type: 'load'; dtype?: 'q8' | 'fp32' }
   | { type: 'generate'; text: string; voice: string; speed: number; id: number }
+  | { type: 'cancel'; id: number }
+  | { type: 'cancel-all' }
   | { type: 'info' }
 
 export type HostResponse =
@@ -144,11 +146,21 @@ async function configureTransformersEnv(localModelRoot: string | null): Promise<
 let tts: KokoroInstance | null = null
 let loadedKey = ''
 let lastPackStatus: PackStatus | undefined
+const cancelledIds = new Set<number>()
 
 const port = getPort()
 
 port.onMessage(async (msg) => {
   if (!msg || typeof msg !== 'object') return
+
+  if (msg.type === 'cancel') {
+    cancelledIds.add(msg.id)
+    return
+  }
+
+  if (msg.type === 'cancel-all') {
+    return
+  }
 
   if (msg.type === 'info') {
     let modelPack = lastPackStatus
@@ -208,19 +220,31 @@ port.onMessage(async (msg) => {
   }
 
   if (msg.type === 'generate') {
+    if (cancelledIds.delete(msg.id)) {
+      port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
+      return
+    }
     if (!tts) {
       port.post({ type: 'generateError', message: 'Native model not loaded', id: msg.id })
       return
     }
     try {
       const audio = (await tts.generate(msg.text, { voice: msg.voice as never, speed: msg.speed })) as { audio?: Float32Array }
-      if (audio.audio) {
+      if (cancelledIds.delete(msg.id)) {
+        port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
+      } else if (audio.audio) {
         port.post({ type: 'generated', samples: audio.audio, id: msg.id })
       } else {
         port.post({ type: 'generateError', message: 'No audio produced', id: msg.id })
       }
     } catch (err) {
-      port.post({ type: 'generateError', message: err instanceof Error ? err.message : 'Native generation failed', id: msg.id })
+      port.post({
+        type: 'generateError',
+        message: cancelledIds.delete(msg.id)
+          ? 'Generation cancelled.'
+          : err instanceof Error ? err.message : 'Native generation failed',
+        id: msg.id,
+      })
     }
   }
 })

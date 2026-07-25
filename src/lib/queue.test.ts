@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type QueueJob, deleteJob, deleteJobWithSnapshot, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, replaceQueueChunk, restoreQueueJob, saveChunkBlob, saveJob } from './queue.ts'
+import { type QueueJob, commitQueueChunk, deleteJob, deleteJobWithSnapshot, getChunkBlob, getJob, jobProgress, listJobs, migrateQueueJob, nextPendingChunk, replaceQueueChunk, restoreQueueJob, saveChunkBlob, saveJob } from './queue.ts'
 
 function makeJob(id: string, chunks = 3): QueueJob {
   return {
@@ -62,6 +62,26 @@ describe('queue', () => {
     const retrieved = await getChunkBlob('q3', 0)
     expect(retrieved).not.toBeNull()
     expect(await retrieved!.text()).toBe('audio data')
+  })
+
+  it('commits completed chunk metadata and audio in one transaction', async () => {
+    const job = makeJob('atomic')
+    await saveJob(job)
+    job.chunks[0].status = 'done'
+    job.chunks[0].duration = '1.0s'
+    await commitQueueChunk(job, 0, new Blob(['complete audio']))
+
+    expect((await getJob(job.id))?.chunks[0]).toMatchObject({ status: 'done', duration: '1.0s' })
+    expect(await (await getChunkBlob(job.id, 0))?.text()).toBe('complete audio')
+  })
+
+  it('refuses to commit audio without completed metadata', async () => {
+    const job = makeJob('incomplete')
+    await saveJob(job)
+
+    await expect(commitQueueChunk(job, 0, new Blob(['partial audio']))).rejects.toThrow('completed chunk')
+    expect(await getChunkBlob(job.id, 0)).toBeNull()
+    expect((await getJob(job.id))?.chunks[0].status).toBe('pending')
   })
 
   it('deleteJob removes job and its chunk blobs', async () => {
