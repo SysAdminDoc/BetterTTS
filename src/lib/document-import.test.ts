@@ -18,6 +18,17 @@ function makeDocx(documentXml: string): ArrayBuffer {
   }))
 }
 
+function declareZipEntrySize(bytes: Uint8Array, size: number): Uint8Array {
+  const patched = bytes.slice()
+  const view = new DataView(patched.buffer)
+  for (let offset = 0; offset <= patched.length - 30; offset += 1) {
+    const signature = view.getUint32(offset, true)
+    if (signature === 0x04034b50) view.setUint32(offset + 22, size, true)
+    if (signature === 0x02014b50) view.setUint32(offset + 24, size, true)
+  }
+  return patched
+}
+
 function makePdf(text: string): ArrayBuffer {
   const parts = ['%PDF-1.4\n']
   const offsets: number[] = [0]
@@ -78,6 +89,14 @@ describe('document import adapters', () => {
   it('throws on invalid DOCX packages', () => {
     const invalid = bytesToBuffer(zipSync({ 'word/styles.xml': new TextEncoder().encode('<xml/>') }))
     expect(() => extractDocxTextFromArrayBuffer(invalid)).toThrow('word/document.xml')
+  })
+
+  it('rejects a DOCX body that declares an oversized expansion before inflating it', () => {
+    const archive = zipSync({
+      'word/document.xml': new TextEncoder().encode('<w:document><w:body><w:p>tiny</w:p></w:body></w:document>'),
+    })
+    const oversized = declareZipEntrySize(archive, 0xffffffff)
+    expect(() => extractDocxTextFromArrayBuffer(bytesToBuffer(oversized))).toThrow('word/document.xml')
   })
 
   it('routes document files by extension or MIME type', async () => {

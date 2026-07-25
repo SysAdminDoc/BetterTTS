@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Patched the production Transformers/ONNX dependency graph to adm-zip 0.6.0 and sharp 0.35.0, and added runtime plus packaged-asar security gates with expiring, owner-labelled exception support.
+- Added crafted DOCX and EPUB archive regressions proving declared multi-gigabyte expansions are rejected before fflate inflates user-controlled entries.
+
+### Tests
+- Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.
+
 ## v0.19.0 - 2026-07-09
 
 ### Added

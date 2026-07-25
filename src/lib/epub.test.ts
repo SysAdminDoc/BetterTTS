@@ -39,6 +39,23 @@ function makeEpub(chapters: { id: string; title: string; body: string }[]): File
   return new File([zipped], 'test.epub', { type: 'application/epub+zip' })
 }
 
+function declareZipEntrySize(bytes: Uint8Array, size: number): Uint8Array {
+  const patched = bytes.slice()
+  const view = new DataView(patched.buffer)
+  for (let offset = 0; offset <= patched.length - 30; offset += 1) {
+    const signature = view.getUint32(offset, true)
+    if (signature === 0x04034b50) view.setUint32(offset + 22, size, true)
+    if (signature === 0x02014b50) view.setUint32(offset + 24, size, true)
+  }
+  return patched
+}
+
+function bytesToBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
+}
+
 describe('parseEpub', () => {
   it('extracts chapters from a valid EPUB', async () => {
     const epub = makeEpub([
@@ -72,6 +89,14 @@ describe('parseEpub', () => {
     const zipped = zipSync({ 'random.txt': new TextEncoder().encode('not an epub') })
     const file = new File([zipped], 'bad.epub')
     await expect(parseEpub(file)).rejects.toThrow('container.xml')
+  })
+
+  it('rejects EPUB entries that declare oversized expansions before inflating them', async () => {
+    const archive = zipSync({
+      'META-INF/container.xml': new TextEncoder().encode('<container/>'),
+    })
+    const oversized = declareZipEntrySize(archive, 0xffffffff)
+    await expect(parseEpub(new File([bytesToBuffer(oversized)], 'oversized.epub'))).rejects.toThrow('container.xml')
   })
 
   it('resolves URI-encoded manifest hrefs to their zip entries', async () => {
