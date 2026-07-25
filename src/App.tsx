@@ -209,6 +209,7 @@ function getInitialTheme(): Theme {
 }
 
 function getInitialPiperFlag(): boolean {
+  if (window.betterttsPlatform?.isDesktop) return true
   if (typeof window === 'undefined') return false
   try {
     const params = new URLSearchParams(window.location.search)
@@ -1003,8 +1004,6 @@ function App() {
     : library, [library, normalizedProjectSearch])
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
-    : engine === 'piper'
-      ? 'Experimental Piper-plus jobs can generate clips but are not queueable yet.'
     : !usableText.trim()
       ? 'Enter text before queueing.'
       : null
@@ -1863,6 +1862,16 @@ function App() {
       }
     }
 
+    if (job.engine === 'piper') {
+      const tts = await loadPiperPlus(onProgress)
+      setRuntimeLabel(`Piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`)
+      return {
+        sampleRate: PIPER_PLUS_SAMPLE_RATE,
+        synthesize: (text, _voice, spd) =>
+          synthesizePiperPlus(tts, text, (job.language as PiperPlusLanguage | undefined) ?? 'en', spd),
+      }
+    }
+
     return {
       sampleRate: KOKORO_SAMPLE_RATE,
       ...(await ensureKokoroEngine(onProgress, { wordTimestamps: false })),
@@ -2545,8 +2554,10 @@ function App() {
         ? selectedVoice.id
         : queueEngine === 'supertonic'
           ? selectedSupertonicVoice.id
-          : selectedKittenVoice.id,
-      language: queueEngine === 'kokoro' ? locale : undefined,
+          : queueEngine === 'piper'
+            ? piperLanguage
+            : selectedKittenVoice.id,
+      language: queueEngine === 'kokoro' ? locale : queueEngine === 'piper' ? piperLanguage : undefined,
       speed,
       format: audioFormat,
       bitrate: mp3Bitrate,
@@ -3797,7 +3808,7 @@ function App() {
               {showSystemTools ? (
               <div className="system-tools-section" role="group" aria-labelledby="diagnostics-heading" ref={systemToolsSectionRef}>
                 <h3 id="diagnostics-heading" className="sr-only">System and diagnostics</h3>
-                <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
+                {!desktopProjects ? <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
                   <input
                     id="experimental-piper"
                     type="checkbox"
@@ -3808,7 +3819,7 @@ function App() {
                     <strong>Enable experimental Piper-plus</strong>
                     <small>{piperPlusSupport.supported ? 'Loads the Piper runtime and Tsukuyomi-chan model only when selected.' : 'Requires WebAssembly and IndexedDB support.'}</small>
                   </span>
-                </label>
+                </label> : null}
                 <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>

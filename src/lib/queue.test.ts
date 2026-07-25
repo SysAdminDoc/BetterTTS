@@ -172,6 +172,18 @@ describe('queue', () => {
     expect(migrated.chunks[0].cues).toEqual([{ index: 1, startSec: 0, endSec: 1.2, text: 'Chunk text.' }])
   })
 
+  it('preserves Piper engine and language across restart migration', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('piper', 1),
+      engine: 'piper',
+      voice: 'ja',
+      language: 'ja',
+    })
+    expect(migrated.engine).toBe('piper')
+    expect(migrated.voice).toBe('ja')
+    expect(migrated.language).toBe('ja')
+  })
+
   it('replaces one queue chunk without mutating the original job', () => {
     const job = makeJob('replace', 2)
     job.chunks[0] = { ...job.chunks[0], status: 'failed', error: 'old failure', chapterTitle: 'Old title' }

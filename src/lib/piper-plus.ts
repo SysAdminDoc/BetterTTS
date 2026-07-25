@@ -74,7 +74,7 @@ export function piperPlusRuntimeSupport(): PiperPlusRuntimeSupport {
     webGpu,
     defaultFirstLoad: false,
     notes: [
-      'Experimental engine: package, ONNX Runtime, WASM G2P, and model assets are lazy-loaded only after the flag is enabled and Piper-plus is selected.',
+      'Desktop catalog engine: package, ONNX Runtime, WASM G2P, and model assets are lazy-loaded only when Piper-plus is selected; the web build remains opt-in.',
       'Piper-plus stores model assets in its own IndexedDB cache; BetterTTS does not include those entries in the per-engine Cache API manager yet.',
     ],
   }

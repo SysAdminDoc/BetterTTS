@@ -18,7 +18,7 @@ export const ENGINE_REGISTRY: EngineDescriptor[] = [
   { id: 'kokoro', label: 'Kokoro local', queueable: true, experimental: false, firstLoad: 'default' },
   { id: 'supertonic', label: 'Supertonic', queueable: true, experimental: false, firstLoad: 'lazy' },
   { id: 'kitten', label: 'KittenTTS', queueable: true, experimental: false, firstLoad: 'lazy' },
-  { id: 'piper', label: 'Piper-plus', queueable: false, experimental: true, firstLoad: 'lazy' },
+  { id: 'piper', label: 'Piper-plus', queueable: true, experimental: false, firstLoad: 'lazy' },
   { id: 'browser', label: 'Browser', queueable: false, experimental: false, firstLoad: 'default' },
 ]
 

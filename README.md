@@ -138,6 +138,8 @@ The Windows app can create and open portable `.bettertts` projects from System t
 
 When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Optional two-pass EBU R128 normalization targets -16 LUFS / -1.5 dBTP; queue M4B exports include chapter metadata and optional JPEG/PNG cover art. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
 
+Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingual Tsukuyomi-chan pack download only when selected, and Piper jobs use the same resumable queue, clip library, project, and native export paths as other local engines. The web/PWA build keeps Piper behind its explicit experimental toggle because the WASM/G2P payload is large.
+
 ## Tech Stack
 
 | Layer | Technology |

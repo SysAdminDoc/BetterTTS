@@ -2,9 +2,10 @@ import type { AudioFormat } from './encode.ts'
 import { publishStoreChange } from './coordination.ts'
 import type { Cue } from './subtitles.ts'
 import type { KokoroLocale, VoiceId } from './voices.ts'
+import type { PiperPlusLanguage } from './piper-plus.ts'
 
 export type ChunkStatus = 'pending' | 'generating' | 'done' | 'failed'
-export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten'
+export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten' | 'piper'
 
 export type QueueChunk = {
   index: number
@@ -27,7 +28,7 @@ export type QueueJob = {
   createdAt: number
   engine: QueueEngine
   voice: VoiceId | string
-  language?: KokoroLocale
+  language?: KokoroLocale | PiperPlusLanguage
   speed: number
   format: AudioFormat
   bitrate: number
@@ -253,7 +254,7 @@ export function replaceQueueChunk(
 
 export function migrateQueueJob(raw: unknown): QueueJob {
   const job = raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
-  const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' ? job.engine : 'kokoro'
+  const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' || job.engine === 'piper' ? job.engine : 'kokoro'
   return {
     schemaVersion: 2,
     id: String(job.id ?? crypto.randomUUID()),
@@ -261,7 +262,7 @@ export function migrateQueueJob(raw: unknown): QueueJob {
     createdAt: typeof job.createdAt === 'number' ? job.createdAt : Date.now(),
     engine,
     voice: job.voice ?? 'af_heart',
-    language: engine === 'kokoro' ? job.language : undefined,
+    language: engine === 'kokoro' || engine === 'piper' ? job.language : undefined,
     speed: typeof job.speed === 'number' ? job.speed : 1,
     format: job.format ?? 'wav',
     bitrate: typeof job.bitrate === 'number' ? job.bitrate : 128,

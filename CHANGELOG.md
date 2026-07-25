@@ -14,6 +14,7 @@
 - Added an unsigned Windows static-update path with Pages-hosted `latest.yml`, versioned GitHub Release installer/blockmap assets, six-hour and manual checks, explicit download/restart actions, sanitized failure recovery, packaged bridge/UI smoke coverage, checksum validation, and a live deployment gate.
 - Added portable `.bettertts` desktop projects with atomic saves, checksum-validated open/restore, crash-resumable queue and clip assets, debounced autosave, browser-backup migration, and project-wide title/script/filename search.
 - Added system-FFmpeg desktop export for WAV, MP3, Ogg Opus, FLAC, and M4B, with bounded IPC/temp files, two-pass EBU R128 normalization, chaptered queue M4B output, optional cover art, capability diagnostics, and actionable installation recovery.
+- Promoted Piper-plus to a queueable, lazy desktop catalog engine with persisted language selection and the same project/library/export flow as other local engines; web users retain the explicit experimental gate.
 
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.

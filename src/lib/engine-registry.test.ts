@@ -16,11 +16,11 @@ describe('engine registry', () => {
     expect(visibleEngineDescriptors({ piperPlus: true }).map((engine) => engine.id)).toContain('piper')
   })
 
-  it('keeps experimental Piper-plus out of long-form queue persistence', () => {
+  it('makes Piper-plus queueable when its platform flag exposes it', () => {
     expect(engineQueueable('kokoro')).toBe(true)
     expect(engineQueueable('supertonic')).toBe(true)
     expect(engineQueueable('kitten')).toBe(true)
-    expect(engineQueueable('piper')).toBe(false)
+    expect(engineQueueable('piper')).toBe(true)
     expect(engineQueueable('browser')).toBe(false)
   })
 })
