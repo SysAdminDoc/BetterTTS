@@ -16,6 +16,8 @@
     "test": "vitest run",
     "lint": "oxlint",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:release": "cross-env BETTERTTS_SMOKE_REAL_ENGINE=1 node scripts/smoke.mjs",
+    "release:smoke": "node scripts/run-release-smoke.mjs",
     "license:runtime": "node scripts/check-runtime-licenses.mjs",
     "security:runtime": "node scripts/check-runtime-security.mjs",
     "security:artifact": "node scripts/check-runtime-security.mjs --artifact release/win-unpacked/resources/app.asar",

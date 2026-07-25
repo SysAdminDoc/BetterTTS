@@ -10,6 +10,7 @@
 - Added versioned portable browser backups for clip audio, generation queues, and local settings. Backups are checksum-validated and quota-preflighted before a replace-and-restore operation, with rollback to the prior local state if any write fails.
 - PDF, DOCX, and EPUB imports now parse in a dedicated bounded worker with phase progress, cancellation, sanitized errors, and unchanged-script recovery on failure.
 - Added checked-in raw/gzip budgets for the initial shell and every heavy lazy asset group. Production builds fail on regressions, browser smoke rejects eager engine/parser loads and records time to interactive, and the pinned native probe enforces time to first audio plus real-time factor.
+- Added an opt-in real-engine release lane that uses the same immutable Apache-2.0 Kokoro q8 revision in Chromium and the packaged Windows app, decodes generated WAVs, validates cues, cancellation and partial-queue resume, records timing/RTF, and removes its temporary native model cache.
 
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
@@ -19,6 +20,7 @@
 ### Tests
 - Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.
 - Browser smoke now enforces landmarks, heading order, skip-link and focus behavior, reduced-motion and forced-colors rendering, dark/light contrast tokens, and mobile layout.
+- `npm run release:smoke` now rebuilds the installer and verifies real synthesis through both browser Worker and packaged Electron utility-process paths while the default smoke stays fast and model-free.
 
 ## v0.19.0 - 2026-07-09
 

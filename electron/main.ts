@@ -195,6 +195,79 @@ function probeTtsHostLoad(timeoutMs = 180000): Promise<unknown> {
   })
 }
 
+function probeTtsHostGenerate(text: string, id: number, timeoutMs = 180000): Promise<Float32Array> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const host = ensureTtsHost()
+    const timer = setTimeout(() => {
+      host.removeListener('message', onMessage)
+      rejectPromise(new Error('native host generation timeout'))
+    }, timeoutMs)
+    const onMessage = (message: unknown) => {
+      if (!message || typeof message !== 'object') return
+      const response = message as { type?: string; id?: number; samples?: Float32Array; message?: string }
+      if (response.id !== id || (response.type !== 'generated' && response.type !== 'generateError')) return
+      clearTimeout(timer)
+      host.removeListener('message', onMessage)
+      if (response.type === 'generated' && response.samples) resolvePromise(new Float32Array(response.samples))
+      else rejectPromise(new Error(response.message ?? 'native host generation failed'))
+    }
+    host.on('message', onMessage)
+    host.postMessage({ type: 'generate', text, voice: 'af_heart', speed: 1, id })
+  })
+}
+
+async function probeTtsHostCancellation(): Promise<void> {
+  const id = 91001
+  const pending = probeTtsHostGenerate(
+    'The packaged cancellation fixture must discard this unfinished output. '.repeat(15),
+    id,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  ensureTtsHost().postMessage({ type: 'cancel', id })
+  try {
+    await pending
+    throw new Error('cancelled native generation produced output')
+  } catch (error) {
+    if (!(error instanceof Error) || !/cancel/i.test(error.message)) throw error
+  }
+}
+
+function encodeSmokeWav(samples: Float32Array, sampleRate = 24000): Buffer {
+  const wav = Buffer.allocUnsafe(44 + samples.length * 2)
+  wav.write('RIFF', 0, 'ascii')
+  wav.writeUInt32LE(36 + samples.length * 2, 4)
+  wav.write('WAVE', 8, 'ascii')
+  wav.write('fmt ', 12, 'ascii')
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(sampleRate, 24)
+  wav.writeUInt32LE(sampleRate * 2, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write('data', 36, 'ascii')
+  wav.writeUInt32LE(samples.length * 2, 40)
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]))
+    wav.writeInt16LE(Math.round(sample < 0 ? sample * 0x8000 : sample * 0x7fff), 44 + index * 2)
+  }
+  return wav
+}
+
+async function decodeSmokeWav(win: BrowserWindow, wav: Buffer): Promise<{ duration: number; sampleRate: number }> {
+  const base64 = wav.toString('base64')
+  return win.webContents.executeJavaScript(`(async () => {
+    const bytes = Uint8Array.from(atob(${JSON.stringify(base64)}), character => character.charCodeAt(0))
+    const context = new AudioContext()
+    try {
+      const decoded = await context.decodeAudioData(bytes.buffer)
+      return { duration: decoded.duration, sampleRate: decoded.sampleRate }
+    } finally {
+      await context.close()
+    }
+  })()`)
+}
+
 function applyDevSecurityHeaders(): void {
   // The Vite dev server can't set COOP/COEP itself, so inject them here to keep
   // the isolated-context behavior identical to production.
@@ -281,6 +354,26 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       if (LOAD_NATIVE_IN_SMOKE) {
         const nativeLoad = (await probeTtsHostLoad()) as { key?: unknown; runtime?: unknown }
         result.nativeLoad = { key: nativeLoad.key, runtime: nativeLoad.runtime }
+        const cancellationStartedAt = performance.now()
+        await probeTtsHostCancellation()
+        result.nativeCancellation = { ok: true, elapsedMs: Math.round(performance.now() - cancellationStartedAt) }
+        const generationStartedAt = performance.now()
+        const samples = await probeTtsHostGenerate('Packaged BetterTTS synthesis is working.', 91002)
+        const generationMs = performance.now() - generationStartedAt
+        if (samples.length === 0 || samples.some((sample) => !Number.isFinite(sample))) throw new Error('native host produced invalid samples')
+        const decoded = await decodeSmokeWav(win, encodeSmokeWav(samples))
+        const audioSeconds = samples.length / 24000
+        result.nativeSynthesis = {
+          // decodeAudioData may resample into the machine's output context;
+          // duration must still agree with the 24 kHz source header.
+          ok: decoded.duration > 0 && Math.abs(decoded.duration - audioSeconds) < 0.02,
+          samples: samples.length,
+          audioSeconds: Number(audioSeconds.toFixed(2)),
+          generationMs: Math.round(generationMs),
+          realTimeFactor: Number(((generationMs / 1000) / audioSeconds).toFixed(2)),
+          decoded,
+          cues: [{ index: 1, startSec: 0, endSec: audioSeconds, text: 'Packaged BetterTTS synthesis is working.' }],
+        }
       }
     } catch (err) {
       result.nativeHostError = err instanceof Error ? err.message : String(err)
@@ -292,12 +385,19 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.generate &&
       Boolean(probe.platform) &&
       Boolean(result.nativeHost) &&
-      (!LOAD_NATIVE_IN_SMOKE || Boolean(result.nativeLoad))
+      (!LOAD_NATIVE_IN_SMOKE || (
+        Boolean(result.nativeLoad)
+        && Boolean((result.nativeCancellation as { ok?: boolean } | undefined)?.ok)
+        && Boolean((result.nativeSynthesis as { ok?: boolean } | undefined)?.ok)
+      ))
     result.probe = probe
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err)
   }
 
+  if (process.env.BETTERTTS_SMOKE_REPORT) {
+    await writeFile(process.env.BETTERTTS_SMOKE_REPORT, `${JSON.stringify(result, null, 2)}\n`).catch(() => undefined)
+  }
   console.log(JSON.stringify(result, null, 2))
   app.exit(result.ok ? 0 : 1)
 }

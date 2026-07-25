@@ -2,7 +2,7 @@ import { SELF_HOSTED_KOKORO_VOICE_IDS } from './voices.ts'
 
 export const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 export const KOKORO_SAMPLE_RATE = 24000
-export const KOKORO_MODEL_REVISION = 'main'
+export const KOKORO_MODEL_REVISION = '1939ad2a8e416c0acfeecc08a694d14ef25f2231'
 export const KOKORO_HF_RESOLVE_PREFIX =
   `https://huggingface.co/${KOKORO_MODEL_ID}/resolve/${KOKORO_MODEL_REVISION}/`
 export const KOKORO_LOCAL_MODEL_PREFIX = `models/${KOKORO_MODEL_ID}/`

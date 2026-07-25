@@ -117,6 +117,9 @@ npm run build
 
 # Re-check the existing production bundle against pinned shell/lazy-asset budgets
 npm run budget:build
+
+# Opt-in release gate: real pinned browser + packaged Electron synthesis
+npm run release:smoke
 ```
 
 Open `http://localhost:5173/BetterTTS/` in your browser.
@@ -128,6 +131,8 @@ Use **Properties -> System & diagnostics -> Diagnostics -> Copy JSON** when repo
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
 Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, queue/library playback and Undo recovery, empty states, M4B fallback messaging, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Eight screen captures plus `summary.json` are written to `dist/smoke/`. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
+
+`npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
 ## Tech Stack
 

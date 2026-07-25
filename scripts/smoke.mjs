@@ -12,6 +12,7 @@ const baseUrl = `http://127.0.0.1:${port}/BetterTTS/`
 const distDir = join(root, 'dist')
 const smokeDir = join(root, 'dist', 'smoke')
 const performanceBudget = JSON.parse(await readFile(join(root, 'scripts', 'performance-budget.json'), 'utf8'))
+const runRealEngine = process.env.BETTERTTS_SMOKE_REAL_ENGINE === '1'
 const allowedConsole = [
   'No available adapters',
   'Setting up fake worker',
@@ -345,6 +346,203 @@ async function assertAccessibilityStructure(page) {
   await page.emulateMedia({ reducedMotion: 'no-preference', forcedColors: 'none' })
 }
 
+async function seedPartiallyCompleteRealQueue(page) {
+  await page.evaluate(async () => {
+    const sampleRate = 8000
+    const samples = sampleRate
+    const buffer = new ArrayBuffer(44 + samples * 2)
+    const view = new DataView(buffer)
+    const write = (offset, value) => {
+      for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index))
+    }
+    write(0, 'RIFF')
+    view.setUint32(4, 36 + samples * 2, true)
+    write(8, 'WAVE')
+    write(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    write(36, 'data')
+    view.setUint32(40, samples * 2, true)
+
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('bettertts-queue', 2)
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains('jobs')) request.result.createObjectStore('jobs', { keyPath: 'id' })
+        if (!request.result.objectStoreNames.contains('chunks')) request.result.createObjectStore('chunks')
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    const tx = db.transaction(['jobs', 'chunks'], 'readwrite')
+    tx.objectStore('jobs').put({
+      schemaVersion: 2,
+      id: 'release-real-queue',
+      title: 'Pinned real-engine queue',
+      createdAt: Date.now(),
+      engine: 'kokoro',
+      voice: 'af_heart',
+      language: 'en-us',
+      speed: 1,
+      format: 'wav',
+      bitrate: 96,
+      chunks: [
+        { index: 0, text: 'Already completed fixture.', status: 'done', duration: '1.0s', cues: [{ index: 1, startSec: 0, endSec: 1, text: 'Already completed fixture.' }] },
+        { index: 1, text: 'The resumed queue generated this verified sentence.', status: 'pending' },
+      ],
+    })
+    tx.objectStore('chunks').put(new Blob([buffer], { type: 'audio/wav' }), 'release-real-queue:0')
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+    db.close()
+  })
+}
+
+async function objectUrlBuffer(locator, attribute) {
+  const dataUrl = await locator.evaluate((element, attributeName) => {
+    const url = element.getAttribute(attributeName)
+    const blob = url ? window.__betterttsSmokeBlobs?.get(url) : null
+    if (!(blob instanceof Blob)) throw new Error(`Smoke blob not found for ${attributeName}=${url}`)
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(blob)
+    })
+  }, attribute)
+  if (typeof dataUrl !== 'string') throw new Error('Smoke blob did not produce a data URL')
+  return Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+}
+
+async function inspectGeneratedAudio(page, resultRow) {
+  const bytes = await objectUrlBuffer(resultRow.locator('audio'), 'src')
+  const header = bytes.subarray(0, 12).toString('ascii')
+  const decoded = await page.evaluate(async (base64) => {
+    const wav = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
+    const context = new AudioContext()
+    try {
+      const audio = await context.decodeAudioData(wav.buffer)
+      return { duration: audio.duration, sampleRate: audio.sampleRate }
+    } finally {
+      await context.close()
+    }
+  }, bytes.toString('base64'))
+  return { bytes: bytes.byteLength, header, ...decoded }
+}
+
+async function runRealEngineChecks(browser) {
+  console.log('Checking pinned real browser engine, cancellation, and queue resume...')
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addInitScript(() => {
+    const blobs = new Map()
+    const createObjectURL = URL.createObjectURL.bind(URL)
+    URL.createObjectURL = (blob) => {
+      const url = createObjectURL(blob)
+      blobs.set(url, blob)
+      return url
+    }
+    window.__betterttsSmokeBlobs = blobs
+  })
+  const page = await context.newPage()
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  try {
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.locator('.generate-button').waitFor({ timeout: 20000 })
+    await page.getByLabel('Text to synthesize').fill('Pinned release synthesis works. Its caption cues are verified.')
+    const generationStartedAt = performance.now()
+    await page.locator('.generate-button').click()
+    const resultRow = page.locator('#generated-output .result-row').first()
+    await resultRow.locator('audio').waitFor({ timeout: 300000 })
+    const timeToFirstAudioMs = performance.now() - generationStartedAt
+    const audio = await inspectGeneratedAudio(page, resultRow)
+    if (!audio.header.startsWith('RIFF') || !audio.header.endsWith('WAVE') || audio.bytes <= 44 || audio.duration <= 0) {
+      throw new Error(`Real engine produced invalid WAV output: ${JSON.stringify(audio)}`)
+    }
+    const srt = (await objectUrlBuffer(resultRow.getByRole('link', { name: 'SRT' }), 'href')).toString('utf8')
+    const vtt = (await objectUrlBuffer(resultRow.getByRole('link', { name: 'VTT' }), 'href')).toString('utf8')
+    if (!srt.includes('-->') || !vtt.startsWith('WEBVTT') || !vtt.includes('-->')) throw new Error('Real engine caption cues are missing')
+    if (timeToFirstAudioMs > performanceBudget.realEngine.maxTimeToFirstAudioMs) {
+      throw new Error(`Browser time to first audio ${timeToFirstAudioMs.toFixed(0)} ms exceeds ${performanceBudget.realEngine.maxTimeToFirstAudioMs} ms`)
+    }
+
+    const originalResultCount = await page.locator('#generated-output .result-row').count()
+    await page.getByLabel('Text to synthesize').fill(`${'Cancellation must discard unfinished audio. '.repeat(90)}Final sentence.`)
+    await page.locator('.generate-button').click()
+    const cancelButton = page.locator('.generate-button.cancel')
+    await cancelButton.waitFor({ timeout: 20000 })
+    await page.waitForTimeout(50)
+    await cancelButton.click()
+    await page.getByText('Generation cancelled.').waitFor({ timeout: 60000 })
+    await page.locator('.generate-button').filter({ hasText: /^Generate audio$/ }).waitFor({ timeout: 60000 })
+    if (await page.locator('#generated-output .result-row').count() !== originalResultCount) {
+      throw new Error('Cancelled browser generation committed a new output')
+    }
+
+    await seedPartiallyCompleteRealQueue(page)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.getByRole('tab', { name: /Queue/ }).click()
+    const queue = page.getByLabel('Generation queue')
+    await queue.getByRole('button', { name: 'Resume' }).click()
+    await page.getByText('Job "Pinned real-engine queue" complete.').waitFor({ timeout: 300000 })
+    const resumed = await page.evaluate(async () => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('bettertts-queue', 2)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const tx = db.transaction(['jobs', 'chunks'], 'readonly')
+      const job = await new Promise((resolve, reject) => {
+        const request = tx.objectStore('jobs').get('release-real-queue')
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const blob = await new Promise((resolve, reject) => {
+        const request = tx.objectStore('chunks').get('release-real-queue:1')
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      db.close()
+      const bytes = blob instanceof Blob ? await blob.arrayBuffer() : new ArrayBuffer(0)
+      const header = new TextDecoder('ascii').decode(bytes.slice(0, 12))
+      return {
+        statuses: job?.chunks?.map((chunk) => chunk.status) ?? [],
+        cueCount: job?.chunks?.[1]?.cues?.length ?? 0,
+        bytes: bytes.byteLength,
+        header,
+      }
+    })
+    if (resumed.statuses.some((status) => status !== 'done') || resumed.cueCount < 1 || resumed.bytes <= 44 || !resumed.header.startsWith('RIFF')) {
+      throw new Error(`Partially completed queue did not resume transactionally: ${JSON.stringify(resumed)}`)
+    }
+    if (pageErrors.length > 0) throw new Error(`Real-engine page errors:\n${pageErrors.join('\n')}`)
+
+    const report = {
+      ok: true,
+      model: 'onnx-community/Kokoro-82M-v1.0-ONNX',
+      revision: '1939ad2a8e416c0acfeecc08a694d14ef25f2231',
+      license: 'Apache-2.0',
+      timeToFirstAudioMs: Math.round(timeToFirstAudioMs),
+      realTimeFactor: Number(((timeToFirstAudioMs / 1000) / audio.duration).toFixed(2)),
+      audio,
+      captions: { srtBytes: srt.length, vttBytes: vtt.length },
+      cancellation: 'passed',
+      queueResume: resumed,
+    }
+    await writeFile(join(smokeDir, 'real-engine.json'), `${JSON.stringify(report, null, 2)}\n`)
+    return report
+  } finally {
+    await context.close()
+  }
+}
+
 async function runSmoke() {
   console.log('Building production app...')
   runChecked('npm', ['run', 'build'])
@@ -608,6 +806,7 @@ async function runSmoke() {
     const unexpected = allMessages.filter((msg) => !allowedConsole.some((allowed) => msg.includes(allowed)))
     if (unexpected.length > 0) throw new Error(`Unexpected console messages:\n${unexpected.join('\n')}`)
 
+    const realEngine = runRealEngine ? await runRealEngineChecks(browser) : null
     const summary = {
       ok: true,
       url: baseUrl,
@@ -627,6 +826,7 @@ async function runSmoke() {
         timeToInteractiveBudgetMs: performanceBudget.shell.maxTimeToInteractiveMs,
         initialAssets: desktop.initialAssets,
       },
+      ...(realEngine ? { realEngine } : {}),
     }
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
     console.log(JSON.stringify(summary, null, 2))
