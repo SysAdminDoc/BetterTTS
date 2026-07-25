@@ -11,6 +11,7 @@ const port = Number(process.env.BETTERTTS_SMOKE_PORT ?? 4873)
 const baseUrl = `http://127.0.0.1:${port}/BetterTTS/`
 const distDir = join(root, 'dist')
 const smokeDir = join(root, 'dist', 'smoke')
+const performanceBudget = JSON.parse(await readFile(join(root, 'scripts', 'performance-budget.json'), 'utf8'))
 const allowedConsole = [
   'No available adapters',
   'Setting up fake worker',
@@ -217,9 +218,14 @@ async function openSeededApp(context, jobId) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   await page.getByText('BetterTTS').first().waitFor({ timeout: 20000 })
   await seedCompletedQueueJob(page, jobId)
+  const navigationStartedAt = performance.now()
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
-  return { page, messages }
+  const timeToInteractiveMs = performance.now() - navigationStartedAt
+  const initialAssets = await page.evaluate(() => (
+    performance.getEntriesByType('resource').map((entry) => new URL(entry.name).pathname)
+  ))
+  return { page, messages, timeToInteractiveMs, initialAssets }
 }
 
 async function assertThemeContrast(page, themeName) {
@@ -357,6 +363,15 @@ async function runSmoke() {
     })
     await desktopContext.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl })
     const desktop = await openSeededApp(desktopContext, 'smoke-default')
+    if (desktop.timeToInteractiveMs > performanceBudget.shell.maxTimeToInteractiveMs) {
+      throw new Error(`Time to interactive ${desktop.timeToInteractiveMs.toFixed(0)} ms exceeds ${performanceBudget.shell.maxTimeToInteractiveMs} ms`)
+    }
+    const unexpectedInitialAssets = desktop.initialAssets.filter((asset) => (
+      performanceBudget.shell.forbiddenInitialAssetPatterns.some((pattern) => asset.toLowerCase().includes(pattern.toLowerCase()))
+    ))
+    if (unexpectedInitialAssets.length > 0) {
+      throw new Error(`Initial shell loaded lazy assets:\n${unexpectedInitialAssets.join('\n')}`)
+    }
     const title = await desktop.page.title()
     if (!title.includes('BetterTTS')) throw new Error(`Unexpected page title: ${title}`)
     const body = await desktop.page.locator('body').innerText()
@@ -607,6 +622,11 @@ async function runSmoke() {
         'dist/smoke/docs-dark.png',
       ],
       allowedConsoleMessages: allMessages,
+      performance: {
+        timeToInteractiveMs: Math.round(desktop.timeToInteractiveMs),
+        timeToInteractiveBudgetMs: performanceBudget.shell.maxTimeToInteractiveMs,
+        initialAssets: desktop.initialAssets,
+      },
     }
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
     console.log(JSON.stringify(summary, null, 2))

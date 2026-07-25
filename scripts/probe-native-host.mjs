@@ -5,9 +5,11 @@
 // onnxruntime-node, synthesizes a sentence, and reports timing + sample count.
 // This exercises the exact code path the desktop app uses, without a GUI.
 import { fork } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 const hostPath = 'dist-electron/tts-host.mjs'
+const performanceBudget = JSON.parse(readFileSync('scripts/performance-budget.json', 'utf8'))
+const reportPath = 'dist-electron/native-host-performance.json'
 if (!existsSync(hostPath)) {
   console.error('Host not built. Run: node scripts/build-electron.mjs')
   process.exit(2)
@@ -65,18 +67,37 @@ child.on('message', (msg) => {
     finish(1)
   } else if (msg.type === 'generated') {
     const ms = performance.now() - loadedAt
+    const timeToFirstAudioMs = performance.now() - startedAt
     const seconds = msg.samples.length / 24000
-    console.log(
-      JSON.stringify({
-        ok: true,
-        voice,
-        samples: msg.samples.length,
-        audioSeconds: Number(seconds.toFixed(2)),
-        synthMs: Math.round(ms),
-        realtimeFactor: Number((seconds / (ms / 1000)).toFixed(2)),
-      }),
-    )
-    finish(0)
+    const report = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      ok: msg.samples.length > 0,
+      voice,
+      samples: msg.samples.length,
+      audioSeconds: Number(seconds.toFixed(2)),
+      modelLoadMs: Math.round(loadedAt - startedAt),
+      synthMs: Math.round(ms),
+      timeToFirstAudioMs: Math.round(timeToFirstAudioMs),
+      realTimeFactor: Number(((ms / 1000) / seconds).toFixed(2)),
+    }
+    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+    console.log(JSON.stringify(report))
+    const failures = []
+    if (!report.ok) failures.push('generated audio is empty')
+    if (report.timeToFirstAudioMs > performanceBudget.realEngine.maxTimeToFirstAudioMs) {
+      failures.push(`time to first audio ${report.timeToFirstAudioMs} ms exceeds ${performanceBudget.realEngine.maxTimeToFirstAudioMs} ms`)
+    }
+    if (report.realTimeFactor > performanceBudget.realEngine.maxRealTimeFactor) {
+      failures.push(`real-time factor ${report.realTimeFactor} exceeds ${performanceBudget.realEngine.maxRealTimeFactor}`)
+    }
+    if (failures.length > 0) {
+      console.error(`Native performance budget failed:\n- ${failures.join('\n- ')}`)
+      finish(1)
+    } else {
+      console.log('Native performance budget passed.')
+      finish(0)
+    }
   } else if (msg.type === 'generateError') {
     console.error(`generate failed: ${msg.message}`)
     finish(1)

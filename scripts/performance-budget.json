@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "shell": {
+    "maxRawBytes": 525000,
+    "maxGzipBytes": 165000,
+    "maxTimeToInteractiveMs": 5000,
+    "forbiddenInitialAssetPatterns": [
+      "document",
+      "epub",
+      "pdf",
+      "kokoro",
+      "transformers",
+      "ephone",
+      "phonemizer",
+      "piper",
+      "ort-wasm",
+      "lamejs",
+      "Signalsmith"
+    ]
+  },
+  "lazyBoundaries": {
+    "document-parsers": {
+      "patterns": ["document", "epub", "pdf"],
+      "maxRawBytes": 3800000,
+      "maxGzipBytes": 1100000
+    },
+    "kokoro-runtime": {
+      "patterns": ["kokoro-", "dist-lib"],
+      "maxRawBytes": 1700000,
+      "maxGzipBytes": 850000
+    },
+    "multilingual-g2p": {
+      "patterns": ["ephone", "phonemizer", "roa-", "all-"],
+      "maxRawBytes": 41000000,
+      "maxGzipBytes": 30000000
+    },
+    "transformers-runtime": {
+      "patterns": ["transformers.web"],
+      "maxRawBytes": 1150000,
+      "maxGzipBytes": 330000
+    },
+    "piper-runtime": {
+      "patterns": ["piper_plus_wasm"],
+      "maxRawBytes": 65000000,
+      "maxGzipBytes": 24000000
+    },
+    "onnx-web-runtime": {
+      "patterns": ["ort-wasm"],
+      "maxRawBytes": 40000000,
+      "maxGzipBytes": 10500000
+    },
+    "mp3-encoder": {
+      "patterns": ["lamejs"],
+      "maxRawBytes": 200000,
+      "maxGzipBytes": 70000
+    },
+    "pitch-processor": {
+      "patterns": ["SignalsmithStretch"],
+      "maxRawBytes": 125000,
+      "maxGzipBytes": 55000
+    }
+  },
+  "realEngine": {
+    "maxTimeToFirstAudioMs": 30000,
+    "maxRealTimeFactor": 3
+  }
+}

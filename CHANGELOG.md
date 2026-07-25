@@ -9,6 +9,7 @@
 ### Added
 - Added versioned portable browser backups for clip audio, generation queues, and local settings. Backups are checksum-validated and quota-preflighted before a replace-and-restore operation, with rollback to the prior local state if any write fails.
 - PDF, DOCX, and EPUB imports now parse in a dedicated bounded worker with phase progress, cancellation, sanitized errors, and unchanged-script recovery on failure.
+- Added checked-in raw/gzip budgets for the initial shell and every heavy lazy asset group. Production builds fail on regressions, browser smoke rejects eager engine/parser loads and records time to interactive, and the pinned native probe enforces time to first audio plus real-time factor.
 
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
