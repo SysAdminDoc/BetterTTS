@@ -204,7 +204,7 @@ npm run deploy
 
 The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
 
-To rebuild the unsigned Windows installer and publish its version-matched `latest.yml`, installer, and blockmap under the static `/updates/` feed, run `npm run deploy:updates`. Staging aborts if metadata and package versions differ or an artifact is missing.
+To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`. The command verifies the installer checksum, uploads the installer and blockmap to the versioned GitHub Release, and publishes version-matched `latest.yml` under the static `/updates/` feed. This split keeps the 200+ MB binary outside GitHub Pages' 100 MB per-file limit.
 
 ## Voice Catalog
 

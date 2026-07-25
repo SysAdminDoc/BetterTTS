@@ -23,7 +23,7 @@
     "security:artifact": "node scripts/check-runtime-security.mjs --artifact release/win-unpacked/resources/app.asar",
     "preview": "vite preview",
     "deploy": "npm run security:runtime && node scripts/deploy.mjs",
-    "deploy:updates": "npm run desktop:dist && node scripts/deploy.mjs --include-updates",
+    "deploy:updates": "npm run desktop:dist && node scripts/publish-desktop-update.mjs && node scripts/deploy.mjs --include-updates",
     "sync:kokoro": "node scripts/sync-kokoro-assets.mjs",
     "sync:piper": "node scripts/sync-piper-assets.mjs",
     "desktop:dev": "cross-env BETTERTTS_TARGET=electron BETTERTTS_DEV_URL=http://localhost:5174/ concurrently -k -n vite,electron \"vite --port 5174 --strictPort\" \"node scripts/build-electron.mjs --dev && wait-on http://localhost:5174/ && node scripts/run-electron.mjs\"",

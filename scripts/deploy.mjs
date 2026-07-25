@@ -4,9 +4,10 @@
 // touched. Never use `git clean -fdx` in a deploy flow: -x deletes gitignored
 // files (it destroyed local working docs once on 2026-07-08).
 import { execSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buildStaticUpdateMetadata, readDesktopUpdateArtifacts } from './desktop-update-feed.mjs'
 
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts })
 
@@ -96,6 +97,7 @@ async function verifyLiveDeploy() {
       }
     }
     if (!lastFailure) {
+      if (includeUpdates) await verifyLiveUpdateFeed(base)
       console.log(`Live site verified: ${probes.length} probes OK.`)
       return
     }
@@ -106,26 +108,24 @@ async function verifyLiveDeploy() {
 }
 
 function stageDesktopUpdates() {
-  const releaseDir = join(repoRoot, 'release')
-  const metadataPath = join(releaseDir, 'latest.yml')
-  if (!existsSync(metadataPath)) throw new Error('release/latest.yml is missing. Run npm run desktop:dist first.')
-  const metadata = readFileSync(metadataPath, 'utf8')
-  const versionMatch = metadata.match(/^version:\s*['"]?([^'"\r\n]+)['"]?/m)
-  const installerMatch = metadata.match(/^path:\s*['"]?([^'"\r\n]+)['"]?/m)
-  const packageVersion = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).version
-  if (versionMatch?.[1]?.trim() !== packageVersion) {
-    throw new Error(`Update metadata version ${versionMatch?.[1] ?? 'missing'} does not match package ${packageVersion}.`)
-  }
-  const installerName = installerMatch?.[1]?.trim()
-  if (!installerName) throw new Error('release/latest.yml has no installer path.')
+  const artifacts = readDesktopUpdateArtifacts(repoRoot)
+  const staticFeed = buildStaticUpdateMetadata(artifacts.metadata, artifacts)
   const updateDir = join(distDir, 'updates')
   rmSync(updateDir, { recursive: true, force: true })
   mkdirSync(updateDir, { recursive: true })
-  for (const name of ['latest.yml', installerName, `${installerName}.blockmap`]) {
-    const source = join(releaseDir, name)
-    if (!existsSync(source)) throw new Error(`Required update artifact is missing: ${source}`)
-    const target = join(updateDir, name)
-    cpSync(source, target)
-  }
-  console.log(`Staged unsigned desktop update v${packageVersion} in dist/updates/.`)
+  writeFileSync(join(updateDir, 'latest.yml'), staticFeed.metadata)
+  console.log(`Staged desktop update metadata v${artifacts.packageVersion}; binaries remain in GitHub Releases.`)
+}
+
+async function verifyLiveUpdateFeed(base) {
+  const response = await fetch(`${base}updates/latest.yml?v=${Date.now()}`, { cache: 'no-store' })
+  const metadata = await response.text()
+  const assetMatch = metadata.match(/^\s*-\s+url:\s*(https:\/\/github\.com\/[^\s]+)$/m)
+  if (!assetMatch) throw new Error('Live desktop update metadata has no absolute GitHub Release URL.')
+  const asset = await fetch(assetMatch[1], {
+    headers: { Range: 'bytes=0-0' },
+    redirect: 'follow',
+  })
+  await asset.body?.cancel()
+  if (!asset.ok) throw new Error(`Live desktop update asset probe failed: HTTP ${asset.status}`)
 }
