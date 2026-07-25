@@ -4,7 +4,7 @@
 // touched. Never use `git clean -fdx` in a deploy flow: -x deletes gitignored
 // files (it destroyed local working docs once on 2026-07-08).
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildStaticUpdateMetadata, readDesktopUpdateArtifacts } from './desktop-update-feed.mjs'
