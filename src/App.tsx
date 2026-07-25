@@ -50,7 +50,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
+import { getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -876,6 +876,9 @@ function App() {
   const [projectAction, setProjectAction] = useState<'open' | 'save' | 'save-as' | 'autosave' | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
   const [projectSearch, setProjectSearch] = useState('')
+  const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; version?: string; message?: string } | null>(null)
+  const [loudnessNormalization, setLoudnessNormalization] = useState(false)
+  const [m4bCoverFile, setM4bCoverFile] = useState<File | null>(null)
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
@@ -978,12 +981,13 @@ function App() {
   const lineCount = useMemo(() => text.split(/\r?\n/).length, [text])
   const cacheRows = modelCache?.engines ?? []
   const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
-  const m4bExportReady = m4bCapability?.supported === true
+  const m4bExportReady = ffmpegStatus?.available === true || m4bCapability?.supported === true
   const crossOriginStorage = useMemo(() => detectCrossOriginStorage(), [])
   const transformersReadiness = useMemo(() => transformersUpgradeReadiness(), [])
   const piperPlusSupport = useMemo(() => piperPlusRuntimeSupport(), [])
   const desktopUpdater = useMemo(() => getDesktopUpdaterBridge(), [])
   const desktopProjects = useMemo(() => getDesktopProjectBridge(), [])
+  const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
   const visibleQueueJobs = useMemo(() => normalizedProjectSearch
     ? queueJobs.filter((job) =>
@@ -1046,8 +1050,12 @@ function App() {
       : audioFormat === 'mp3'
         ? `MP3 - ${mp3Bitrate} kbps`
         : audioFormat === 'opus'
-          ? 'Opus/WebM'
-          : `WAV - ${activeSampleRate}`
+          ? `Opus${desktopFfmpeg ? '' : '/WebM'}`
+          : audioFormat === 'flac'
+            ? 'FLAC lossless'
+            : audioFormat === 'm4b'
+              ? 'M4B / AAC'
+              : `WAV - ${activeSampleRate}`
   const captionModeLabel = wordTimestamps && englishKokoro ? 'Word-level captions' : engine === 'browser' ? 'Live only' : 'SRT + VTT'
   const editorModeLabel = dialogMode ? 'Dialog script' : separateLines ? 'Line export' : 'Single clip'
   const completedQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.filter((chunk) => chunk.status === 'done').length, 0)
@@ -1111,6 +1119,13 @@ function App() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopUpdater])
+
+  useEffect(() => {
+    if (!desktopFfmpeg) return
+    desktopFfmpeg.status()
+      .then(setFfmpegStatus)
+      .catch(() => setFfmpegStatus({ available: false, message: 'FFmpeg capability check failed. Restart BetterTTS and try again.' }))
+  }, [desktopFfmpeg])
 
   useEffect(() => {
     let refreshTimer: number | null = null
@@ -1421,6 +1436,33 @@ function App() {
     const { createPortableBackup } = await import('./lib/backup.ts')
     const project = await createPortableBackup()
     return { bytes: new Uint8Array(await project.blob.arrayBuffer()), preview: project.preview }
+  }
+
+  async function encodeOutput(
+    samples: Float32Array,
+    sampleRate: number,
+    format: AudioFormat,
+    bitrate: number,
+    title: string,
+  ): Promise<{ blob: Blob; extension: string }> {
+    if (desktopFfmpeg && ffmpegStatus?.available) {
+      const encoded = await desktopFfmpeg.transcode({
+        samples,
+        sampleRate,
+        format,
+        bitrate,
+        title,
+        loudnessTarget: loudnessNormalization ? -16 : undefined,
+      })
+      return {
+        blob: new Blob([encoded.bytes as Uint8Array<ArrayBuffer>], { type: encoded.mime }),
+        extension: encoded.extension,
+      }
+    }
+    if (format === 'flac' || format === 'm4b') {
+      throw new Error(ffmpegStatus?.message ?? `${format.toUpperCase()} export requires FFmpeg in the Windows desktop app.`)
+    }
+    return { blob: await encodeAudio(samples, sampleRate, format, bitrate), extension: formatExtension(format) }
   }
 
   async function handleSaveProject(saveAs = false) {
@@ -2018,8 +2060,8 @@ function App() {
           showToast({ tone: 'warn', message: 'Background music file contained no audio — exported speech only.' })
         }
       }
-      const ext = formatExtension(audioFormat)
-      const blob = await encodeAudio(processed, outputSampleRate, audioFormat, mp3Bitrate)
+      const encoded = await encodeOutput(processed, outputSampleRate, audioFormat, mp3Bitrate, job.label)
+      const { blob, extension: ext } = encoded
       if (abortRef.current) break
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
       const result = await buildResult(blob, job.label, filename)
@@ -2589,7 +2631,7 @@ function App() {
     if (aborted) return null
     if (parts.length === 0) throw new Error('No audio produced')
     const raw = concatFloat32Arrays(parts)
-    const blob = await encodeAudio(raw, sampleRate, job.format, job.bitrate)
+    const { blob } = await encodeOutput(raw, sampleRate, job.format, job.bitrate, job.title)
     if (abortRef.current) return null
     return {
       blob,
@@ -2808,7 +2850,7 @@ function App() {
       for (const chunk of doneChunks) {
         const blob = await getChunkBlob(jobId, chunk.index)
         if (blob) {
-          const ext = formatExtension(job.format)
+          const ext = job.format === 'opus' && desktopFfmpeg && ffmpegStatus?.available ? '.opus' : formatExtension(job.format)
           const filename = `${String(chunk.index + 1).padStart(3, '0')}-${slugify(chunk.text)}${ext}`
           blobEntries.push({ filename, blob })
           manifestChunks.push({
@@ -2867,6 +2909,41 @@ function App() {
     if (!job || m4bExportingJobId) return
     if (job.chunks.some((chunk) => chunk.status !== 'done')) {
       showToast({ tone: 'warn', message: 'Finish every queue chunk before exporting M4B.' })
+      return
+    }
+    if (desktopFfmpeg && ffmpegStatus?.available) {
+      setM4bExportingJobId(jobId)
+      setStatus('Building native M4B audiobook…')
+      try {
+        const chunks = []
+        for (const chunk of job.chunks) {
+          const blob = await getChunkBlob(jobId, chunk.index)
+          if (!blob) throw new Error(`Missing audio for chunk ${chunk.index + 1}. Resume the job, then export again.`)
+          chunks.push({
+            bytes: new Uint8Array(await blob.arrayBuffer()),
+            title: chunk.chapterTitle || `Chapter ${chunk.chapterIndex !== undefined ? chunk.chapterIndex + 1 : chunk.index + 1}`,
+          })
+        }
+        const result = await desktopFfmpeg.audiobook({
+          chunks,
+          title: job.title,
+          bitrate: Math.max(64, Math.min(192, job.bitrate)),
+          loudnessTarget: loudnessNormalization ? -16 : undefined,
+          cover: m4bCoverFile ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()) } : undefined,
+        })
+        const url = URL.createObjectURL(new Blob([result.bytes as Uint8Array<ArrayBuffer>], { type: result.mime }))
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${slugify(job.title)}.m4b`
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        showToast({ tone: 'ok', message: `Native M4B ready with ${result.chapterCount} chapters.` })
+      } catch (err) {
+        showToast({ tone: 'error', message: err instanceof Error ? err.message : 'Native M4B export failed.' })
+      } finally {
+        setM4bExportingJobId(null)
+        setStatus('Ready')
+      }
       return
     }
     let capability = m4bCapability
@@ -3899,7 +3976,8 @@ function App() {
                 <dl className="diagnostics-facts">
                   <div><dt>Runtime</dt><dd title={runtimeLabel}>{runtimeLabel}</dd></div>
                   <div><dt>Opus export</dt><dd>{opusSupported() ? 'Available' : 'Unavailable'}</dd></div>
-                  <div><dt>M4B export</dt><dd>{m4bCapability?.supported ? 'AAC ready' : 'ZIP fallback'}</dd></div>
+                  <div><dt>Native FFmpeg</dt><dd>{ffmpegStatus?.available ? ffmpegStatus.version ?? 'Ready' : ffmpegStatus?.message ?? 'Not checked'}</dd></div>
+                  <div><dt>M4B export</dt><dd>{m4bExportReady ? (ffmpegStatus?.available ? 'Native chapters ready' : 'WebCodecs AAC ready') : 'ZIP fallback'}</dd></div>
                   <div><dt>Storage</dt><dd title={storageEstimate ?? 'Unknown'}>{storageEstimate ?? 'Unknown'}</dd></div>
                   <div><dt>Storage mode</dt><dd title={crossOriginStorage.message}>{crossOriginStorageShortLabel(crossOriginStorage.usable)}</dd></div>
                   <div>
@@ -4163,7 +4241,9 @@ function App() {
                     <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
                       <option value="wav">WAV (lossless)</option>
                       <option value="mp3">MP3</option>
-                      {opusSupported() ? <option value="opus">Opus (WebM)</option> : null}
+                      {desktopFfmpeg || opusSupported() ? <option value="opus">Opus{desktopFfmpeg ? ' (Ogg)' : ' (WebM)'}</option> : null}
+                      {desktopFfmpeg ? <option value="flac">FLAC (lossless)</option> : null}
+                      {desktopFfmpeg ? <option value="m4b">M4B (AAC)</option> : null}
                     </select>
                     {audioFormat === 'mp3' ? (
                       <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
@@ -4171,6 +4251,40 @@ function App() {
                         <option value={128}>128 kbps</option>
                         <option value={160}>{engine === 'kokoro' || engine === 'kitten' ? '160 kbps (max at 24 kHz)' : '160 kbps'}</option>
                       </select>
+                    ) : null}
+                    {desktopFfmpeg ? (
+                      <>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={loudnessNormalization}
+                            disabled={!ffmpegStatus?.available}
+                            onChange={(event) => setLoudnessNormalization(event.target.checked)}
+                          />
+                          <span>
+                            Two-pass loudness
+                            <small>{ffmpegStatus?.available ? 'Normalize to -16 LUFS / -1.5 dBTP with measured EBU R128 values.' : ffmpegStatus?.message ?? 'Checking FFmpeg…'}</small>
+                          </span>
+                        </label>
+                        <label className="cover-art-control">
+                          <span>M4B cover</span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] ?? null
+                              if (file && file.size > 10 * 1024 * 1024) {
+                                showToast({ tone: 'warn', message: 'Cover art must be 10 MB or smaller.' })
+                                event.target.value = ''
+                                setM4bCoverFile(null)
+                              } else {
+                                setM4bCoverFile(file)
+                              }
+                            }}
+                          />
+                          <small>{m4bCoverFile ? shortUiLabel(m4bCoverFile.name, 40) : 'Optional JPEG or PNG, up to 10 MB.'}</small>
+                        </label>
+                      </>
                     ) : null}
                   </div>
                 ) : null}

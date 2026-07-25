@@ -4,6 +4,7 @@ const NATIVE_TTS_CHANNEL = 'bettertts:native-tts'
 const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
 const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 const PROJECT_CHANNEL = 'bettertts:project'
+const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -55,6 +56,17 @@ const bridge = {
     },
     forget(): Promise<unknown> {
       return ipcRenderer.invoke(PROJECT_CHANNEL, { action: 'forget' })
+    },
+  },
+  ffmpeg: {
+    status(): Promise<unknown> {
+      return ipcRenderer.invoke(FFMPEG_CHANNEL, { action: 'status' })
+    },
+    transcode(request: unknown): Promise<unknown> {
+      return ipcRenderer.invoke(FFMPEG_CHANNEL, { action: 'transcode', ...(request as object) })
+    },
+    audiobook(request: unknown): Promise<unknown> {
+      return ipcRenderer.invoke(FFMPEG_CHANNEL, { action: 'audiobook', ...(request as object) })
     },
   },
 }

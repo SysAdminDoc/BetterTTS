@@ -37,6 +37,27 @@ export type DesktopProjectBridge = {
   forget: () => Promise<DesktopProjectResult>
 }
 
+export type NativeAudioFormat = 'wav' | 'mp3' | 'opus' | 'flac' | 'm4b'
+
+export type DesktopFfmpegBridge = {
+  status: () => Promise<{ available: boolean; version?: string; message?: string }>
+  transcode: (request: {
+    samples: Float32Array
+    sampleRate: number
+    format: NativeAudioFormat
+    bitrate: number
+    title: string
+    loudnessTarget?: number
+  }) => Promise<{ bytes: Uint8Array; extension: string; mime: string }>
+  audiobook: (request: {
+    chunks: Array<{ bytes: Uint8Array; title: string }>
+    title: string
+    bitrate: number
+    loudnessTarget?: number
+    cover?: { bytes: Uint8Array }
+  }) => Promise<{ bytes: Uint8Array; extension: '.m4b'; mime: 'audio/mp4'; chapterCount: number }>
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -44,6 +65,7 @@ export type DesktopBridge = {
   nativeTts?: NativeTtsBridge
   updater?: DesktopUpdaterBridge
   projects?: DesktopProjectBridge
+  ffmpeg?: DesktopFfmpegBridge
 }
 
 declare global {
@@ -82,4 +104,9 @@ export function getDesktopUpdaterBridge(): DesktopUpdaterBridge | null {
 export function getDesktopProjectBridge(): DesktopProjectBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.projects ?? null
+}
+
+export function getDesktopFfmpegBridge(): DesktopFfmpegBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.ffmpeg ?? null
 }

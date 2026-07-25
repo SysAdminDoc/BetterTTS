@@ -1,6 +1,6 @@
 import { encodeWav } from './wav.ts'
 
-export type AudioFormat = 'wav' | 'mp3' | 'opus'
+export type AudioFormat = 'wav' | 'mp3' | 'opus' | 'flac' | 'm4b'
 
 // Kokoro output is 24 kHz → MPEG-2 LSF, whose bitrate table tops out at 160 kbps.
 // lamejs silently clamps higher requests, so the UI must not offer them.
@@ -21,6 +21,7 @@ export function encodeAudio(samples: Float32Array, sampleRate: number, format: A
   }
   if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate)
   if (format === 'opus') return encodeOpus(samples, sampleRate, bitrate)
+  if (format === 'flac' || format === 'm4b') return Promise.reject(new Error(`${format.toUpperCase()} export requires the Windows desktop FFmpeg path.`))
   return Promise.resolve(new Blob([encodeWav(samples, sampleRate)], { type: 'audio/wav' }))
 }
 
@@ -332,19 +333,25 @@ function concat(arrays: Uint8Array[]): Uint8Array {
 export function formatExtension(format: AudioFormat): string {
   if (format === 'mp3') return '.mp3'
   if (format === 'opus') return '.webm'
+  if (format === 'flac') return '.flac'
+  if (format === 'm4b') return '.m4b'
   return '.wav'
 }
 
 export function formatMime(format: AudioFormat): string {
   if (format === 'mp3') return 'audio/mpeg'
   if (format === 'opus') return 'audio/webm'
+  if (format === 'flac') return 'audio/flac'
+  if (format === 'm4b') return 'audio/mp4'
   return 'audio/wav'
 }
 
 export function formatFromFilename(filename: string): AudioFormat {
   const lower = filename.toLowerCase()
   if (lower.endsWith('.mp3')) return 'mp3'
-  if (lower.endsWith('.webm')) return 'opus'
+  if (lower.endsWith('.webm') || lower.endsWith('.opus')) return 'opus'
+  if (lower.endsWith('.flac')) return 'flac'
+  if (lower.endsWith('.m4b')) return 'm4b'
   return 'wav'
 }
 

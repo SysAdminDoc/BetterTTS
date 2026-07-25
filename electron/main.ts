@@ -4,6 +4,7 @@ import { autoUpdater } from 'electron-updater'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join, normalize, sep } from 'node:path'
 import { readProjectFile, writeProjectFile } from './project-files.mjs'
+import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 
 // In dev the renderer is served by Vite; in production it is served from the
 // packaged dist/ over a custom app:// scheme so we control the response headers
@@ -110,6 +111,7 @@ const NATIVE_TTS_CHANNEL = 'bettertts:native-tts'
 const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
 const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 const PROJECT_CHANNEL = 'bettertts:project'
+const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
 let activeProjectPath: string | null = null
@@ -277,6 +279,29 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
     return { canceled: false, name: basename(activeProjectPath) }
   }
   throw new Error('Unsupported project action.')
+})
+
+ipcMain.handle(FFMPEG_CHANNEL, async (event, request: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender) || !request || typeof request !== 'object') {
+    throw new Error('Invalid FFmpeg request.')
+  }
+  const message = request as {
+    action?: string
+    samples?: Float32Array
+    sampleRate?: number
+    format?: string
+    bitrate?: number
+    title?: string
+    loudnessTarget?: number
+    chunks?: Array<{ bytes: Uint8Array; title: string }>
+    cover?: { bytes: Uint8Array }
+  }
+  if (message.action === 'status') return probeFfmpeg()
+  if (message.action === 'transcode' && message.samples && message.sampleRate && message.format) {
+    return transcodePcm(message)
+  }
+  if (message.action === 'audiobook' && message.chunks) return buildM4bAudiobook(message)
+  throw new Error('Unsupported FFmpeg action.')
 })
 
 // Ask the host for its runtime info without loading any model — used by the
@@ -462,9 +487,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -502,6 +527,16 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       const bytes = opened.bytes ? Array.from(opened.bytes) : []
       await projects.forget()
       return { saved: !saved.canceled && saved.name?.endsWith('.bettertts'), opened: !opened.canceled, bytes }
+    })()`)
+    result.ffmpeg = await win.webContents.executeJavaScript(`(async () => {
+      const bridge = window.betterttsPlatform?.ffmpeg
+      if (!bridge) return null
+      const status = await bridge.status()
+      if (!status.available) return status
+      const samples = new Float32Array(2400)
+      for (let i = 0; i < samples.length; i++) samples[i] = Math.sin(i * Math.PI / 12) * 0.1
+      const output = await bridge.transcode({ samples, sampleRate: 24000, format: 'flac', bitrate: 128, title: 'Smoke' })
+      return { ...status, outputBytes: output.bytes.byteLength, extension: output.extension }
     })()`)
 
     try {
@@ -542,6 +577,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean(probe.platform) &&
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
+      probe.platform?.ffmpeg === true &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
       Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
@@ -549,6 +585,10 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.saved) &&
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.opened) &&
       JSON.stringify((result.projectIo as { bytes?: number[] } | undefined)?.bytes) === '[80,75,3,4,5]' &&
+      (!((result.ffmpeg as { available?: boolean } | undefined)?.available) || (
+        ((result.ffmpeg as { outputBytes?: number } | undefined)?.outputBytes ?? 0) > 0
+        && (result.ffmpeg as { extension?: string } | undefined)?.extension === '.flac'
+      )) &&
       Boolean(result.nativeHost) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)
