@@ -16,6 +16,9 @@
 - Added system-FFmpeg desktop export for WAV, MP3, Ogg Opus, FLAC, and M4B, with bounded IPC/temp files, two-pass EBU R128 normalization, chaptered queue M4B output, optional cover art, capability diagnostics, and actionable installation recovery.
 - Promoted Piper-plus to a queueable, lazy desktop catalog engine with persisted language selection and the same project/library/export flow as other local engines; web users retain the explicit experimental gate.
 
+### Changed
+- Reimagined the studio as a compact broadcast-console workspace with a wider labeled rail, calmer script stage, complete in-view audio deck, scan-friendly engine inspector, stronger generation dock, and coordinated dark/light responsive themes.
+
 ### Fixed
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
 - Queue generation, regeneration, and deletion now use cross-tab leases with crash-expiring fallback locks; queue and library mutations propagate to other open tabs through BroadcastChannel with a storage-event fallback.

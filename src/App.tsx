@@ -3475,7 +3475,7 @@ function App() {
                   <strong>{engine === 'browser' ? 'Device audio' : activeSampleRate}</strong>
                   <small>{status}</small>
                 </div>
-                <div className="output-waveform" aria-hidden="true">
+                <div className={results.length > 0 ? 'output-waveform has-output' : 'output-waveform'} aria-hidden="true">
                   {results.length === 0 ? (
                     <span className="waveform-empty">
                       <Volume2 size={22} aria-hidden="true" />

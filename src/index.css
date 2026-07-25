@@ -1,27 +1,27 @@
 :root {
-  --bg: #0a0d11;
-  --bg-strong: #05070a;
-  --surface-0: #0e1217;
-  --surface-1: #131820;
-  --surface-2: #181f28;
-  --surface-3: #1d2630;
-  --surface-glass: #11161d;
-  --surface-raised: #151b23;
-  --editor-bg: #090c10;
-  --control-bg: #10151c;
-  --border: #252d37;
-  --border-strong: #3a4654;
-  --line-soft: #171d24;
-  --heading: #f3f6fa;
-  --text: #c8d0da;
-  --muted: #909baa;
-  --accent: #5a9fff;
-  --accent-2: #43c4e6;
-  --accent-soft: #132943;
-  --accent-text: #70adff;
-  --accent-action: #5a9fff;
-  --accent-action-2: #43c4e6;
-  --accent-action-contrast: #04111f;
+  --bg: #071018;
+  --bg-strong: #040a0f;
+  --surface-0: #0a131c;
+  --surface-1: #0e1923;
+  --surface-2: #13212d;
+  --surface-3: #192a37;
+  --surface-glass: #0b151f;
+  --surface-raised: #111e29;
+  --editor-bg: #071017;
+  --control-bg: #0b151e;
+  --border: #1d2d3a;
+  --border-strong: #304757;
+  --line-soft: #13222d;
+  --heading: #f3f7fa;
+  --text: #c8d3dc;
+  --muted: #8495a4;
+  --accent: #30c5f1;
+  --accent-2: #8d7cf6;
+  --accent-soft: #0e2a38;
+  --accent-text: #65d7f7;
+  --accent-action: #35c8f3;
+  --accent-action-2: #1fa8db;
+  --accent-action-contrast: #031118;
   --success: #6ade91;
   --success-soft: #0f2c21;
   --warning: #f0c45f;
@@ -31,9 +31,9 @@
   --danger-action: #ff6878;
   --danger-action-2: #f4a368;
   --danger-action-contrast: #17060a;
-  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.52);
-  --shadow: 0 20px 70px rgba(0, 0, 0, 0.46);
-  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 28px 90px rgba(0, 0, 0, 0.58);
+  --shadow: 0 20px 64px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 10px 28px rgba(0, 0, 0, 0.26);
   --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
   --sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -69,14 +69,14 @@
   --heading: #161b22;
   --text: #323a45;
   --muted: #667281;
-  --accent: #256fe6;
-  --accent-2: #0e9ac2;
-  --accent-soft: #dcecff;
+  --accent: #007fa8;
+  --accent-2: #6754d9;
+  --accent-soft: #d9f2fa;
   /* Accent used AS TEXT on tinted chips must run darker in light mode to
      clear WCAG AA (4.5:1) over 10-16% accent tints. */
-  --accent-text: #1f5fc9;
-  --accent-action: #1f5fc9;
-  --accent-action-2: #08718f;
+  --accent-text: #006f93;
+  --accent-action: #00799f;
+  --accent-action-2: #006a8c;
   --accent-action-contrast: #ffffff;
   --success: #168a4f;
   --success-soft: #dff5e9;
