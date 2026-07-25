@@ -1,4 +1,5 @@
 import { unzipSync } from 'fflate'
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url'
 
 export type ImportedDocument = {
   kind: 'pdf' | 'docx'
@@ -40,15 +41,20 @@ export async function extractPdfText(file: File): Promise<string> {
   }
 }
 
-export async function extractPdfTextFromArrayBuffer(buffer: ArrayBuffer): Promise<string> {
+export async function extractPdfTextFromArrayBuffer(
+  buffer: ArrayBuffer,
+  onPage?: (page: number, total: number) => void,
+): Promise<string> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const nestedWorkerAvailable = typeof Worker !== 'undefined'
+  if (nestedWorkerAvailable) pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(buffer),
-    disableWorker: true,
+    ...(!nestedWorkerAvailable ? { disableWorker: true } : {}),
     disableFontFace: false,
     isEvalSupported: false,
     useSystemFonts: true,
-  } as Parameters<typeof pdfjs.getDocument>[0] & { disableWorker: boolean })
+  } as Parameters<typeof pdfjs.getDocument>[0] & { disableWorker?: boolean; isEvalSupported: boolean })
   const pdf = await loadingTask.promise
   try {
     const pages: string[] = []
@@ -57,8 +63,10 @@ export async function extractPdfTextFromArrayBuffer(buffer: ArrayBuffer): Promis
       const content = await page.getTextContent()
       const lines = textContentToLines(content.items as PdfTextItem[])
       if (lines) pages.push(lines)
+      onPage?.(pageNumber, pdf.numPages)
     }
     const text = normalizeTextBlocks(pages.join('\n\n'))
+      .replace(/\b(?:[A-Z]\s+){2,}[A-Z]\b/g, (acronym) => acronym.replace(/\s+/g, ''))
     if (!text) throw new Error('No selectable text found in this PDF. Scanned PDFs need OCR before importing.')
     return text
   } finally {
@@ -86,7 +94,7 @@ export function extractDocxTextFromArrayBuffer(buffer: ArrayBuffer): string {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   if (doc.querySelector('parsererror')) throw new Error('DOCX import failed. The document XML is damaged.')
 
-  const body = Array.from(doc.getElementsByTagName('*')).find((element) => localName(element) === 'body')
+  const body = Array.from(doc.querySelectorAll('*')).find((element) => localName(element) === 'body')
   if (!body) throw new Error('DOCX import failed. The document body is missing.')
 
   const text = normalizeTextBlocks(extractDocxNodeText(body))
@@ -117,8 +125,8 @@ function textContentToLines(items: PdfTextItem[]): string {
 }
 
 function extractDocxNodeText(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
-  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+  if (node.nodeType === 3) return node.textContent ?? ''
+  if (node.nodeType !== 1) return ''
 
   const element = node as Element
   const tag = localName(element)
@@ -135,7 +143,7 @@ function extractDocxNodeText(node: Node): string {
 }
 
 function localName(element: Element): string {
-  return element.localName || element.tagName.replace(/^.*:/, '')
+  return (element.localName || element.tagName).replace(/^.*:/, '')
 }
 
 function normalizeTextBlocks(text: string): string {

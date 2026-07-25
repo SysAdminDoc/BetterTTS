@@ -10,6 +10,7 @@ const expectedLicenses = [
   ['fflate', 'MIT'],
   ['kitten-tts-webgpu', 'MIT'],
   ['kokoro-js', 'Apache-2.0'],
+  ['linkedom', 'ISC'],
   ['lucide-react', 'ISC'],
   ['onnxruntime-web', 'MIT'],
   ['pdfjs-dist', 'Apache-2.0'],

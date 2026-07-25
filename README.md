@@ -137,7 +137,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
 | Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
 | Phonemization | `phonemizer` for English + `ephone`/eSpeak NG WASM for multilingual Kokoro |
-| Document Import | `pdfjs-dist` for PDF text; `fflate` + XML parsing for EPUB/DOCX |
+| Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
 | Testing | Vitest (238 tests across 29 files) + Playwright smoke |
@@ -259,6 +259,7 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | `@breezystack/lamejs` | LGPL-3.0 | MP3 export |
 | `pdfjs-dist` | Apache-2.0 | Local PDF text extraction |
 | `signalsmith-stretch`, `fflate` | MIT | Pitch shift and ZIP/EPUB/DOCX parsing |
+| `linkedom` | ISC | Worker-safe EPUB/DOCX document parsing |
 | `lucide-react` | ISC | Interface icons |
 
 Review runtime package licenses locally with:

@@ -192,6 +192,7 @@ const RUNTIME_LICENSE_ROWS = [
   ['lamejs MP3 encoder', 'LGPL-3.0', 'MP3 export path'],
   ['pdfjs-dist', 'Apache-2.0', 'Local PDF text extraction'],
   ['signalsmith-stretch, fflate', 'MIT', 'Pitch shift and ZIP/EPUB/DOCX parsing'],
+  ['linkedom', 'ISC', 'Worker-safe EPUB/DOCX document parsing'],
   ['lucide-react', 'ISC', 'Interface icons'],
 ]
 
@@ -887,6 +888,7 @@ function App() {
   const [newPronunciation, setNewPronunciation] = useState('')
   const [importUrlValue, setImportUrlValue] = useState('')
   const [importingUrl, setImportingUrl] = useState(false)
+  const [isImportingFile, setIsImportingFile] = useState(false)
   const [library, setLibrary] = useState<ClipRecord[]>([])
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
@@ -938,6 +940,7 @@ function App() {
   const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const abortRef = useRef(false)
   const generationAbortRef = useRef<AbortController | null>(null)
+  const importAbortRef = useRef<AbortController | null>(null)
   const generatingRef = useRef(false)
 
   // A run scheduled 700 ms after the previous one ends must not have its
@@ -2836,10 +2839,18 @@ function App() {
       return
     }
     const fileLabel = shortUiLabel(file.name, 72)
+    const controller = new AbortController()
+    importAbortRef.current = controller
+    setIsImportingFile(true)
     try {
-      setStatus('Parsing EPUB…')
-      const { parseEpub } = await import('./lib/epub.ts')
-      const chapters = await parseEpub(file)
+      const { importDocumentInWorker } = await import('./lib/document-worker.ts')
+      const imported = await importDocumentInWorker(file, (info) => {
+        const pct = info.total > 0 ? info.done / info.total : 0
+        setProgress(info.phase === 'read' ? Math.round(pct * 15) : 15 + Math.round(pct * 80))
+        setStatus(info.phase === 'read' ? 'Reading EPUB…' : `Parsing EPUB ${info.done} / ${info.total}`)
+      }, controller.signal)
+      if (imported.kind !== 'epub') throw new Error('EPUB parser returned an unexpected document type.')
+      const chapters = imported.chapters
       const allChunks = chapters.flatMap((ch, chapterIndex) => {
         const cleaned = cleanupText(ch.text, cleanup)
         return splitInput(cleaned, false).map((text) => ({ title: ch.title, chapterIndex, text }))
@@ -2868,8 +2879,13 @@ function App() {
         message: `Imported "${shortUiLabel(job.title)}" — ${chapters.length} chapters, ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} empty chapters skipped.` : ''}`,
       })
     } catch (err) {
-      showToast({ tone: 'error', message: err instanceof Error ? err.message : `${fileLabel} import failed.` })
+      showToast(err instanceof Error && err.name === 'AbortError'
+        ? { tone: 'warn', message: 'EPUB import cancelled. The previous script and queue were kept.' }
+        : { tone: 'error', message: err instanceof Error ? err.message : `${fileLabel} import failed.` })
     } finally {
+      if (importAbortRef.current === controller) importAbortRef.current = null
+      setIsImportingFile(false)
+      setProgress(null)
       setStatus('Ready')
     }
   }
@@ -2881,11 +2897,18 @@ function App() {
       return
     }
     const fileLabel = shortUiLabel(file.name, 72)
+    const controller = new AbortController()
+    importAbortRef.current = controller
+    setIsImportingFile(true)
     try {
       const extension = file.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'DOCX'
-      setStatus(`Parsing ${extension}…`)
-      const { importDocumentFile } = await import('./lib/document-import.ts')
-      const imported = await importDocumentFile(file)
+      const { importDocumentInWorker } = await import('./lib/document-worker.ts')
+      const imported = await importDocumentInWorker(file, (info) => {
+        const pct = info.total > 0 ? info.done / info.total : 0
+        setProgress(info.phase === 'read' ? Math.round(pct * 15) : 15 + Math.round(pct * 80))
+        setStatus(info.phase === 'read' ? `Reading ${extension}…` : `Parsing ${extension} ${info.done} / ${info.total}`)
+      }, controller.signal)
+      if (imported.kind === 'epub') throw new Error('Document parser returned an unexpected EPUB result.')
       const cleaned = cleanupText(imported.text, cleanup)
       if (!cleaned.trim()) {
         showToast({ tone: 'warn', message: `No readable text found in ${fileLabel} after cleanup.` })
@@ -2902,8 +2925,13 @@ function App() {
           : `${fileLabel} imported from ${imported.kind.toUpperCase()}; ${chunkCount} cleaned chunks ready.`,
       })
     } catch (err) {
-      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'Document import failed.' })
+      showToast(err instanceof Error && err.name === 'AbortError'
+        ? { tone: 'warn', message: 'Document import cancelled. The previous script was kept.' }
+        : { tone: 'error', message: err instanceof Error ? err.message : 'Document import failed.' })
     } finally {
+      if (importAbortRef.current === controller) importAbortRef.current = null
+      setIsImportingFile(false)
+      setProgress(null)
       setStatus('Ready')
     }
   }
@@ -3077,9 +3105,19 @@ function App() {
                   <FilePlus2 size={16} aria-hidden="true" />
                   New
                 </button>
-                <button type="button" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={16} aria-hidden="true" />
-                  Open
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isImportingFile) {
+                      importAbortRef.current?.abort()
+                      setStatus('Cancelling import…')
+                    } else {
+                      fileInputRef.current?.click()
+                    }
+                  }}
+                >
+                  {isImportingFile ? <X size={16} aria-hidden="true" /> : <Upload size={16} aria-hidden="true" />}
+                  {isImportingFile ? 'Cancel import' : 'Open'}
                 </button>
                 <input
                   ref={fileInputRef}

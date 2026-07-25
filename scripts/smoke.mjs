@@ -13,6 +13,7 @@ const distDir = join(root, 'dist')
 const smokeDir = join(root, 'dist', 'smoke')
 const allowedConsole = [
   'No available adapters',
+  'Setting up fake worker',
   'WebGPU',
 ]
 
@@ -54,6 +55,36 @@ function makeDocxUpload() {
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     buffer: Buffer.from(zipped),
   }
+}
+
+function makePdfUpload() {
+  const parts = ['%PDF-1.4\n']
+  const offsets = [0]
+  const addObject = (id, body) => {
+    offsets[id] = parts.join('').length
+    parts.push(`${id} 0 obj\n${body}\nendobj\n`)
+  }
+  addObject(1, '<< /Type /Catalog /Pages 2 0 R >>')
+  addObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
+  addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>')
+  addObject(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
+  const stream = 'BT /F1 24 Tf 100 700 Td (Worker PDF text.) Tj ET'
+  addObject(5, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
+  const xref = parts.join('').length
+  parts.push('xref\n0 6\n0000000000 65535 f \n')
+  for (let id = 1; id <= 5; id += 1) parts.push(`${String(offsets[id]).padStart(10, '0')} 00000 n \n`)
+  parts.push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
+  return { name: 'smoke.pdf', mimeType: 'application/pdf', buffer: Buffer.from(parts.join('')) }
+}
+
+function makeEpubUpload() {
+  const zipped = zipSync({
+    'META-INF/container.xml': new TextEncoder().encode('<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>'),
+    'content.opf': new TextEncoder().encode('<?xml version="1.0"?><package><manifest><item id="one" href="one.xhtml"/><item id="two" href="two.xhtml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>'),
+    'one.xhtml': new TextEncoder().encode('<html><body><h1>One</h1><p>First worker chapter.</p></body></html>'),
+    'two.xhtml': new TextEncoder().encode('<html><body><h1>Two</h1><p>Second worker chapter.</p></body></html>'),
+  })
+  return { name: 'worker-book.epub', mimeType: 'application/epub+zip', buffer: Buffer.from(zipped) }
 }
 
 async function seedCompletedQueueJob(page, id) {
@@ -249,10 +280,30 @@ async function runSmoke() {
     console.log('Checking DOCX and unsupported file import...')
     const fileInput = desktop.page.locator('input[type="file"]').first()
     await fileInput.setInputFiles(makeDocxUpload())
-    await desktop.page.getByText(/smoke\.docx imported from DOCX/).waitFor({ timeout: 20000 })
+    try {
+      const importResult = await Promise.race([
+        desktop.page.getByText(/smoke\.docx imported from DOCX/).waitFor({ timeout: 20000 }).then(() => 'ok'),
+        desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
+      ])
+      if (importResult !== 'ok') throw new Error(importResult)
+    } catch (error) {
+      const visibleText = await desktop.page.locator('body').innerText()
+      throw new Error(`DOCX worker import did not complete (${error instanceof Error ? error.message : error}): ${visibleText.slice(-1200)}`, { cause: error })
+    }
     const importedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
     if (!importedText.includes('Imported DOCX body.') || !importedText.includes('Second cleaned paragraph.')) {
       throw new Error(`DOCX import did not populate the editor: ${importedText}`)
+    }
+    await fileInput.setInputFiles(makePdfUpload())
+    const pdfImportResult = await Promise.race([
+      desktop.page.getByText(/smoke\.pdf imported from PDF/).waitFor({ timeout: 20000 }).then(() => 'ok'),
+      desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
+    ])
+    if (pdfImportResult !== 'ok') throw new Error(`PDF worker import did not complete: ${pdfImportResult}`)
+    await desktop.page.waitForTimeout(200)
+    const pdfImportedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
+    if (!pdfImportedText.replace(/\s/g, '').includes('WorkerPDFtext.')) {
+      throw new Error(`PDF worker import did not populate the editor: ${pdfImportedText}`)
     }
     await fileInput.setInputFiles({ name: 'smoke.rtf', mimeType: 'application/rtf', buffer: Buffer.from('unsupported') })
     await desktop.page.getByText('Import supports .txt, .epub, .pdf, and .docx files.').waitFor({ timeout: 20000 })
@@ -338,6 +389,13 @@ async function runSmoke() {
     await libraryPanel.getByText('No saved clips').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('button', { name: /^Kokoro 82M/ }).click()
+    await fileInput.setInputFiles(makeEpubUpload())
+    const epubImportResult = await Promise.race([
+      desktop.page.getByText(/Imported "worker-book" — 2 chapters/).waitFor({ timeout: 20000 }).then(() => 'ok'),
+      desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
+    ])
+    if (epubImportResult !== 'ok') throw new Error(`EPUB worker import did not complete: ${epubImportResult}`)
     await desktop.page.evaluate(() => localStorage.removeItem('bettertts-experimental-piper'))
     await desktop.page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
     await desktop.page.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
@@ -488,6 +546,7 @@ function contentType(filePath) {
     case '.css': return 'text/css; charset=utf-8'
     case '.html': return 'text/html; charset=utf-8'
     case '.js': return 'text/javascript; charset=utf-8'
+    case '.mjs': return 'text/javascript; charset=utf-8'
     case '.json': return 'application/json; charset=utf-8'
     case '.wasm': return 'application/wasm'
     case '.webmanifest': return 'application/manifest+json; charset=utf-8'

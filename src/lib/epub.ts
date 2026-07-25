@@ -11,7 +11,14 @@ export type EpubChapter = {
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024
 
 export async function parseEpub(file: File): Promise<EpubChapter[]> {
-  const buffer = new Uint8Array(await file.arrayBuffer())
+  return parseEpubFromArrayBuffer(await file.arrayBuffer())
+}
+
+export function parseEpubFromArrayBuffer(
+  source: ArrayBuffer,
+  onChapter?: (chapter: number, total: number) => void,
+): EpubChapter[] {
+  const buffer = new Uint8Array(source)
   const files = unzipSync(buffer, {
     filter: (entry) => entry.originalSize <= MAX_ENTRY_BYTES,
   })
@@ -126,6 +133,7 @@ export async function parseEpub(file: File): Promise<EpubChapter[]> {
     chapterNum++
     const title = tocTitles.get(href) ?? `Chapter ${chapterNum}`
     chapters.push({ title, text })
+    onChapter?.(chapterNum, spineOrder.length)
   }
 
   if (chapters.length === 0) throw new Error('EPUB contains no readable text content')
@@ -133,8 +141,8 @@ export async function parseEpub(file: File): Promise<EpubChapter[]> {
 }
 
 function extractText(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
-  if (node.nodeType !== Node.ELEMENT_NODE) return ''
+  if (node.nodeType === 3) return node.textContent ?? ''
+  if (node.nodeType !== 1) return ''
 
   const el = node as Element
   const tag = el.tagName.toLowerCase()
