@@ -2663,13 +2663,14 @@ function App() {
 
   async function resumeJob(jobId: string) {
     if (generatingRef.current) return
-    const lease = await withJobLease(jobId, () => resumeJobWithLease(jobId))
+    const lease = await withJobLease(jobId, (leaseSignal) => resumeJobWithLease(jobId, leaseSignal))
     if (!lease.acquired) {
       showToast({ tone: 'warn', message: 'This queue job is active in another BetterTTS tab. That tab owns generation until it pauses or closes.' })
     }
   }
 
-  async function resumeJobWithLease(jobId: string) {
+  async function resumeJobWithLease(jobId: string, leaseSignal: AbortSignal) {
+    if (leaseSignal.aborted) throw leaseSignal.reason
     const jobs = await listJobs()
     const job = jobs.find((j) => j.id === jobId)
     if (!job) return
@@ -2681,6 +2682,8 @@ function App() {
     abortRef.current = false
     const generationController = new AbortController()
     generationAbortRef.current = generationController
+    const onLeaseLost = () => cancelGeneration()
+    leaseSignal.addEventListener('abort', onLeaseLost, { once: true })
 
     try {
       const onProgress = (info: { status?: string; file?: string; loaded?: number; total?: number }) => {
@@ -2734,6 +2737,7 @@ function App() {
         showToast({ tone: 'error', message: err instanceof Error ? err.message : 'The queue run failed.' })
       }
     } finally {
+      leaseSignal.removeEventListener('abort', onLeaseLost)
       generatingRef.current = false
       setIsGenerating(false)
       setActiveJobId(null)
@@ -2748,7 +2752,7 @@ function App() {
       showToast({ tone: 'warn', message: 'Another generation is running — your edit is kept, try again when it finishes.' })
       return false
     }
-    const lease = await withJobLease(jobId, () => regenerateQueueChunkWithLease(jobId, chunkIndex, nextText, nextTitle))
+    const lease = await withJobLease(jobId, (leaseSignal) => regenerateQueueChunkWithLease(jobId, chunkIndex, nextText, nextTitle, leaseSignal))
     if (!lease.acquired) {
       showToast({ tone: 'warn', message: 'This queue job is active in another BetterTTS tab. Pause it there before regenerating a segment.' })
       return false
@@ -2756,7 +2760,14 @@ function App() {
     return lease.value
   }
 
-  async function regenerateQueueChunkWithLease(jobId: string, chunkIndex: number, nextText: string, nextTitle?: string): Promise<boolean> {
+  async function regenerateQueueChunkWithLease(
+    jobId: string,
+    chunkIndex: number,
+    nextText: string,
+    nextTitle: string | undefined,
+    leaseSignal: AbortSignal,
+  ): Promise<boolean> {
+    if (leaseSignal.aborted) throw leaseSignal.reason
     const cleanText = nextText.trim()
     if (!cleanText) {
       showToast({ tone: 'warn', message: 'Segment text cannot be empty.' })
@@ -2795,6 +2806,8 @@ function App() {
     abortRef.current = false
     const generationController = new AbortController()
     generationAbortRef.current = generationController
+    const onLeaseLost = () => cancelGeneration()
+    leaseSignal.addEventListener('abort', onLeaseLost, { once: true })
     setStatus(`Regenerating chunk ${chunkIndex + 1}`)
     setProgress(5)
 
@@ -2833,6 +2846,7 @@ function App() {
       showToast({ tone: 'error', message: err instanceof Error ? `${err.message} Old audio kept.` : 'Regeneration failed. Old audio kept.' })
       return false
     } finally {
+      leaseSignal.removeEventListener('abort', onLeaseLost)
       generatingRef.current = false
       setIsGenerating(false)
       setRegeneratingChunkKey(null)

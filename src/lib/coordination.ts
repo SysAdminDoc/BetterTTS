@@ -10,11 +10,15 @@ export type StoreChange = {
 
 const CHANNEL_NAME = 'bettertts-storage-v1'
 const PULSE_KEY = 'bettertts-storage-pulse-v1'
-const LEASE_PREFIX = 'bettertts-job-lease:'
+const LEASE_DB_NAME = 'bettertts-coordination'
+const LEASE_DB_VERSION = 1
+const LEASE_STORE = 'leases'
 const LEASE_TTL_MS = 15_000
 const LEASE_RENEW_MS = 5_000
+const LEASE_CLOCK_SKEW_MS = 60_000
 let channel: BroadcastChannel | null = null
 let fallbackId = ''
+let leaseDbPromise: Promise<IDBDatabase> | null = null
 
 function tabId(): string {
   if (typeof window === 'undefined') return 'server'
@@ -96,62 +100,191 @@ type LeaseResult<T> =
   | { acquired: false }
 
 type StoredLease = {
+  name: string
   owner: string
+  token: string
+  issuedAt: number
   expiresAt: number
 }
 
-function readStoredLease(key: string): StoredLease | null {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) ?? 'null') as Partial<StoredLease> | null
-    return parsed && typeof parsed.owner === 'string' && typeof parsed.expiresAt === 'number'
-      ? parsed as StoredLease
-      : null
-  } catch {
-    return null
-  }
+function openLeaseDB(): Promise<IDBDatabase> {
+  if (leaseDbPromise) return leaseDbPromise
+  leaseDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(LEASE_DB_NAME, LEASE_DB_VERSION)
+    let settled = false
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(LEASE_STORE)) {
+        request.result.createObjectStore(LEASE_STORE, { keyPath: 'name' })
+      }
+    }
+    request.onblocked = () => {
+      settled = true
+      leaseDbPromise = null
+      reject(new Error('Coordination database is blocked'))
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      if (settled) {
+        db.close()
+        return
+      }
+      settled = true
+      db.onversionchange = () => {
+        db.close()
+        leaseDbPromise = null
+      }
+      resolve(db)
+    }
+    request.onerror = () => {
+      settled = true
+      leaseDbPromise = null
+      reject(request.error)
+    }
+  })
+  return leaseDbPromise
 }
 
-async function withFallbackLease<T>(name: string, task: () => Promise<T>): Promise<LeaseResult<T>> {
-  const key = `${LEASE_PREFIX}${name}`
-  const owner = tabId()
-  const current = readStoredLease(key)
-  if (current && current.owner !== owner && current.expiresAt > Date.now()) return { acquired: false }
+function isStoredLease(value: unknown): value is StoredLease {
+  if (!value || typeof value !== 'object') return false
+  const lease = value as Partial<StoredLease>
+  return (
+    typeof lease.name === 'string'
+    && typeof lease.owner === 'string'
+    && typeof lease.token === 'string'
+    && typeof lease.issuedAt === 'number'
+    && typeof lease.expiresAt === 'number'
+  )
+}
 
-  const writeLease = (): boolean => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify({ owner, expiresAt: Date.now() + LEASE_TTL_MS }))
-      return true
-    } catch {
-      return false
+function leaseIsActive(lease: StoredLease, now: number): boolean {
+  if (lease.expiresAt <= now) return false
+  // If the wall clock moved backwards, a lease can appear valid forever.
+  // Bound its believable lifetime and let a new contender repair it.
+  return (
+    lease.issuedAt <= now + LEASE_CLOCK_SKEW_MS
+    && lease.expiresAt - now <= LEASE_TTL_MS + LEASE_CLOCK_SKEW_MS
+  )
+}
+
+async function acquireFallbackLease(name: string, owner: string, token: string): Promise<boolean> {
+  const db = await openLeaseDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(LEASE_STORE, 'readwrite')
+    const store = transaction.objectStore(LEASE_STORE)
+    let acquired = false
+    const request = store.get(name)
+    request.onsuccess = () => {
+      const now = Date.now()
+      if (isStoredLease(request.result) && leaseIsActive(request.result, now)) return
+      store.put({
+        name,
+        owner,
+        token,
+        issuedAt: now,
+        expiresAt: now + LEASE_TTL_MS,
+      } satisfies StoredLease)
+      acquired = true
     }
-  }
-  if (!writeLease()) {
-    // Storage-disabled browsers cannot coordinate a fallback lease safely.
+    transaction.oncomplete = () => resolve(acquired)
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error ?? new DOMException('Transaction aborted', 'AbortError'))
+  })
+}
+
+async function renewFallbackLease(name: string, owner: string, token: string): Promise<boolean> {
+  const db = await openLeaseDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(LEASE_STORE, 'readwrite')
+    const store = transaction.objectStore(LEASE_STORE)
+    let renewed = false
+    const request = store.get(name)
+    request.onsuccess = () => {
+      const current = request.result
+      if (!isStoredLease(current) || current.owner !== owner || current.token !== token) return
+      const now = Date.now()
+      store.put({ ...current, issuedAt: now, expiresAt: now + LEASE_TTL_MS })
+      renewed = true
+    }
+    transaction.oncomplete = () => resolve(renewed)
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error ?? new DOMException('Transaction aborted', 'AbortError'))
+  })
+}
+
+async function releaseFallbackLease(name: string, owner: string, token: string): Promise<void> {
+  const db = await openLeaseDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(LEASE_STORE, 'readwrite')
+    const store = transaction.objectStore(LEASE_STORE)
+    const request = store.get(name)
+    request.onsuccess = () => {
+      const current = request.result
+      if (isStoredLease(current) && current.owner === owner && current.token === token) store.delete(name)
+    }
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error ?? new DOMException('Transaction aborted', 'AbortError'))
+  })
+}
+
+async function withFallbackLease<T>(
+  name: string,
+  task: (signal: AbortSignal) => Promise<T>,
+): Promise<LeaseResult<T>> {
+  const owner = tabId()
+  const token = crypto.randomUUID()
+  try {
+    if (!await acquireFallbackLease(name, owner, token)) return { acquired: false }
+  } catch {
+    // IndexedDB-disabled browsers cannot coordinate a fallback lease safely.
     return { acquired: false }
   }
-  if (readStoredLease(key)?.owner !== owner) return { acquired: false }
 
-  const renew = window.setInterval(writeLease, LEASE_RENEW_MS)
+  const leaseController = new AbortController()
+  let stopped = false
+  let renewTimer: number | null = null
+  let renewal: Promise<void> | null = null
+  const scheduleRenewal = () => {
+    renewTimer = window.setTimeout(() => {
+      renewal = renewFallbackLease(name, owner, token)
+        .then((renewed) => {
+          if (!renewed) leaseController.abort(new DOMException('Queue lease lost', 'AbortError'))
+        })
+        .catch(() => leaseController.abort(new DOMException('Queue lease renewal failed', 'AbortError')))
+        .finally(() => {
+          renewal = null
+          if (!stopped && !leaseController.signal.aborted) scheduleRenewal()
+        })
+    }, LEASE_RENEW_MS)
+  }
+  scheduleRenewal()
+
   try {
-    return { acquired: true, value: await task() }
+    return { acquired: true, value: await task(leaseController.signal) }
   } finally {
-    window.clearInterval(renew)
+    stopped = true
+    if (renewTimer !== null) window.clearTimeout(renewTimer)
+    const pendingRenewal = renewal as Promise<void> | null
+    if (pendingRenewal) await pendingRenewal.catch(() => {})
     try {
-      if (readStoredLease(key)?.owner === owner) window.localStorage.removeItem(key)
+      await releaseFallbackLease(name, owner, token)
     } catch {
-      // The lease expires naturally if storage becomes unavailable mid-task.
+      // The lease expires naturally if IndexedDB becomes unavailable mid-task.
     }
   }
 }
 
-export async function withJobLease<T>(jobId: string, task: () => Promise<T>): Promise<LeaseResult<T>> {
+export async function withJobLease<T>(
+  jobId: string,
+  task: (signal: AbortSignal) => Promise<T>,
+): Promise<LeaseResult<T>> {
   const name = `bettertts-job:${jobId}`
   if (typeof navigator !== 'undefined' && navigator.locks?.request) {
     return navigator.locks.request(name, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
       if (!lock) return { acquired: false }
-      return { acquired: true, value: await task() }
+      return { acquired: true, value: await task(new AbortController().signal) }
     })
   }
-  if (typeof window === 'undefined') return { acquired: true, value: await task() }
+  if (typeof window === 'undefined') return { acquired: true, value: await task(new AbortController().signal) }
   return withFallbackLease(name, task)
 }

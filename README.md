@@ -156,7 +156,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (287 tests across 40 files) + Playwright smoke |
+| Testing | Vitest (290 tests across 40 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

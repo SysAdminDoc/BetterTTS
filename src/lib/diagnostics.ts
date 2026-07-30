@@ -78,10 +78,10 @@ export type DiagnosticsBundle = {
     crossOriginStorage: CrossOriginStorageStatus
     transformers: TransformersUpgradeReadiness
     piperPlus: PiperPlusRuntimeSupport
-    coordination: {
-      broadcastChannel: boolean
-      webLocks: boolean
-      fallback: 'localStorage'
+      coordination: {
+        broadcastChannel: boolean
+        webLocks: boolean
+        fallback: 'indexedDB'
     }
   }
   storage: {
@@ -254,7 +254,7 @@ export async function collectDiagnostics(
       coordination: {
         broadcastChannel: typeof BroadcastChannel !== 'undefined',
         webLocks: typeof navigator !== 'undefined' && Boolean(navigator.locks?.request),
-        fallback: 'localStorage',
+        fallback: 'indexedDB',
       },
     },
     storage: {

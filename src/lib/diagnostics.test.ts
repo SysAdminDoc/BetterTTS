@@ -110,7 +110,7 @@ describe('collectDiagnostics', () => {
     expect(bundle.capabilities.transformers.readyToSwitch).toBe(false)
     expect(bundle.capabilities.piperPlus.model).toBe('ayousanz/piper-plus-tsukuyomi-chan')
     expect(bundle.capabilities.piperPlus.defaultFirstLoad).toBe(false)
-    expect(bundle.capabilities.coordination.fallback).toBe('localStorage')
+    expect(bundle.capabilities.coordination.fallback).toBe('indexedDB')
     expect(bundle.storage.browser.usagePct).toBe(10)
     expect(bundle.selection.modelRoutes.kokoroRemote).toContain('Kokoro-82M')
     expect(bundle.recentEvents[0].message).toBe('AAC unavailable')
