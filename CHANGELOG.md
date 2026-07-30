@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.21.0 - 2026-07-29
+
 ### Security
 - Native desktop inference now re-hashes every installed model file before creating an ONNX session, validates immutable revisions and safe manifest paths, and fails closed on integrity or license errors. Missing/offline packs are reported separately; mutable model fallback is development-only and is disabled in packaged builds.
 - ZIP-backed backups, EPUBs, and DOCX files now enforce format-specific compressed, expanded, entry-count, and compression-ratio budgets before extraction. EPUB import inflates only referenced reading-order assets, rejects excessive chapter/text/chunk counts without silent truncation, and backup restore commits each queue job with its audio blobs in one transaction.
