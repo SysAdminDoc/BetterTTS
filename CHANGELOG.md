@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.22.0 - 2026-07-29
 
 ### Security
 - Hardened untrusted desktop and archive boundaries: native inference IPC now validates every renderer message, `app://` navigation no longer serves the shell for missing script/model assets, and portable backups reject duplicate, dangling, inconsistent, or excessive records before replacing local data.
@@ -20,11 +20,14 @@
 - Toast notifications now have a keyboard-accessible dismiss action in addition to their automatic timeout.
 - Media Session handlers now follow the active connected audio element, report playback state, and release stale handlers during teardown.
 - Legacy clip and queue records are shape-checked and bounded before sorting, rendering, synthesis, or caption playback; malformed metadata no longer reaches React as arbitrary objects.
+- The 390 px workspace rail now allows all six destinations to shrink within the viewport instead of clipping Diagnostics and Docs off-canvas.
+- Packaged `--smoke` runs now write captures beside the explicit report or into the system temporary directory instead of attempting to write inside read-only `app.asar`.
 
 ### Tests
 - Added regression coverage for malformed backups and queue records, oversized document imports, worker transfer failures, stalled Web Speech playback, invalid background audio, desktop protocol routing, and native inference IPC validation.
 - Browser smoke now verifies recoverable script clearing and cancellable article import, and real-engine smoke exercises the monitor transport. Persisted editor-setting parsers have malformed, type, and size-boundary coverage.
 - Added bounded-cache eviction/disposal, playback-write throttling, and malformed IndexedDB clip/queue migration regressions.
+- Added packaged/development/report-path coverage for Electron smoke artifact routing.
 
 ## v0.21.0 - 2026-07-29
 

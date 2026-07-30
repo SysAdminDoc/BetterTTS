@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import {
   ProjectConflictError,
@@ -11,6 +11,7 @@ import {
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 import { validateNativeTtsRequest } from './native-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
+import { resolveSmokeOutputDirectory } from './smoke-output.ts'
 
 // In dev the renderer is served by Vite; in production it is served from the
 // packaged dist/ over a custom app:// scheme so we control the response headers
@@ -543,6 +544,13 @@ function createWindow(): BrowserWindow {
 async function runSmoke(win: BrowserWindow): Promise<void> {
   const result: Record<string, unknown> = { ok: false }
   try {
+    const smokeOutputDirectory = resolveSmokeOutputDirectory({
+      appPath: app.getAppPath(),
+      tempPath: app.getPath('temp'),
+      packaged: app.isPackaged,
+      reportPath: process.env.BETTERTTS_SMOKE_REPORT,
+    })
+    await mkdir(smokeOutputDirectory, { recursive: true })
     await new Promise<void>((resolve, reject) => {
       win.webContents.once('did-finish-load', () => resolve())
       win.webContents.once('did-fail-load', (_e, code, desc) => reject(new Error(`did-fail-load ${code} ${desc}`)))
@@ -562,8 +570,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
 
     try {
       const image = await win.webContents.capturePage()
-      await writeFile(join(app.getAppPath(), 'dist-electron', 'smoke.png'), image.toPNG())
-      result.screenshot = 'dist-electron/smoke.png'
+      const screenshotPath = join(smokeOutputDirectory, 'smoke.png')
+      await writeFile(screenshotPath, image.toPNG())
+      result.screenshot = screenshotPath
     } catch {
       /* capture is best-effort on a hidden window */
     }
@@ -584,8 +593,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       }
     })()`)
     const systemImage = await win.webContents.capturePage()
-    await writeFile(join(app.getAppPath(), 'dist-electron', 'system-smoke.png'), systemImage.toPNG())
-    result.systemScreenshot = 'dist-electron/system-smoke.png'
+    const systemScreenshotPath = join(smokeOutputDirectory, 'system-smoke.png')
+    await writeFile(systemScreenshotPath, systemImage.toPNG())
+    result.systemScreenshot = systemScreenshotPath
 
     result.projectIo = await win.webContents.executeJavaScript(`(async () => {
       const projects = window.betterttsPlatform?.projects

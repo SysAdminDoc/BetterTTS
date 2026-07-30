@@ -659,9 +659,19 @@ async function runSmoke() {
     if (await desktop.page.getByLabel('Text to synthesize').inputValue() !== pdfImportedText) {
       throw new Error('Undo did not restore the cleared script')
     }
-    await desktop.page.route('https://smoke.invalid/article', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      await route.fulfill({ status: 200, contentType: 'text/html', body: '<article>Too late.</article>' })
+    await desktop.page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window)
+      window.fetch = (input, init) => {
+        if (String(input) !== 'https://smoke.invalid/article') return originalFetch(input, init)
+        return new Promise((_resolve, reject) => {
+          const signal = init?.signal
+          if (signal?.aborted) {
+            reject(signal.reason)
+            return
+          }
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      }
     })
     await desktop.page.getByLabel('Article URL to import').fill('https://smoke.invalid/article')
     await desktop.page.getByRole('button', { name: 'Import', exact: true }).click()
@@ -808,6 +818,26 @@ async function runSmoke() {
       if (!(await mobileWorkspaceNav.getByRole('link', { name: new RegExp(`^${destination}`) }).isVisible())) {
         throw new Error(`Mobile workspace destination is not visible: ${destination}`)
       }
+    }
+    const mobileNavLayout = await mobileWorkspaceNav.evaluate((nav) => {
+      const navRect = nav.getBoundingClientRect()
+      const links = Array.from(nav.querySelectorAll('a')).map((link) => {
+        const rect = link.getBoundingClientRect()
+        const label = link.querySelector(':scope > span')
+        return {
+          text: link.textContent?.trim(),
+          left: rect.left,
+          right: rect.right,
+          labelClipped: label ? label.scrollWidth > label.clientWidth + 1 : true,
+        }
+      })
+      return { left: navRect.left, right: navRect.right, clientWidth: nav.clientWidth, scrollWidth: nav.scrollWidth, links }
+    })
+    if (
+      mobileNavLayout.scrollWidth > mobileNavLayout.clientWidth + 1
+      || mobileNavLayout.links.some((link) => link.left < mobileNavLayout.left - 1 || link.right > mobileNavLayout.right + 1 || link.labelClipped)
+    ) {
+      throw new Error(`Mobile workspace rail clips destinations: ${JSON.stringify(mobileNavLayout)}`)
     }
     if (!(await mobile.page.locator('.editor-actions').getByRole('button', { name: 'Generate audio' }).isVisible())) {
       throw new Error('Mobile editor-level Generate audio action is not visible')
