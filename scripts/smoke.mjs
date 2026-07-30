@@ -300,7 +300,7 @@ async function assertAccessibilityStructure(page) {
       throw new Error(`Heading level skipped: ${JSON.stringify(structure.headings)}`)
     }
   }
-  for (const expected of ['Script', 'Render monitor', 'Generated audio', 'Generation queue', 'Clip library', 'Properties', 'Model library', 'Runtime licenses', 'Privacy & portability']) {
+  for (const expected of ['Script', 'Render monitor', 'Generated audio', 'Generation queue', 'Clip library', 'Voice chain', 'Model library', 'Runtime licenses', 'Privacy & portability']) {
     if (!structure.headings.some(({ text }) => text.startsWith(expected))) {
       throw new Error(`Missing semantic heading: ${expected}`)
     }

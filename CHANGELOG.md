@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
+
 ## v0.21.0 - 2026-07-29
 
 ### Security

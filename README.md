@@ -11,7 +11,7 @@
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro through **native ONNX Runtime** in an isolated utility process. Native model packs are pinned to immutable revisions and SHA-256 verified before use. Enable **Native engine (desktop)** under Properties -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro through **native ONNX Runtime** in an isolated utility process. Native model packs are pinned to immutable revisions and SHA-256 verified before use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -127,7 +127,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 
 ## Troubleshooting
 
-Use **Properties -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, WebGPU adapter status, WebCodecs AAC/Opus support, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs.
+Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, WebGPU adapter status, WebCodecs AAC/Opus support, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs.
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
@@ -259,7 +259,7 @@ Supertonic is available as a separate English speed engine: 66M parameters, 10 v
 
 KittenTTS is available as a separate English lightweight engine: Nano 15M / 24 MB by default, Micro 40M / 41 MB, Mini 80M / 78 MB, 8 voices, 24,000 Hz output, WebGPU-only shader inference, MIT package code, and Apache-2.0 model weights. The package is lazy-loaded and model weights stay HF-hosted until the engine is selected.
 
-Piper-plus is available behind **Enable experimental Piper-plus** under Properties -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. The engine is direct-generation only in this prototype; it is not added to the persistent queue yet. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
+Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. The engine is direct-generation only in this prototype; it is not added to the persistent queue yet. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
 
 Word timestamps are available as an opt-in Kokoro mode using `onnx-community/Kokoro-82M-v1.0-ONNX-timestamped`; the extra q8 model stays HF-hosted and powers word-level SRT/VTT plus follow-along highlighting.
 

@@ -155,7 +155,7 @@ const STARTER_TEXT = `Welcome to BetterTTS — private text-to-speech that runs 
 
 No account, no cloud processing, no usage caps — up to 5,000 characters per run. Your text and audio stay on this device.
 
-Choose an engine and voice in Properties, then select Generate audio. BetterTTS will synthesize your script locally.
+Choose an engine and voice in the Voice chain, then select Generate audio. BetterTTS will synthesize your script locally.
 
 Download as WAV, MP3, or Opus when you're done.`
 
@@ -3326,12 +3326,11 @@ function App() {
             <span>BetterTTS</span>
           </a>
           <div className="project-context" aria-label="Current workspace">
-            <strong>Local studio</strong>
-            <span><span className="status-dot" aria-hidden="true" /> Session active</span>
+            <strong>Studio</strong>
+            <span><span className="status-dot" aria-hidden="true" /> Session ready</span>
           </div>
           <div className="topbar-status" aria-label="Runtime status">
             <span className="status-dot" aria-hidden="true" />
-            <span>No cloud</span>
             <span>100% local</span>
           </div>
           <button
@@ -3515,7 +3514,10 @@ function App() {
               <div className="workspace-header">
                 <div className="section-heading">
                   <h2>Render monitor</h2>
-                  <span aria-live="polite">{status}</span>
+                  <span className="monitor-status" aria-live="polite">
+                    <span className="status-dot" aria-hidden="true" />
+                    {status}
+                  </span>
                 </div>
                 <div className="workspace-tabs" role="tablist" aria-label="Render workspace">
                 {WORKSPACE_TABS.map(([target, label]) => {
@@ -3743,7 +3745,7 @@ function App() {
                 <div className="compact-empty">
                   <FileText size={28} aria-hidden="true" />
                   <strong>Queue is empty</strong>
-                  <span>Use Queue in Properties to create a resumable long-form or chapter export.</span>
+                  <span>Use Queue in the Voice chain to create a resumable long-form or chapter export.</span>
                 </div>
               </section>
             )}
@@ -3805,7 +3807,7 @@ function App() {
           <aside className="settings-panel" aria-labelledby="properties-heading">
             <div className="settings-scroll">
             <div className="section-heading">
-              <h2 id="properties-heading">Properties</h2>
+              <h2 id="properties-heading">Voice chain</h2>
               <span>v{APP_VERSION}</span>
             </div>
             <div className="inspector-summary" aria-label="Current render settings">
@@ -3815,8 +3817,12 @@ function App() {
               <span><small>Output</small><strong>{outputFormatLabel}</strong></span>
             </div>
 
+            <div className="chain-step">
+              <span aria-hidden="true">1</span>
+              <h3>Engine</h3>
+            </div>
             <fieldset className="control-module engine-module">
-              <legend>Engine</legend>
+              <legend className="sr-only">Engine</legend>
               <div className="engine-grid">
                 <button
                   type="button"
@@ -4109,6 +4115,10 @@ function App() {
               ) : null}
             </fieldset>
 
+            <div className="chain-step">
+              <span aria-hidden="true">2</span>
+              <h3>Voice</h3>
+            </div>
             {engine === 'kokoro' ? (
               <>
                 <label className="control-label" htmlFor="locale">
@@ -4276,6 +4286,10 @@ function App() {
               </>
             )}
 
+            <div className="chain-step">
+              <span aria-hidden="true">3</span>
+              <h3>Delivery</h3>
+            </div>
             <div className="range-row">
               <label htmlFor="speed">Speed</label>
               <span>{speed.toFixed(2)}x</span>
@@ -4289,6 +4303,29 @@ function App() {
                 onChange={(event) => setSpeed(Number(event.target.value))}
               />
             </div>
+
+            <div className="chain-step">
+              <span aria-hidden="true">4</span>
+              <h3>Output</h3>
+            </div>
+            {engine !== 'browser' ? (
+              <div className="primary-output-row">
+                <label className="control-label" htmlFor="format">Format</label>
+                <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
+                  <option value="wav">WAV (lossless)</option>
+                  <option value="mp3">MP3</option>
+                  {desktopFfmpeg || opusSupported() ? <option value="opus">Opus{desktopFfmpeg ? ' (Ogg)' : ' (WebM)'}</option> : null}
+                  {desktopFfmpeg ? <option value="flac">FLAC (lossless)</option> : null}
+                  {desktopFfmpeg ? <option value="m4b">M4B (AAC)</option> : null}
+                </select>
+                <small>{outputFormatLabel}</small>
+              </div>
+            ) : (
+              <div className="primary-output-row browser-output">
+                <strong>Device audio</strong>
+                <small>Playback uses the selected system voice.</small>
+              </div>
+            )}
 
             <button
               type="button"
@@ -4337,15 +4374,7 @@ function App() {
                 ) : null}
 
                 {engine !== 'browser' ? (
-                  <div className="format-row">
-                    <label className="control-label" htmlFor="format">Format</label>
-                    <select id="format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value as AudioFormat)}>
-                      <option value="wav">WAV (lossless)</option>
-                      <option value="mp3">MP3</option>
-                      {desktopFfmpeg || opusSupported() ? <option value="opus">Opus{desktopFfmpeg ? ' (Ogg)' : ' (WebM)'}</option> : null}
-                      {desktopFfmpeg ? <option value="flac">FLAC (lossless)</option> : null}
-                      {desktopFfmpeg ? <option value="m4b">M4B (AAC)</option> : null}
-                    </select>
+                  <div className="format-row format-options">
                     {audioFormat === 'mp3' ? (
                       <select value={mp3Bitrate} onChange={(e) => setMp3Bitrate(Number(e.target.value))} aria-label="MP3 bitrate">
                         <option value={96}>96 kbps</option>
