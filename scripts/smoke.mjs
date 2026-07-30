@@ -472,6 +472,12 @@ async function runRealEngineChecks(browser) {
     if (timeToFirstAudioMs > performanceBudget.realEngine.maxTimeToFirstAudioMs) {
       throw new Error(`Browser time to first audio ${timeToFirstAudioMs.toFixed(0)} ms exceeds ${performanceBudget.realEngine.maxTimeToFirstAudioMs} ms`)
     }
+    const monitorPlay = page.getByRole('button', { name: 'Play current output' })
+    await monitorPlay.click()
+    const monitorPause = page.getByRole('button', { name: 'Pause current output' })
+    await monitorPause.waitFor({ timeout: 20000 })
+    await page.getByLabel('Current output position').waitFor({ state: 'visible' })
+    await monitorPause.click()
 
     const originalResultCount = await page.locator('#generated-output .result-row').count()
     await page.getByLabel('Text to synthesize').fill(`${'Cancellation must discard unfinished audio. '.repeat(90)}Final sentence.`)
@@ -643,6 +649,26 @@ async function runSmoke() {
     const pdfImportedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
     if (!pdfImportedText.replace(/\s/g, '').includes('WorkerPDFtext.')) {
       throw new Error(`PDF worker import did not populate the editor: ${pdfImportedText}`)
+    }
+    console.log('Checking recoverable script clearing and cancellable article import...')
+    await desktop.page.getByRole('button', { name: 'New', exact: true }).click()
+    if (await desktop.page.getByLabel('Text to synthesize').inputValue() !== '') {
+      throw new Error('New did not clear the script')
+    }
+    await desktop.page.getByRole('button', { name: 'Undo' }).click()
+    if (await desktop.page.getByLabel('Text to synthesize').inputValue() !== pdfImportedText) {
+      throw new Error('Undo did not restore the cleared script')
+    }
+    await desktop.page.route('https://smoke.invalid/article', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<article>Too late.</article>' })
+    })
+    await desktop.page.getByLabel('Article URL to import').fill('https://smoke.invalid/article')
+    await desktop.page.getByRole('button', { name: 'Import', exact: true }).click()
+    await desktop.page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await desktop.page.getByText('Article import cancelled. The current script was kept.').waitFor({ timeout: 20000 })
+    if (await desktop.page.getByLabel('Text to synthesize').inputValue() !== pdfImportedText) {
+      throw new Error('Cancelling article import replaced the current script')
     }
     await fileInput.setInputFiles({ name: 'smoke.rtf', mimeType: 'application/rtf', buffer: Buffer.from('unsupported') })
     await desktop.page.getByText('Import supports .txt, .epub, .pdf, and .docx files.').waitFor({ timeout: 20000 })

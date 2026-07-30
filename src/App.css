@@ -727,6 +727,16 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--heading);
+  cursor: pointer;
+}
+
+.output-transport audio {
+  display: none;
+}
+
+.output-transport button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .output-transport .output-clear {
@@ -740,19 +750,17 @@ button:disabled {
 }
 
 .transport-track {
-  position: relative;
-  height: 4px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--border-strong) 78%, var(--surface-2));
+  width: 100%;
+  min-width: 80px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-action);
+  cursor: pointer;
 }
 
-.transport-track::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  border-radius: inherit;
-  background: var(--accent);
+.transport-track:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .output-empty-note {
@@ -2154,6 +2162,11 @@ footer {
   animation: toast-in 220ms ease-out;
 }
 
+.toast > span {
+  min-width: 0;
+  line-height: 1.35;
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -2189,6 +2202,25 @@ footer {
 .toast-action:hover {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
+}
+
+.toast-dismiss {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toast-dismiss:hover {
+  border-color: var(--border-strong);
+  color: var(--heading);
 }
 
 .fatal-shell {

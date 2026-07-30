@@ -12,6 +12,7 @@ import {
   Loader2,
   Moon,
   FilePlus2,
+  Pause,
   Play,
   RefreshCw,
   Settings2,
@@ -108,6 +109,7 @@ import {
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
 import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
+import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationSetting } from './lib/settings.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
@@ -349,6 +351,105 @@ type PlaybackAudioProps = {
   label: string
   cues?: Cue[]
   vttUrl?: string
+}
+
+type OutputMonitorTransportProps = {
+  result?: AudioResult
+  sampleRate: string
+  onClear: () => void
+  onError: (message: string) => void
+  hasOutputs: boolean
+}
+
+function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutputs }: OutputMonitorTransportProps) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const playable = Boolean(result?.url)
+
+  useEffect(() => {
+    const audio = audioRef.current
+    setPlaying(false)
+    setCurrentTime(0)
+    setDuration(0)
+    return () => audio?.pause()
+  }, [result?.id, result?.url])
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current
+    if (!audio || !playable) return
+    if (!audio.paused) {
+      audio.pause()
+      return
+    }
+    try {
+      await audio.play()
+    } catch {
+      onError('The current output could not be played. Export it or try another audio device.')
+    }
+  }
+
+  const seek = (value: number) => {
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(value)) return
+    audio.currentTime = Math.max(0, Math.min(duration, value))
+    setCurrentTime(audio.currentTime)
+  }
+
+  return (
+    <div className="output-transport" aria-label="Current output transport">
+      {result?.url ? (
+        <audio
+          ref={audioRef}
+          preload="metadata"
+          src={result.url}
+          onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false)
+            setCurrentTime(0)
+          }}
+        >
+          <track kind="captions" src={result.vttUrl ?? EMPTY_VTT_URL} srcLang="en" label={result.vttUrl ? 'English' : 'No captions'} />
+        </audio>
+      ) : null}
+      <button
+        type="button"
+        disabled={!playable}
+        onClick={togglePlayback}
+        aria-label={playing ? 'Pause current output' : 'Play current output'}
+        title={playable ? (playing ? 'Pause current output' : 'Play current output') : 'Generate downloadable audio to enable playback'}
+      >
+        {playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+      </button>
+      <strong aria-live="off">{formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}</strong>
+      <input
+        className="transport-track"
+        type="range"
+        min={0}
+        max={duration || 0}
+        step={0.01}
+        value={Math.min(currentTime, duration || 0)}
+        onChange={(event) => seek(Number(event.target.value))}
+        disabled={!playable || duration <= 0}
+        aria-label="Current output position"
+      />
+      <span>{sampleRate}</span>
+      <button
+        type="button"
+        className="output-clear"
+        onClick={onClear}
+        disabled={!hasOutputs}
+        aria-label="Clear generated output"
+        title={hasOutputs ? 'Clear generated output' : 'No generated output to clear'}
+      >
+        <Trash2 size={15} aria-hidden="true" />
+      </button>
+    </div>
+  )
 }
 
 function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: PlaybackAudioProps) {
@@ -835,14 +936,12 @@ function App() {
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
   const [pronunciations, setPronunciations] = useState<Record<string, string>>(() => {
     try {
-      const saved = window.localStorage.getItem('bettertts-pronunciations')
-      return saved ? JSON.parse(saved) : {}
+      return parsePronunciationSetting(window.localStorage.getItem('bettertts-pronunciations'))
     } catch { return {} }
   })
   const [cleanup, setCleanup] = useState<CleanupOptions>(() => {
     try {
-      const saved = window.localStorage.getItem('bettertts-cleanup')
-      return saved ? { ...DEFAULT_CLEANUP, ...JSON.parse(saved) } : DEFAULT_CLEANUP
+      return parseCleanupSetting(window.localStorage.getItem('bettertts-cleanup'))
     } catch { return DEFAULT_CLEANUP }
   })
   const [text, setText] = useState(STARTER_TEXT)
@@ -960,6 +1059,7 @@ function App() {
   const abortRef = useRef(false)
   const generationAbortRef = useRef<AbortController | null>(null)
   const importAbortRef = useRef<AbortController | null>(null)
+  const articleImportAbortRef = useRef<AbortController | null>(null)
   const generatingRef = useRef(false)
 
   // A run scheduled 700 ms after the previous one ends must not have its
@@ -1713,6 +1813,23 @@ function App() {
     showToast({
       tone: 'ok',
       message: hadOutputs ? 'Output list cleared.' : 'No generated output to clear.',
+    })
+  }
+
+  function startNewScript() {
+    if (!text || isGenerating || isImportingFile || importingUrl) return
+    const previousText = text
+    setText('')
+    showToast({
+      tone: 'ok',
+      message: 'Script cleared.',
+      action: {
+        label: 'Undo',
+        run: () => {
+          setText(previousText)
+          showToast({ tone: 'ok', message: 'Script restored.' })
+        },
+      },
     })
   }
 
@@ -2550,7 +2667,11 @@ function App() {
     setImportingUrl(true)
     setStatus('Fetching article…')
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), ARTICLE_IMPORT_TIMEOUT_MS)
+    articleImportAbortRef.current = controller
+    const timeout = window.setTimeout(
+      () => controller.abort(new DOMException('Article import timed out.', 'TimeoutError')),
+      ARTICLE_IMPORT_TIMEOUT_MS,
+    )
     try {
       const target = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`)
       if (target.protocol !== 'https:' && target.protocol !== 'http:') throw new Error('Unsupported protocol')
@@ -2576,8 +2697,10 @@ function App() {
       // page, and CORS blocks are different problems with different fixes.
       recordDiagnosticEvent('warn', err, 'article.import')
       let message = 'Could not read that page — most sites block cross-origin reads. Paste the article text instead.'
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        message = 'Article import timed out. Paste the text instead.'
+      if (controller.signal.aborted) {
+        message = controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError'
+          ? 'Article import timed out. Paste the text instead.'
+          : 'Article import cancelled. The current script was kept.'
       } else if (err instanceof Error && /^HTTP \d+$/.test(err.message)) {
         message = `The site answered ${err.message} for that URL. Check the address or paste the text instead.`
       } else if (err instanceof Error && err.message === 'No readable text found') {
@@ -2588,8 +2711,11 @@ function App() {
       showToast({ tone: 'warn', message })
     } finally {
       window.clearTimeout(timeout)
-      setImportingUrl(false)
-      setStatus('Ready')
+      if (articleImportAbortRef.current === controller) {
+        articleImportAbortRef.current = null
+        setImportingUrl(false)
+        setStatus('Ready')
+      }
     }
   }
 
@@ -3415,17 +3541,16 @@ function App() {
               <div className="editor-actions">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!text) return
-                    setText('')
-                    showToast({ tone: 'ok', message: 'Script cleared.' })
-                  }}
+                  onClick={startNewScript}
+                  disabled={!text || isGenerating || isImportingFile || importingUrl}
+                  title={isGenerating ? 'Cancel generation before starting a new script' : isImportingFile || importingUrl ? 'Cancel the import before starting a new script' : text ? 'Clear the script' : 'The script is already empty'}
                 >
                   <FilePlus2 size={16} aria-hidden="true" />
                   New
                 </button>
                 <button
                   type="button"
+                  disabled={importingUrl}
                   onClick={() => {
                     if (isImportingFile) {
                       importAbortRef.current?.abort()
@@ -3469,24 +3594,33 @@ function App() {
                     value={importUrlValue}
                     onChange={(e) => setImportUrlValue(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') importFromUrl(importUrlValue)
+                      if (e.key === 'Enter' && !importingUrl) importFromUrl(importUrlValue)
                     }}
                     placeholder="Paste article URL…"
                     aria-label="Article URL to import"
                   />
                   <button
                     type="button"
-                    onClick={() => importFromUrl(importUrlValue)}
-                    disabled={importingUrl || !importUrlValue.trim()}
+                    onClick={() => {
+                      if (importingUrl) {
+                        articleImportAbortRef.current?.abort(new DOMException('Article import cancelled.', 'AbortError'))
+                        setStatus('Cancelling article import…')
+                      } else {
+                        importFromUrl(importUrlValue)
+                      }
+                    }}
+                    disabled={!importingUrl && !importUrlValue.trim()}
                   >
-                    {importingUrl ? <Loader2 size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
-                    Import
+                    {importingUrl ? <X size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
+                    {importingUrl ? 'Cancel' : 'Import'}
                   </button>
                 </div>
                 <button
                   type="button"
                   className={isGenerating ? 'mobile-generate cancel' : 'mobile-generate'}
                   onClick={isGenerating ? cancelGeneration : handleGenerate}
+                  disabled={!isGenerating && (isImportingFile || importingUrl)}
+                  title={!isGenerating && (isImportingFile || importingUrl) ? 'Finish or cancel the import before generating audio' : undefined}
                 >
                   {isGenerating ? <X size={17} aria-hidden="true" /> : <Waves size={17} aria-hidden="true" />}
                   {isGenerating ? 'Cancel generation' : 'Generate audio'}
@@ -3570,24 +3704,13 @@ function App() {
                     </span>
                   ) : null}
                 </div>
-                <div className="output-transport" aria-label="Output transport">
-                  <button type="button" disabled={results.length === 0} aria-label="Play current output">
-                    <Play size={16} aria-hidden="true" />
-                  </button>
-                  <strong>{results.length > 0 ? results[0].duration : '00:00'}</strong>
-                  <span className="transport-track" aria-hidden="true" />
-                  <span>{engine === 'browser' ? 'Device' : activeSampleRate}</span>
-                  <button
-                    type="button"
-                    className="output-clear"
-                    onClick={handleClearOutputs}
-                    disabled={results.length === 0 && zipUrl === null}
-                    aria-label="Clear generated output"
-                    title="Clear generated output"
-                  >
-                    <Trash2 size={15} aria-hidden="true" />
-                  </button>
-                </div>
+                <OutputMonitorTransport
+                  result={results[0]}
+                  sampleRate={engine === 'browser' ? 'Device' : activeSampleRate}
+                  hasOutputs={results.length > 0 || zipUrl !== null}
+                  onClear={handleClearOutputs}
+                  onError={(message) => showToast({ tone: 'error', message })}
+                />
               </div>
               {results.length === 0 ? (
                 <p className="output-empty-note">Choose a voice, review the script, then generate a preview or queue a resumable export.</p>
@@ -4710,6 +4833,7 @@ function App() {
                             value={newWord}
                             onChange={(e) => setNewWord(e.target.value)}
                             aria-label="Pronunciation word"
+                            maxLength={MAX_PRONUNCIATION_WORD_CHARS}
                           />
                           <input
                             type="text"
@@ -4718,10 +4842,16 @@ function App() {
                             value={newPronunciation}
                             onChange={(e) => setNewPronunciation(e.target.value)}
                             aria-label="Pronunciation replacement"
+                            maxLength={MAX_PRONUNCIATION_VALUE_CHARS}
                           />
                           <button
                             type="button"
                             className="heading-action"
+                            disabled={
+                              !newWord.trim()
+                              || !newPronunciation.trim()
+                              || (Object.keys(pronunciations).length >= MAX_PRONUNCIATIONS && !(newWord.trim() in pronunciations))
+                            }
                             onClick={() => {
                               if (newWord.trim() && newPronunciation.trim()) {
                                 setPronunciations((prev) => ({ ...prev, [newWord.trim()]: newPronunciation.trim() }))
@@ -4778,7 +4908,13 @@ function App() {
                   Cancel
                 </button>
               ) : (
-                <button type="button" className="generate-button" onClick={handleGenerate}>
+                <button
+                  type="button"
+                  className="generate-button"
+                  onClick={handleGenerate}
+                  disabled={isImportingFile || importingUrl}
+                  title={isImportingFile || importingUrl ? 'Finish or cancel the import before generating audio' : undefined}
+                >
                   <Waves size={18} aria-hidden="true" />
                   Generate audio
                 </button>
@@ -4788,8 +4924,8 @@ function App() {
                 type="button"
                 className="secondary-action"
                 onClick={queueCurrentText}
-                disabled={isGenerating || queueDisabledReason !== null}
-                title={queueDisabledReason ?? 'Queue current text for file export.'}
+                disabled={isGenerating || isImportingFile || importingUrl || queueDisabledReason !== null}
+                title={isImportingFile || importingUrl ? 'Finish or cancel the import before creating a queue job.' : queueDisabledReason ?? 'Queue current text for file export.'}
               >
                 <FileText size={16} aria-hidden="true" />
                 Queue
@@ -4924,6 +5060,19 @@ function App() {
                 {toast.action.label}
               </button>
             ) : null}
+            <button
+              type="button"
+              className="toast-dismiss"
+              onClick={() => {
+                if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+                toastTimerRef.current = null
+                setToast(null)
+              }}
+              aria-label="Dismiss notification"
+              title="Dismiss"
+            >
+              <X size={15} aria-hidden="true" />
+            </button>
           </div>
         ) : null}
       </div>

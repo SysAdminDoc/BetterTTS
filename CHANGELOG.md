@@ -8,14 +8,19 @@
 
 ### Changed
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
+- The render monitor transport now plays, pauses, seeks, reports elapsed/total time, and explains why playback is unavailable instead of presenting decorative controls.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
 - Browser speech now surfaces stalled or synchronously failed playback instead of silently skipping text, clears voice-discovery timers promptly, and document workers terminate on transfer or message-decoding failures.
 - Portable backup creation records the actual clip blob size, tolerates blocked settings reads, restores data before settings, and attempts every settings write before reporting storage rejection.
+- Starting a new script is now recoverable with Undo, while file/article imports block conflicting generation and queue actions. Article fetches can be cancelled explicitly without replacing the current script or being misreported as timeouts.
+- Malformed persisted cleanup and pronunciation JSON now falls back safely instead of crashing startup or injecting invalid setting types. Pronunciation entries and field lengths are bounded before regular-expression construction.
+- Toast notifications now have a keyboard-accessible dismiss action in addition to their automatic timeout.
 
 ### Tests
 - Added regression coverage for malformed backups and queue records, oversized document imports, worker transfer failures, stalled Web Speech playback, invalid background audio, desktop protocol routing, and native inference IPC validation.
+- Browser smoke now verifies recoverable script clearing and cancellable article import, and real-engine smoke exercises the monitor transport. Persisted editor-setting parsers have malformed, type, and size-boundary coverage.
 
 ## v0.21.0 - 2026-07-29
 
