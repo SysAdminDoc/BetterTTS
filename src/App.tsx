@@ -1300,6 +1300,12 @@ function App() {
         const pack = nativeRuntime.modelPack
         modelRoutes.nativeModelPack = `${pack.modelId}@${pack.revision.slice(0, 12)} · ${pack.license.spdx} · ${pack.verified ? 'verified' : pack.installed ? 'present (unverified)' : 'not installed'}`
       }
+      if (nativeRuntime.modelPackFailure) {
+        const failure = nativeRuntime.modelPackFailure
+        modelRoutes.nativeModelPackFailure = failure.kind === 'unavailable'
+          ? 'unavailable or offline'
+          : `${failure.kind} failure`
+      }
     }
 
     return {

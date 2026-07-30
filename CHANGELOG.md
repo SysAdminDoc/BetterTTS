@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Native desktop inference now re-hashes every installed model file before creating an ONNX session, validates immutable revisions and safe manifest paths, and fails closed on integrity or license errors. Missing/offline packs are reported separately; mutable model fallback is development-only and is disabled in packaged builds.
+
 ## v0.20.0 - 2026-07-25
 
 ### Security

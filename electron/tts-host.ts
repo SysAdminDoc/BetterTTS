@@ -12,6 +12,10 @@ import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { KOKORO_Q8_PACK, ensurePack, readPackStatus, type PackStatus } from './native-models.ts'
+import {
+  initializeNativeRuntimeWithPack,
+  type NativePackFailure,
+} from './native-pack-policy.ts'
 
 type KokoroModule = typeof import('kokoro-js')
 type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
@@ -29,6 +33,7 @@ export type NativeRuntimeInfo = {
   node: string
   modelCacheDir: string
   modelPack?: PackStatus
+  modelPackFailure?: NativePackFailure
 }
 
 export type HostRequest =
@@ -110,7 +115,7 @@ function modelCacheDir(): string {
   return dir
 }
 
-function runtimeInfo(modelPack?: PackStatus): NativeRuntimeInfo {
+function runtimeInfo(modelPack?: PackStatus, modelPackFailure?: NativePackFailure): NativeRuntimeInfo {
   return {
     runtime: 'onnxruntime-node',
     ep: 'cpu',
@@ -120,6 +125,7 @@ function runtimeInfo(modelPack?: PackStatus): NativeRuntimeInfo {
     node: process.versions.node,
     modelCacheDir: modelCacheDir(),
     ...(modelPack ? { modelPack } : {}),
+    ...(modelPackFailure ? { modelPackFailure } : {}),
   }
 }
 
@@ -134,8 +140,8 @@ async function configureTransformersEnv(localModelRoot: string | null): Promise<
     env.allowLocalModels = true
     return
   }
-  // Manifest download unavailable (offline with a dev sync present): fall back
-  // to a previously synced dist/models copy, else transformers' own HF fetch.
+  // This branch is reachable only behind the explicit non-packaged
+  // BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK flag.
   const localModels = resolve('dist', 'models')
   if (existsSync(join(localModels, KOKORO_MODEL_ID))) {
     env.localModelPath = localModels
@@ -146,6 +152,7 @@ async function configureTransformersEnv(localModelRoot: string | null): Promise<
 let tts: KokoroInstance | null = null
 let loadedKey = ''
 let lastPackStatus: PackStatus | undefined
+let lastPackFailure: NativePackFailure | undefined
 const cancelledIds = new Set<number>()
 
 const port = getPort()
@@ -171,7 +178,7 @@ port.onMessage(async (msg) => {
         // status stays undefined when the cache dir is unreadable
       }
     }
-    port.post({ type: 'info', runtime: runtimeInfo(modelPack) })
+    port.post({ type: 'info', runtime: runtimeInfo(modelPack, lastPackFailure) })
     return
   }
 
@@ -179,38 +186,44 @@ port.onMessage(async (msg) => {
     const dtype = msg.dtype ?? 'q8'
     const key = `cpu:${dtype}`
     if (tts && loadedKey === key) {
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus) })
+      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus, lastPackFailure) })
       return
     }
     try {
-      // Manifest-verified download first (resumable, SHA-256 checked, license
-      // gated). A download failure falls back to transformers' own fetch so an
-      // HF hiccup doesn't brick native mode — the pack status records it.
-      let localModelRoot: string | null = null
-      try {
-        const ensured = await ensurePack(modelCacheDir(), KOKORO_Q8_PACK, {
+      const initialized = await initializeNativeRuntimeWithPack({
+        ensure: () => ensurePack(modelCacheDir(), KOKORO_Q8_PACK, {
           onProgress: (info) => port.post({ type: 'progress', info }),
-        })
-        localModelRoot = ensured.localModelRoot
-        lastPackStatus = ensured.status
-      } catch (packErr) {
-        lastPackStatus = await readPackStatus(modelCacheDir(), KOKORO_Q8_PACK).catch(() => undefined)
-        port.post({
-          type: 'progress',
-          info: { status: 'pack-fallback', message: packErr instanceof Error ? packErr.message : String(packErr) },
-        })
-      }
-      await configureTransformersEnv(localModelRoot)
-      const { KokoroTTS } = await import('kokoro-js')
-      tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-        device: 'cpu' as never,
-        dtype,
-        progress_callback: (info) => {
-          port.post({ type: 'progress', info })
+        }),
+        readStatus: () => readPackStatus(modelCacheDir(), KOKORO_Q8_PACK),
+        env: process.env,
+        onFailure: (failure, fallbackAllowed) => {
+          lastPackFailure = failure
+          port.post({
+            type: 'progress',
+            info: {
+              status: fallbackAllowed ? 'pack-dev-fallback' : 'pack-error',
+              kind: failure.kind,
+              message: failure.message,
+            },
+          })
+        },
+        createRuntime: async (localModelRoot) => {
+          await configureTransformersEnv(localModelRoot)
+          const { KokoroTTS } = await import('kokoro-js')
+          return KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+            device: 'cpu' as never,
+            dtype,
+            progress_callback: (info) => {
+              port.post({ type: 'progress', info })
+            },
+          })
         },
       })
+      tts = initialized.runtime
+      lastPackStatus = initialized.modelPack
+      lastPackFailure = initialized.failure
       loadedKey = key
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus) })
+      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus, lastPackFailure) })
     } catch (err) {
       tts = null
       loadedKey = ''

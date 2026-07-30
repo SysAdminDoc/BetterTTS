@@ -127,6 +127,7 @@ function ensureTtsHost(): UtilityProcess {
   const env: Record<string, string | undefined> = {
     ...process.env,
     BETTERTTS_MODEL_CACHE: process.env.BETTERTTS_MODEL_CACHE ?? join(app.getPath('userData'), 'native-models'),
+    BETTERTTS_APP_PACKAGED: app.isPackaged ? '1' : '0',
   }
   // Same dev-environment hazard as scripts/run-electron.mjs: a present-but-set
   // ELECTRON_RUN_AS_NODE must be deleted, never blanked.

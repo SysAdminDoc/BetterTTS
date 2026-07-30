@@ -28,6 +28,10 @@ export type NativeRuntimeInfo = {
   node: string
   modelCacheDir: string
   modelPack?: NativeModelPackStatus
+  modelPackFailure?: {
+    kind: 'integrity' | 'license' | 'unavailable'
+    message: string
+  }
 }
 
 type HostMessage =

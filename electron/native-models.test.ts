@@ -2,14 +2,16 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ensurePack,
   licenseBlocksDefaultInstall,
+  NativeModelPackError,
   packDownloadUrl,
   packInstallDir,
   packModelDir,
   readPackStatus,
+  validateNativeModelPack,
   type NativeModelPack,
 } from './native-models.ts'
 
@@ -77,11 +79,27 @@ describe('native model pack manifest', () => {
   it('blocks non-permissive packs from default install', async () => {
     const pack = makePack({ license: { spdx: 'CC-BY-NC-4.0', tier: 'non-commercial', url: 'https://example.com' } })
     expect(licenseBlocksDefaultInstall(pack)).toMatch(/blocked from default install/)
-    await expect(ensurePack(root, pack, makeFakeFetch({}))).rejects.toThrow(/blocked/)
+    await expect(ensurePack(root, pack, makeFakeFetch({}))).rejects.toMatchObject({
+      kind: 'license',
+      message: expect.stringMatching(/blocked/),
+    })
     // Explicit opt-in (BYO tier) is allowed through the same path.
     const { fetchImpl } = makeFakeFetch({ 'config.json': bodyA, 'onnx/model.onnx': bodyB })
     const ensured = await ensurePack(root, pack, { fetchImpl, allowNonPermissive: true })
     expect(ensured.status.installed).toBe(true)
+  })
+
+  it('rejects mutable revisions and unsafe file metadata before fetching', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch
+    const mutableRevision = makePack({ revision: 'main' })
+    expect(() => validateNativeModelPack(mutableRevision)).toThrow(/immutable 40-character commit SHA/)
+    await expect(ensurePack(root, mutableRevision, { fetchImpl })).rejects.toMatchObject({ kind: 'integrity' })
+
+    const unsafePath = makePack({
+      files: [{ path: '../model.onnx', size: bodyB.length, sha256: sha256(bodyB) }],
+    })
+    await expect(ensurePack(root, unsafePath, { fetchImpl })).rejects.toMatchObject({ kind: 'integrity' })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 })
 
@@ -156,6 +174,23 @@ describe('ensurePack', () => {
     expect(existsSync(join(filesDir, 'onnx/model.onnx.part'))).toBe(false)
     // The untouched verified file is still there.
     expect(readFileSync(join(filesDir, 'config.json'), 'utf8')).toBe('{"model":"test"}')
+  })
+
+  it('rehashes installed bytes instead of trusting a stale verification marker', async () => {
+    const pack = makePack()
+    const good = makeFakeFetch({ 'config.json': bodyA, 'onnx/model.onnx': bodyB })
+    await ensurePack(root, pack, { fetchImpl: good.fetchImpl })
+
+    const filesDir = packModelDir(root, pack)
+    const tampered = new Uint8Array(bodyB)
+    tampered[2] ^= 0x7f
+    writeFileSync(join(filesDir, 'onnx/model.onnx'), tampered)
+
+    const poisonedOrigin = makeFakeFetch({ 'config.json': bodyA, 'onnx/model.onnx': tampered })
+    const failure = ensurePack(root, pack, { fetchImpl: poisonedOrigin.fetchImpl })
+    await expect(failure).rejects.toBeInstanceOf(NativeModelPackError)
+    await expect(failure).rejects.toMatchObject({ kind: 'integrity' })
+    expect(existsSync(join(filesDir, 'onnx/model.onnx'))).toBe(false)
   })
 
   it('replaces a right-sized file whose content does not match the manifest', async () => {

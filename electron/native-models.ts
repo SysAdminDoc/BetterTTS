@@ -13,6 +13,18 @@ import { dirname, join } from 'node:path'
 
 export type LicenseTier = 'permissive' | 'restricted' | 'non-commercial'
 
+export type NativeModelPackErrorKind = 'integrity' | 'license' | 'unavailable'
+
+export class NativeModelPackError extends Error {
+  readonly kind: NativeModelPackErrorKind
+
+  constructor(kind: NativeModelPackErrorKind, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'NativeModelPackError'
+    this.kind = kind
+  }
+}
+
 export type NativeModelFile = {
   /** Repo-relative path, forward slashes (e.g. "onnx/model_quantized.onnx"). */
   path: string
@@ -93,6 +105,42 @@ export type EnsurePackOptions = {
   baseUrl?: string
 }
 
+export function validateNativeModelPack(pack: NativeModelPack): void {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(pack.id)) {
+    throw new NativeModelPackError('integrity', `Invalid model pack id: ${pack.id}`)
+  }
+  if (!/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i.test(pack.modelId)) {
+    throw new NativeModelPackError('integrity', `Invalid model repository id: ${pack.modelId}`)
+  }
+  if (!/^[a-f0-9]{40}$/i.test(pack.revision)) {
+    throw new NativeModelPackError('integrity', `Model pack revision must be an immutable 40-character commit SHA: ${pack.revision}`)
+  }
+  if (pack.files.length === 0) {
+    throw new NativeModelPackError('integrity', 'Model pack manifest contains no files.')
+  }
+  const paths = new Set<string>()
+  for (const file of pack.files) {
+    const pathParts = file.path.split('/')
+    if (
+      file.path.startsWith('/')
+      || file.path.includes('\\')
+      || pathParts.some((part) => !part || part === '.' || part === '..')
+    ) {
+      throw new NativeModelPackError('integrity', `Unsafe model pack path: ${file.path}`)
+    }
+    if (paths.has(file.path)) {
+      throw new NativeModelPackError('integrity', `Duplicate model pack path: ${file.path}`)
+    }
+    if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+      throw new NativeModelPackError('integrity', `Invalid expected size for ${file.path}: ${file.size}`)
+    }
+    if (!/^[a-f0-9]{64}$/i.test(file.sha256)) {
+      throw new NativeModelPackError('integrity', `Invalid SHA-256 for ${file.path}.`)
+    }
+    paths.add(file.path)
+  }
+}
+
 export function packDownloadUrl(pack: NativeModelPack, file: NativeModelFile, baseUrl = 'https://huggingface.co'): string {
   return `${baseUrl}/${pack.modelId}/resolve/${pack.revision}/${file.path}`
 }
@@ -142,6 +190,7 @@ async function hashFile(filePath: string): Promise<string> {
 /** Cheap status read: sizes + the verification marker. Pass `deep: true` to
  * re-hash every file from disk instead of trusting the marker. */
 export async function readPackStatus(rootDir: string, pack: NativeModelPack, opts: { deep?: boolean } = {}): Promise<PackStatus> {
+  validateNativeModelPack(pack)
   const modelDir = packModelDir(rootDir, pack)
   const marker = readMarker(rootDir, pack)
   const files: PackFileStatus[] = []
@@ -218,9 +267,9 @@ async function downloadFile(
     start = 0
   }
   if (!response.ok && response.status !== 206) {
-    throw new Error(`Download failed for ${file.path}: HTTP ${response.status}`)
+    throw new NativeModelPackError('unavailable', `Download failed for ${file.path}: HTTP ${response.status}`)
   }
-  if (!response.body) throw new Error(`Download failed for ${file.path}: empty response body`)
+  if (!response.body) throw new NativeModelPackError('unavailable', `Download failed for ${file.path}: empty response body`)
 
   // The hash must cover resumed bytes too — feed the existing partial first.
   const hash = createHash('sha256')
@@ -235,7 +284,9 @@ async function downloadFile(
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
       hash.update(chunk)
       loaded += chunk.byteLength
-      if (loaded > file.size) throw new Error(`Download overran expected size for ${file.path}`)
+      if (loaded > file.size) {
+        throw new NativeModelPackError('integrity', `Download overran expected size for ${file.path}`)
+      }
       await new Promise<void>((resolve, reject) => {
         out.write(chunk, (err) => (err ? reject(err) : resolve()))
       })
@@ -252,14 +303,17 @@ async function downloadFile(
   }
 
   if (loaded !== file.size) {
-    throw new Error(`Download incomplete for ${file.path}: got ${loaded} of ${file.size} bytes (will resume on retry)`)
+    throw new NativeModelPackError(
+      'unavailable',
+      `Download incomplete for ${file.path}: got ${loaded} of ${file.size} bytes (will resume on retry)`,
+    )
   }
   const digest = hash.digest('hex')
   if (digest !== file.sha256) {
     // Corrupt or tampered content is never installed; the partial is discarded
     // so the next attempt starts clean.
     rmSync(partPath, { force: true })
-    throw new Error(`Checksum mismatch for ${file.path}: expected ${file.sha256}, got ${digest}`)
+    throw new NativeModelPackError('integrity', `Checksum mismatch for ${file.path}: expected ${file.sha256}, got ${digest}`)
   }
 
   renameSync(partPath, finalPath)
@@ -270,18 +324,21 @@ async function downloadFile(
  * to hand to transformers' env.localModelPath (it appends the modelId itself).
  * Already-verified files are never re-downloaded or touched. */
 export async function ensurePack(rootDir: string, pack: NativeModelPack, opts: EnsurePackOptions = {}): Promise<{ localModelRoot: string; status: PackStatus }> {
+  validateNativeModelPack(pack)
   const blocked = licenseBlocksDefaultInstall(pack)
-  if (blocked && !opts.allowNonPermissive) throw new Error(blocked)
+  if (blocked && !opts.allowNonPermissive) throw new NativeModelPackError('license', blocked)
 
   const fetchImpl = opts.fetchImpl ?? fetch
   const filesDir = packModelDir(rootDir, pack)
-  const marker = readMarker(rootDir, pack)
   const verifiedFiles: Record<string, string> = {}
 
   for (const file of pack.files) {
     const finalPath = join(filesDir, file.path)
     if (existsSync(finalPath) && statSync(finalPath).size === file.size) {
-      const known = marker?.files[file.path] === file.sha256 || (await hashFile(finalPath)) === file.sha256
+      // The marker accelerates status display only. Native runtime startup
+      // always hashes the actual bytes so a same-sized post-install mutation
+      // cannot inherit trust from stale marker metadata.
+      const known = (await hashFile(finalPath)) === file.sha256
       if (known) {
         verifiedFiles[file.path] = file.sha256
         continue
