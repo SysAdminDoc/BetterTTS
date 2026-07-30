@@ -40,6 +40,7 @@ import {
 } from './lib/engine-registry.ts'
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
+import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
@@ -51,7 +52,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
+import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -877,6 +878,7 @@ function App() {
   const [backupAction, setBackupAction] = useState<'download' | 'inspect' | 'restore' | null>(null)
   const [projectAction, setProjectAction] = useState<'open' | 'save' | 'save-as' | 'autosave' | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
+  const [projectDirty, setProjectDirty] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; version?: string; message?: string } | null>(null)
   const [loudnessNormalization, setLoudnessNormalization] = useState(false)
@@ -909,8 +911,9 @@ function App() {
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
-  const projectSaveInFlightRef = useRef(false)
-  const projectAutosaveQueuedRef = useRef(false)
+  const projectSaveQueueRef = useRef(new SerialTaskQueue())
+  const projectRevisionRef = useRef(0)
+  const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1440,7 +1443,9 @@ function App() {
 
   async function createProjectBytes(): Promise<{ bytes: Uint8Array; preview: BackupPreview }> {
     const { createPortableBackup } = await import('./lib/backup.ts')
-    const project = await createPortableBackup()
+    const project = await createPortableBackup({
+      settings: { 'bettertts-current-text': text },
+    })
     return { bytes: new Uint8Array(await project.blob.arrayBuffer()), preview: project.preview }
   }
 
@@ -1471,49 +1476,85 @@ function App() {
     return { blob: await encodeAudio(samples, sampleRate, format, bitrate), extension: formatExtension(format) }
   }
 
-  async function handleSaveProject(saveAs = false) {
-    if (!desktopProjects || projectAction || projectSaveInFlightRef.current) return
-    setProjectAction(saveAs ? 'save-as' : 'save')
-    projectSaveInFlightRef.current = true
+  async function applyDesktopProject(opened: DesktopProjectResult): Promise<BackupPreview> {
+    if (!opened.bytes || !opened.name) throw new Error('Project data is missing.')
+    const file = new File([opened.bytes as Uint8Array<ArrayBuffer>], opened.name, {
+      type: 'application/vnd.bettertts.backup+zip',
+    })
+    const { inspectPortableBackup, restorePortableBackup } = await import('./lib/backup.ts')
+    const preview = await inspectPortableBackup(file)
+    await restorePortableBackup(file)
+    suppressProjectDirtyRef.current = true
+    setLibrary(await listClips())
+    setQueueJobs(await listJobs())
+    setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
+    setActiveProjectName(opened.name)
+    setProjectSearch('')
+    setProjectDirty(false)
+    await refreshStorageEstimate()
+    return preview
+  }
+
+  async function saveProjectSnapshot(
+    saveAs: boolean,
+    action: 'save' | 'save-as' | 'autosave',
+  ): Promise<void> {
+    if (!desktopProjects) return
+    setProjectAction(action)
+    const requestedRevision = projectRevisionRef.current
     try {
       const project = await createProjectBytes()
       const suggestedName = queueJobs[0]?.title || activeProjectName?.replace(/\.bettertts$/i, '') || 'Untitled project'
       const saved = await desktopProjects.save(project.bytes, suggestedName, saveAs)
-      if (!saved.canceled && saved.name) {
-        setActiveProjectName(saved.name)
+      if (saved.canceled) {
+        if (action === 'autosave') throw new Error('Project autosave was canceled.')
+        return
+      }
+      if (saved.conflictResolution === 'reload') {
+        const preview = await applyDesktopProject(saved)
         showToast({
           tone: 'ok',
-          message: `${saved.name} saved atomically with ${project.preview.clips} clips and ${project.preview.jobs} jobs.`,
+          message: `Reloaded ${saved.name}: ${preview.clips} clips and ${preview.jobs} resumable jobs.`,
+        })
+        return
+      }
+      if (saved.name) setActiveProjectName(saved.name)
+      if (projectRevisionRef.current === requestedRevision) setProjectDirty(false)
+      if (action !== 'autosave' && saved.name) {
+        const resolution = saved.conflictResolution === 'save-copy'
+          ? ' saved as a conflict-safe copy'
+          : saved.conflictResolution === 'overwrite'
+            ? ' explicitly overwrote the external version'
+            : ' saved atomically'
+        showToast({
+          tone: 'ok',
+          message: `${saved.name}${resolution} with ${project.preview.clips} clips and ${project.preview.jobs} jobs.`,
         })
       }
+    } finally {
+      setProjectAction(null)
+    }
+  }
+
+  async function handleSaveProject(saveAs = false) {
+    if (!desktopProjects || projectAction) return
+    try {
+      await projectSaveQueueRef.current.run(() => saveProjectSnapshot(saveAs, saveAs ? 'save-as' : 'save'))
     } catch (error) {
       recordDiagnosticEvent('error', error, 'project.save')
+      setProjectDirty(true)
       showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not save the project.' })
-    } finally {
-      projectSaveInFlightRef.current = false
-      setProjectAction(null)
     }
   }
 
   async function handleOpenProject() {
     if (!desktopProjects || projectAction || isGenerating) return
     setProjectAction('open')
-    projectSaveInFlightRef.current = true
     try {
+      await projectSaveQueueRef.current.drain()
       const opened = await desktopProjects.open()
-      if (opened.canceled || !opened.bytes || !opened.name) return
-      const file = new File([opened.bytes as Uint8Array<ArrayBuffer>], opened.name, {
-        type: 'application/vnd.bettertts.backup+zip',
-      })
-      const { inspectPortableBackup, restorePortableBackup } = await import('./lib/backup.ts')
-      const preview = await inspectPortableBackup(file)
-      await restorePortableBackup(file)
-      setLibrary(await listClips())
-      setQueueJobs(await listJobs())
-      setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
-      setActiveProjectName(opened.name)
-      setProjectSearch('')
-      await refreshStorageEstimate()
+      if (opened.canceled) return
+      const preview = await applyDesktopProject(opened)
       showToast({
         tone: 'ok',
         message: `Opened ${opened.name}: ${preview.clips} clips and ${preview.jobs} resumable jobs.`,
@@ -1523,7 +1564,6 @@ function App() {
       recordDiagnosticEvent('error', error, 'project.open')
       showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not open the project.' })
     } finally {
-      projectSaveInFlightRef.current = false
       setProjectAction(null)
     }
   }
@@ -1556,30 +1596,27 @@ function App() {
   }, [text])
 
   useEffect(() => {
+    if (!activeProjectName) return
+    if (suppressProjectDirtyRef.current) {
+      suppressProjectDirtyRef.current = false
+      return
+    }
+    projectRevisionRef.current++
+    setProjectDirty(true)
+  }, [activeProjectName, library, queueJobs, text])
+
+  useEffect(() => {
     if (!desktopProjects || !activeProjectName) return
-    const timer = window.setTimeout(async () => {
-      if (projectSaveInFlightRef.current) {
-        projectAutosaveQueuedRef.current = true
-        return
-      }
-      projectSaveInFlightRef.current = true
-      setProjectAction('autosave')
-      try {
-        do {
-          projectAutosaveQueuedRef.current = false
-          const project = await createProjectBytes()
-          const saved = await desktopProjects.save(project.bytes, activeProjectName, false)
-          if (saved.canceled) throw new Error('Project autosave was canceled.')
-        } while (projectAutosaveQueuedRef.current)
-      } catch (error) {
+    const timer = window.setTimeout(() => {
+      projectSaveQueueRef.current.run(() => saveProjectSnapshot(false, 'autosave')).catch((error) => {
+        setProjectDirty(true)
         recordDiagnosticEvent('warn', error, 'project.autosave')
-        showToast({ tone: 'warn', message: 'Project autosave failed. Local crash recovery remains available; use Save as to choose a writable location.' })
-      } finally {
-        projectSaveInFlightRef.current = false
-        setProjectAction(null)
-      }
+        showToast({ tone: 'warn', message: 'Project autosave failed. The previous file is unchanged and this workspace remains unsaved; use Save as to choose a writable location.' })
+      })
     }, 2000)
     return () => window.clearTimeout(timer)
+    // saveProjectSnapshot reads the newest IDB/local state when this queued task begins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectName, desktopProjects, library, queueJobs, text])
 
   useEffect(() => {
@@ -3909,7 +3946,11 @@ function App() {
                             : 'Open or create a portable .bettertts project. Opening replaces current local workspace data.'}
                         </small>
                       </span>
-                      {projectAction === 'autosave' ? <small role="status">Saving…</small> : null}
+                      {projectAction === 'autosave'
+                        ? <small role="status">Saving…</small>
+                        : activeProjectName
+                          ? <small role="status">{projectDirty ? 'Unsaved changes' : 'Saved'}</small>
+                          : null}
                     </div>
                     {activeProjectName ? (
                       <label className="project-search">

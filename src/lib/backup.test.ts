@@ -93,9 +93,11 @@ describe('portable backup', () => {
     await saveJob(job)
     await saveChunkBlob(job.id, 0, new Blob(['queue-audio'], { type: 'audio/wav' }))
     window.localStorage.setItem('bettertts-theme', 'light')
-    window.localStorage.setItem('bettertts-current-text', 'Draft project text')
+    window.localStorage.setItem('bettertts-current-text', 'Stale editor text')
 
-    const backup = await createPortableBackup()
+    const backup = await createPortableBackup({
+      settings: { 'bettertts-current-text': 'Draft project text' },
+    })
     expect(backup.preview).toMatchObject({ clips: 1, jobs: 1, settings: 2 })
     await clearLibrary()
     await deleteJob(job.id)

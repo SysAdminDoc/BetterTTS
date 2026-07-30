@@ -29,6 +29,7 @@ export type DesktopProjectResult = {
   canceled: boolean
   name?: string
   bytes?: Uint8Array
+  conflictResolution?: 'reload' | 'save-copy' | 'overwrite' | 'cancel'
 }
 
 export type DesktopProjectBridge = {

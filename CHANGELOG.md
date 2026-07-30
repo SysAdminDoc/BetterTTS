@@ -26,6 +26,7 @@
 - Reimagined the studio as a compact broadcast-console workspace with a wider labeled rail, calmer script stage, complete in-view audio deck, scan-friendly engine inspector, stronger generation dock, and coordinated dark/light responsive themes.
 
 ### Fixed
+- Desktop project saves now run through one serial queue that drains newer snapshots even after an earlier failure. Each file write compares its revision, SHA-256, mtime, and size before atomic replacement; external changes offer reload, save-copy, explicit overwrite, or cancel, while failures preserve both the previous file and an honest unsaved state.
 - Queue generation now uses an atomic IndexedDB compare-and-set lease when Web Locks are unavailable. Concurrent tabs cannot both acquire a job; token-checked renewal, bounded clock-skew recovery, lease-loss cancellation, and stale-owner release guards prevent duplicate synthesis and successor-lease deletion.
 - Generation cancellation now aborts pending browser-worker and native-host requests deterministically, releases the active inference process, and keeps cancelled queue chunks resumable. Clip presentation waits for the atomic library write, while queue audio and completed metadata commit in one IndexedDB transaction.
 - Queue generation, regeneration, and deletion now use cross-tab leases with crash-expiring fallback locks; queue and library mutations propagate to other open tabs through BroadcastChannel with a storage-event fallback.

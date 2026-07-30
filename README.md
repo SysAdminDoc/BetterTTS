@@ -134,7 +134,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
-The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project autosaves atomically after local changes. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
+The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
 
@@ -156,7 +156,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (290 tests across 40 files) + Playwright smoke |
+| Testing | Vitest (294 tests across 41 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

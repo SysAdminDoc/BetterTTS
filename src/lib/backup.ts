@@ -105,10 +105,10 @@ function safePath(path: string): boolean {
   return !path.startsWith('/') && !path.includes('\\') && !path.split('/').includes('..')
 }
 
-function collectSettings(): Record<string, string> {
+function collectSettings(overrides: Record<string, string> = {}): Record<string, string> {
   const settings: Record<string, string> = {}
   for (const key of SETTINGS_KEYS) {
-    const value = window.localStorage.getItem(key)
+    const value = overrides[key] ?? window.localStorage.getItem(key)
     if (value !== null) settings[key] = value
   }
   return settings
@@ -146,7 +146,9 @@ async function addAsset(
   assets.push({ path, size: bytes.byteLength, sha256: await sha256(bytes), type: blob.type })
 }
 
-export async function createPortableBackup(): Promise<{ blob: Blob; preview: BackupPreview }> {
+export async function createPortableBackup(
+  options: { settings?: Record<string, string> } = {},
+): Promise<{ blob: Blob; preview: BackupPreview }> {
   const files: Record<string, Uint8Array> = {}
   const assets: BackupAsset[] = []
   const clips: ClipRecord[] = []
@@ -178,7 +180,7 @@ export async function createPortableBackup(): Promise<{ blob: Blob; preview: Bac
     createdAt: new Date().toISOString(),
     clips,
     jobs,
-    settings: collectSettings(),
+    settings: collectSettings(options.settings),
     assets,
   }
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest))

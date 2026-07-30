@@ -3,7 +3,11 @@ import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join, normalize, sep } from 'node:path'
-import { readProjectFile, writeProjectFile } from './project-files.mjs'
+import {
+  ProjectConflictError,
+  readProjectSnapshot,
+  writeProjectFile,
+} from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 
 // In dev the renderer is served by Vite; in production it is served from the
@@ -115,6 +119,12 @@ const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
 let activeProjectPath: string | null = null
+let activeProjectIdentity: {
+  revision: string
+  sha256: string
+  mtimeMs: number
+  size: number
+} | null = null
 
 function sendToSubscriber(message: unknown): void {
   if (ttsHostSubscriber && !ttsHostSubscriber.isDestroyed()) {
@@ -242,11 +252,14 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
   if (message.action === 'forget') {
     if (IS_SMOKE && activeProjectPath) await unlink(activeProjectPath).catch(() => undefined)
     activeProjectPath = null
+    activeProjectIdentity = null
     return { canceled: false }
   }
   if (message.action === 'open') {
     if (IS_SMOKE && activeProjectPath) {
-      return { canceled: false, name: basename(activeProjectPath), bytes: await readProjectFile(activeProjectPath) }
+      const opened = await readProjectSnapshot(activeProjectPath)
+      activeProjectIdentity = opened.identity
+      return { canceled: false, name: basename(activeProjectPath), bytes: opened.bytes }
     }
     const choice = await dialog.showOpenDialog(owner, {
       title: 'Open BetterTTS project',
@@ -255,9 +268,10 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
     })
     if (choice.canceled || !choice.filePaths[0]) return { canceled: true }
     const path = choice.filePaths[0]
-    const bytes = await readProjectFile(path)
+    const opened = await readProjectSnapshot(path)
     activeProjectPath = path
-    return { canceled: false, name: basename(path), bytes }
+    activeProjectIdentity = opened.identity
+    return { canceled: false, name: basename(path), bytes: opened.bytes }
   }
   if (message.action === 'save') {
     if (!message.bytes) throw new Error('Project data is missing.')
@@ -276,8 +290,54 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
       if (choice.canceled || !choice.filePath) return { canceled: true }
       path = choice.filePath
     }
-    activeProjectPath = await writeProjectFile(path, message.bytes)
-    return { canceled: false, name: basename(activeProjectPath) }
+    try {
+      const saved = await writeProjectFile(path, message.bytes, {
+        expectedIdentity: path === activeProjectPath ? activeProjectIdentity : null,
+      })
+      activeProjectPath = saved.path
+      activeProjectIdentity = saved.identity
+      return { canceled: false, name: basename(activeProjectPath) }
+    } catch (error) {
+      if (!(error instanceof ProjectConflictError) || !activeProjectPath) throw error
+      const choice = await dialog.showMessageBox(owner, {
+        type: 'warning',
+        title: 'Project changed outside BetterTTS',
+        message: `${basename(activeProjectPath)} was modified by another app window or process.`,
+        detail: 'Reload the external version, save your current workspace as a copy, or explicitly overwrite the changed file.',
+        buttons: ['Reload external version', 'Save current workspace as a copy', 'Overwrite external version', 'Cancel'],
+        defaultId: 0,
+        cancelId: 3,
+        noLink: true,
+      })
+      if (choice.response === 0) {
+        const opened = await readProjectSnapshot(activeProjectPath)
+        activeProjectIdentity = opened.identity
+        return {
+          canceled: false,
+          name: basename(activeProjectPath),
+          bytes: opened.bytes,
+          conflictResolution: 'reload',
+        }
+      }
+      if (choice.response === 1) {
+        const copyChoice = await dialog.showSaveDialog(owner, {
+          title: 'Save BetterTTS project copy',
+          defaultPath: `${basename(activeProjectPath, '.bettertts')} copy.bettertts`,
+          filters: [{ name: 'BetterTTS project', extensions: ['bettertts'] }],
+        })
+        if (copyChoice.canceled || !copyChoice.filePath) return { canceled: true }
+        const saved = await writeProjectFile(copyChoice.filePath, message.bytes)
+        activeProjectPath = saved.path
+        activeProjectIdentity = saved.identity
+        return { canceled: false, name: basename(activeProjectPath), conflictResolution: 'save-copy' }
+      }
+      if (choice.response === 2) {
+        const saved = await writeProjectFile(activeProjectPath, message.bytes)
+        activeProjectIdentity = saved.identity
+        return { canceled: false, name: basename(activeProjectPath), conflictResolution: 'overwrite' }
+      }
+      return { canceled: true, conflictResolution: 'cancel' }
+    }
   }
   throw new Error('Unsupported project action.')
 })
