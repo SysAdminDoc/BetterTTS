@@ -179,12 +179,19 @@ export async function deleteJobWithSnapshot(id: string): Promise<QueueJobSnapsho
 export async function restoreQueueJob(snapshot: QueueJobSnapshot): Promise<void> {
   const db = await openDB()
   const tx = db.transaction([JOBS_STORE, CHUNKS_STORE], 'readwrite')
-  tx.objectStore(JOBS_STORE).put(migrateQueueJob(snapshot.job))
-  const chunks = tx.objectStore(CHUNKS_STORE)
-  for (const entry of snapshot.blobs) {
-    chunks.put(entry.blob, `${snapshot.job.id}:${entry.chunkIndex}`)
+  const done = txDone(tx)
+  try {
+    tx.objectStore(JOBS_STORE).put(migrateQueueJob(snapshot.job))
+    const chunks = tx.objectStore(CHUNKS_STORE)
+    for (const entry of snapshot.blobs) {
+      chunks.put(entry.blob, `${snapshot.job.id}:${entry.chunkIndex}`)
+    }
+  } catch (error) {
+    tx.abort()
+    await done.catch(() => {})
+    throw error
   }
-  await txDone(tx)
+  await done
   publishStoreChange('queue', 'restore', snapshot.job.id)
 }
 

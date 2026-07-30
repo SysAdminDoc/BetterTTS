@@ -107,6 +107,20 @@ describe('queue', () => {
     expect(await (await getChunkBlob('undo-job', 1))!.text()).toBe('chunk one')
   })
 
+  it('aborts restored job metadata when a chunk blob cannot be cloned', async () => {
+    const job = makeJob('atomic-restore', 1)
+    await expect(restoreQueueJob({
+      job,
+      blobs: [{
+        chunkIndex: 0,
+        blob: (() => 'not cloneable') as unknown as Blob,
+      }],
+    })).rejects.toThrow()
+
+    expect(await getJob(job.id)).toBeNull()
+    expect(await getChunkBlob(job.id, 0)).toBeNull()
+  })
+
   it('jobProgress computes percentages', () => {
     const job = makeJob('q5')
     job.chunks[0].status = 'done'

@@ -1,10 +1,37 @@
-import { zip, unzip } from 'fflate'
+import { zip } from 'fflate'
 import { clearLibrary, getClipBlob, listClips, restoreClipSnapshots, saveClip, type ClipRecord, type ClipSnapshot } from './library.ts'
-import { deleteJob, getChunkBlob, listJobs, migrateQueueJob, restoreQueueJob, saveChunkBlob, saveJob, type QueueJob, type QueueJobSnapshot } from './queue.ts'
+import { deleteJob, getChunkBlob, listJobs, migrateQueueJob, restoreQueueJob, type QueueJob, type QueueJobSnapshot } from './queue.ts'
+import {
+  assertArchivePayloadSizes,
+  extractInspectedZipEntries,
+  inspectZipArchive,
+  type ArchiveBudget,
+} from './archive-budget.ts'
 
 const BACKUP_SCHEMA_VERSION = 1
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024
 const MAX_MANIFEST_BYTES = 5 * 1024 * 1024
+const MAX_BACKUP_ENTRIES = 20_000
+const MAX_BACKUP_ASSET_BYTES = 256 * 1024 * 1024
+const MAX_BACKUP_COMPRESSION_RATIO = 200
+const BACKUP_ARCHIVE_BUDGET: ArchiveBudget = {
+  maxArchiveBytes: MAX_BACKUP_BYTES,
+  maxEntries: MAX_BACKUP_ENTRIES,
+  maxEntryBytes: MAX_BACKUP_BYTES,
+  maxTotalBytes: MAX_BACKUP_BYTES,
+  maxCompressionRatio: MAX_BACKUP_COMPRESSION_RATIO,
+}
+const BACKUP_MANIFEST_BUDGET: ArchiveBudget = {
+  ...BACKUP_ARCHIVE_BUDGET,
+  maxEntries: 1,
+  maxEntryBytes: MAX_MANIFEST_BYTES,
+  maxTotalBytes: MAX_MANIFEST_BYTES,
+}
+const BACKUP_ASSET_BUDGET: ArchiveBudget = {
+  ...BACKUP_ARCHIVE_BUDGET,
+  maxEntries: MAX_BACKUP_ENTRIES - 1,
+  maxEntryBytes: MAX_BACKUP_ASSET_BYTES,
+}
 const SETTINGS_KEYS = [
   'bettertts-theme',
   'bettertts-pronunciations',
@@ -48,14 +75,6 @@ type PreparedBackup = {
 function archive(files: Record<string, Uint8Array>): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     zip(files, { level: 0 }, (error, data) => error ? reject(error) : resolve(data))
-  })
-}
-
-function unarchive(data: Uint8Array): Promise<Record<string, Uint8Array>> {
-  return new Promise((resolve, reject) => {
-    unzip(data, {
-      filter: (entry) => entry.originalSize <= MAX_BACKUP_BYTES,
-    }, (error, files) => error ? reject(error) : resolve(files))
   })
 }
 
@@ -108,7 +127,20 @@ async function addAsset(
   assets: BackupAsset[],
   path: string,
   blob: Blob,
+  budget: { entries: number; bytes: number },
 ) {
+  const nextEntries = budget.entries + 1
+  const nextBytes = budget.bytes + blob.size
+  if (
+    nextEntries > BACKUP_ASSET_BUDGET.maxEntries
+    || blob.size > BACKUP_ASSET_BUDGET.maxEntryBytes
+    || !Number.isSafeInteger(nextBytes)
+    || nextBytes > BACKUP_ASSET_BUDGET.maxTotalBytes
+  ) {
+    throw new Error('Portable backup audio exceeds the archive payload limits.')
+  }
+  budget.entries = nextEntries
+  budget.bytes = nextBytes
   const bytes = new Uint8Array(await readBlob(blob))
   files[path] = bytes
   assets.push({ path, size: bytes.byteLength, sha256: await sha256(bytes), type: blob.type })
@@ -118,21 +150,28 @@ export async function createPortableBackup(): Promise<{ blob: Blob; preview: Bac
   const files: Record<string, Uint8Array> = {}
   const assets: BackupAsset[] = []
   const clips: ClipRecord[] = []
+  const assetBudget = { entries: 0, bytes: 0 }
 
   for (const record of await listClips()) {
     const blob = await getClipBlob(record.id)
     if (!blob) continue
     clips.push(record)
-    await addAsset(files, assets, `library/${encodeURIComponent(record.id)}.bin`, blob)
+    await addAsset(files, assets, `library/${encodeURIComponent(record.id)}.bin`, blob, assetBudget)
   }
 
   const jobs = await listJobs()
   for (const job of jobs) {
     for (const chunk of job.chunks) {
       const blob = await getChunkBlob(job.id, chunk.index)
-      if (blob) await addAsset(files, assets, `queue/${encodeURIComponent(job.id)}/${chunk.index}.bin`, blob)
+      if (blob) await addAsset(files, assets, `queue/${encodeURIComponent(job.id)}/${chunk.index}.bin`, blob, assetBudget)
     }
   }
+
+  assertArchivePayloadSizes(
+    assets.map((asset) => asset.size),
+    BACKUP_ASSET_BUDGET,
+    'Portable backup',
+  )
 
   const manifest: BackupManifest = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -142,8 +181,13 @@ export async function createPortableBackup(): Promise<{ blob: Blob; preview: Bac
     settings: collectSettings(),
     assets,
   }
-  files['manifest.json'] = new TextEncoder().encode(JSON.stringify(manifest))
+  const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest))
+  assertArchivePayloadSizes([manifestBytes.byteLength], BACKUP_MANIFEST_BUDGET, 'Portable backup manifest')
+  files['manifest.json'] = manifestBytes
   const packed = await archive(files)
+  if (packed.byteLength > MAX_BACKUP_BYTES) {
+    throw new Error('Portable backup exceeds the 512 MB archive limit.')
+  }
   return {
     blob: new Blob([bytesToBuffer(packed)], { type: 'application/vnd.bettertts.backup+zip' }),
     preview: previewFor(manifest),
@@ -162,8 +206,16 @@ function previewFor(manifest: BackupManifest): BackupPreview {
 
 async function prepareBackup(file: Blob): Promise<PreparedBackup> {
   if (file.size > MAX_BACKUP_BYTES) throw new Error('Backup is larger than 512 MB.')
-  const files = await unarchive(new Uint8Array(await readBlob(file)))
-  const manifestBytes = files['manifest.json']
+  const source = new Uint8Array(await readBlob(file))
+  const entries = inspectZipArchive(source, BACKUP_ARCHIVE_BUDGET, 'Portable backup')
+  const manifestFiles = extractInspectedZipEntries(
+    source,
+    entries,
+    new Set(['manifest.json']),
+    BACKUP_MANIFEST_BUDGET,
+    'Portable backup manifest',
+  )
+  const manifestBytes = manifestFiles['manifest.json']
   if (!manifestBytes || manifestBytes.byteLength > MAX_MANIFEST_BYTES) {
     throw new Error('Backup manifest is missing or too large.')
   }
@@ -177,12 +229,46 @@ async function prepareBackup(file: Blob): Promise<PreparedBackup> {
   if (manifest.schemaVersion !== BACKUP_SCHEMA_VERSION || !Array.isArray(manifest.clips) || !Array.isArray(manifest.jobs) || !Array.isArray(manifest.assets) || !manifest.settings) {
     throw new Error('Backup schema is unsupported or incomplete.')
   }
+  if (
+    manifest.clips.length > MAX_BACKUP_ENTRIES
+    || manifest.jobs.length > MAX_BACKUP_ENTRIES
+    || manifest.assets.length > MAX_BACKUP_ENTRIES - 1
+    || Object.keys(manifest.settings).length > SETTINGS_KEYS.length
+  ) {
+    throw new Error('Backup manifest exceeds record-count limits.')
+  }
 
   const paths = new Set<string>()
+  const assetSizes: number[] = []
   for (const asset of manifest.assets) {
-    if (!safePath(asset.path) || paths.has(asset.path)) throw new Error('Backup contains an invalid or duplicate asset path.')
+    if (
+      !asset
+      || !safePath(asset.path)
+      || paths.has(asset.path)
+      || !Number.isSafeInteger(asset.size)
+      || asset.size < 0
+      || !/^[a-f0-9]{64}$/i.test(asset.sha256)
+      || typeof asset.type !== 'string'
+    ) {
+      throw new Error('Backup contains invalid or duplicate asset metadata.')
+    }
     paths.add(asset.path)
-    const bytes = files[asset.path]
+    assetSizes.push(asset.size)
+  }
+  assertArchivePayloadSizes(assetSizes, BACKUP_ASSET_BUDGET, 'Portable backup')
+
+  const archivePaths = new Set(entries.map((entry) => entry.normalizedName))
+  if (
+    archivePaths.size !== paths.size + 1
+    || !archivePaths.has('manifest.json')
+    || [...paths].some((path) => !archivePaths.has(path))
+  ) {
+    throw new Error('Backup archive files do not match the manifest.')
+  }
+  const assetFiles = extractInspectedZipEntries(source, entries, paths, BACKUP_ASSET_BUDGET, 'Portable backup assets')
+  const files = { ...manifestFiles, ...assetFiles }
+  for (const asset of manifest.assets) {
+    const bytes = assetFiles[asset.path]
     if (!bytes || bytes.byteLength !== asset.size || await sha256(bytes) !== asset.sha256) {
       throw new Error(`Backup asset failed validation: ${asset.path}`)
     }
@@ -241,12 +327,16 @@ async function applyPreparedBackup(prepared: PreparedBackup) {
 
   for (const rawJob of prepared.manifest.jobs) {
     const job = migrateQueueJob(rawJob)
+    const blobs: QueueJobSnapshot['blobs'] = []
     for (const chunk of job.chunks) {
       const path = `queue/${encodeURIComponent(job.id)}/${chunk.index}.bin`
       const asset = prepared.manifest.assets.find((entry) => entry.path === path)
       const bytes = prepared.files[path]
       if (asset && bytes) {
-        await saveChunkBlob(job.id, chunk.index, new Blob([bytesToBuffer(bytes)], { type: asset.type }))
+        blobs.push({
+          chunkIndex: chunk.index,
+          blob: new Blob([bytesToBuffer(bytes)], { type: asset.type }),
+        })
       } else if (chunk.status === 'done') {
         chunk.status = 'pending'
         chunk.duration = undefined
@@ -254,7 +344,7 @@ async function applyPreparedBackup(prepared: PreparedBackup) {
         chunk.warning = 'Restored without audio; regenerate this segment.'
       }
     }
-    await saveJob(job)
+    await restoreQueueJob({ job, blobs })
   }
 }
 

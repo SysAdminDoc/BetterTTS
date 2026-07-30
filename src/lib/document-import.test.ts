@@ -99,6 +99,14 @@ describe('document import adapters', () => {
     expect(() => extractDocxTextFromArrayBuffer(bytesToBuffer(oversized))).toThrow('word/document.xml')
   })
 
+  it('rejects a highly compressed DOCX body before inflating it', () => {
+    const repeated = 'a'.repeat(1_000_000)
+    const archive = makeDocx(
+      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${repeated}</w:t></w:r></w:p></w:body></w:document>`,
+    )
+    expect(() => extractDocxTextFromArrayBuffer(archive)).toThrow('compression-ratio')
+  })
+
   it('routes document files by extension or MIME type', async () => {
     const pdf = new File([makePdf('Router PDF.')], 'router.pdf', { type: 'application/octet-stream' })
     const docx = new File([makeDocx('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Router DOCX.</w:t></w:r></w:p></w:body></w:document>')], 'router.bin', {

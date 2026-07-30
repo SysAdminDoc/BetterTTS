@@ -1,5 +1,9 @@
-import { unzipSync } from 'fflate'
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url'
+import {
+  extractInspectedZipEntries,
+  inspectZipArchive,
+  type ArchiveBudget,
+} from './archive-budget.ts'
 
 export type ImportedDocument = {
   kind: 'pdf' | 'docx'
@@ -78,17 +82,32 @@ export async function extractDocxText(file: File): Promise<string> {
   return extractDocxTextFromArrayBuffer(await file.arrayBuffer())
 }
 
-// Only the main document part is ever read — skip inflating embedded media
-// entirely, and cap the part's decompressed size so a crafted archive cannot
-// balloon a size-checked upload into gigabytes of memory.
-const MAX_DOCUMENT_XML_BYTES = 256 * 1024 * 1024
+const MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
+const MAX_DOCUMENT_XML_BYTES = 32 * 1024 * 1024
+const DOCX_ARCHIVE_BUDGET: ArchiveBudget = {
+  maxArchiveBytes: MAX_DOCX_ARCHIVE_BYTES,
+  maxEntries: 2_000,
+  maxEntryBytes: MAX_DOCUMENT_XML_BYTES,
+  maxTotalBytes: MAX_DOCUMENT_XML_BYTES,
+  maxCompressionRatio: 200,
+}
+const DOCX_DOCUMENT_BUDGET: ArchiveBudget = {
+  ...DOCX_ARCHIVE_BUDGET,
+  maxEntries: 1,
+}
 
 export function extractDocxTextFromArrayBuffer(buffer: ArrayBuffer): string {
-  const files = unzipSync(new Uint8Array(buffer), {
-    filter: (entry) => entry.name.replace(/^\/+/, '') === 'word/document.xml' && entry.originalSize <= MAX_DOCUMENT_XML_BYTES,
-  })
-  const documentKey = Object.keys(files).find((key) => key.replace(/^\/+/, '') === 'word/document.xml')
-  if (!documentKey) throw new Error('DOCX import failed. The file is missing word/document.xml.')
+  const source = new Uint8Array(buffer)
+  const entries = inspectZipArchive(source, DOCX_ARCHIVE_BUDGET, 'DOCX')
+  const files = extractInspectedZipEntries(
+    source,
+    entries,
+    new Set(['word/document.xml']),
+    DOCX_DOCUMENT_BUDGET,
+    'DOCX word/document.xml',
+  )
+  const documentKey = 'word/document.xml'
+  if (!files[documentKey]) throw new Error('DOCX import failed. The file is missing word/document.xml.')
 
   const xml = new TextDecoder('utf-8').decode(files[documentKey])
   const doc = new DOMParser().parseFromString(xml, 'application/xml')

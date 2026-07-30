@@ -69,7 +69,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ### Studio Features
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, durable resume, and previous/next sentence controls
-- **Document import** — open TXT, EPUB, PDF, or DOCX files; PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis
+- **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
@@ -134,7 +134,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
-The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project autosaves atomically after local changes. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project.
+The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project autosaves atomically after local changes. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
 
@@ -156,7 +156,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (259 tests across 34 files) + Playwright smoke |
+| Testing | Vitest (287 tests across 40 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

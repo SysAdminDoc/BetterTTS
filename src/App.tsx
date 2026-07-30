@@ -39,6 +39,7 @@ import {
   type EngineId,
 } from './lib/engine-registry.ts'
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
+import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
@@ -3091,10 +3092,11 @@ function App() {
       }, controller.signal)
       if (imported.kind !== 'epub') throw new Error('EPUB parser returned an unexpected document type.')
       const chapters = imported.chapters
-      const allChunks = chapters.flatMap((ch, chapterIndex) => {
-        const cleaned = cleanupText(ch.text, cleanup)
-        return splitInput(cleaned, false).map((text) => ({ title: ch.title, chapterIndex, text }))
-      })
+      const allChunks = buildEpubQueueChunks(
+        chapters,
+        (chapterText) => cleanupText(chapterText, cleanup),
+        (cleaned) => splitInput(cleaned, false),
+      )
       if (allChunks.length === 0) {
         showToast({ tone: 'warn', message: 'No readable text found in this EPUB.' })
         return

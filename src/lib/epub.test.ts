@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { zipSync } from 'fflate'
 import { parseEpub } from './epub.ts'
 
-function makeEpub(chapters: { id: string; title: string; body: string }[]): File {
+function makeEpub(
+  chapters: { id: string; title: string; body: string }[],
+  extras: Record<string, Uint8Array> = {},
+): File {
   const containerXml = `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
@@ -27,6 +30,7 @@ function makeEpub(chapters: { id: string; title: string; body: string }[]): File
   const files: Record<string, Uint8Array> = {
     'META-INF/container.xml': new TextEncoder().encode(containerXml),
     'content.opf': new TextEncoder().encode(opf),
+    ...extras,
   }
 
   for (const ch of chapters) {
@@ -97,6 +101,28 @@ describe('parseEpub', () => {
     })
     const oversized = declareZipEntrySize(archive, 0xffffffff)
     await expect(parseEpub(new File([bytesToBuffer(oversized)], 'oversized.epub'))).rejects.toThrow('container.xml')
+  })
+
+  it('ignores unreferenced compressed media and rejects compressed reading-order bombs', async () => {
+    const withUnusedMedia = makeEpub(
+      [{ id: 'ch1', title: 'Readable', body: 'Chapter text.' }],
+      { 'media/unused.bin': new Uint8Array(1_000_000) },
+    )
+    await expect(parseEpub(withUnusedMedia)).resolves.toHaveLength(1)
+
+    const compressedChapter = makeEpub([
+      { id: 'ch1', title: 'Bomb', body: 'a'.repeat(1_000_000) },
+    ])
+    await expect(parseEpub(compressedChapter)).rejects.toThrow('compression-ratio')
+  })
+
+  it('rejects an excessive chapter count before inflating chapter bodies', async () => {
+    const chapters = Array.from({ length: 2_001 }, (_, index) => ({
+      id: `ch${index}`,
+      title: `Chapter ${index}`,
+      body: 'Text.',
+    }))
+    await expect(parseEpub(makeEpub(chapters))).rejects.toThrow('chapter limit')
   })
 
   it('resolves URI-encoded manifest hrefs to their zip entries', async () => {

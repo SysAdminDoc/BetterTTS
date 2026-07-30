@@ -1,14 +1,36 @@
-import { unzipSync } from 'fflate'
+import {
+  extractInspectedZipEntries,
+  inspectZipArchive,
+  normalizeArchivePath,
+  type ArchiveBudget,
+} from './archive-budget.ts'
 
 export type EpubChapter = {
   title: string
   text: string
 }
 
-// EPUBs only contain text documents we read individually; cap each entry's
-// decompressed size so a crafted archive (deflate reaches ~1000:1) cannot
-// balloon a size-checked upload into gigabytes of memory.
-const MAX_ENTRY_BYTES = 64 * 1024 * 1024
+const MAX_EPUB_ARCHIVE_BYTES = 25 * 1024 * 1024
+const MAX_EPUB_ENTRY_BYTES = 8 * 1024 * 1024
+const MAX_EPUB_TOTAL_BYTES = 64 * 1024 * 1024
+const MAX_EPUB_ENTRIES = 10_000
+const MAX_EPUB_SELECTED_ENTRIES = 2_010
+const MAX_EPUB_COMPRESSION_RATIO = 200
+export const MAX_EPUB_CHAPTERS = 2_000
+export const MAX_EPUB_TEXT_CHARS = 10_000_000
+export const MAX_EPUB_CHAPTER_CHARS = 1_000_000
+
+const EPUB_ARCHIVE_BUDGET: ArchiveBudget = {
+  maxArchiveBytes: MAX_EPUB_ARCHIVE_BYTES,
+  maxEntries: MAX_EPUB_ENTRIES,
+  maxEntryBytes: MAX_EPUB_ENTRY_BYTES,
+  maxTotalBytes: MAX_EPUB_TOTAL_BYTES,
+  maxCompressionRatio: MAX_EPUB_COMPRESSION_RATIO,
+}
+const EPUB_SELECTION_BUDGET: ArchiveBudget = {
+  ...EPUB_ARCHIVE_BUDGET,
+  maxEntries: MAX_EPUB_SELECTED_ENTRIES,
+}
 
 export async function parseEpub(file: File): Promise<EpubChapter[]> {
   return parseEpubFromArrayBuffer(await file.arrayBuffer())
@@ -19,29 +41,37 @@ export function parseEpubFromArrayBuffer(
   onChapter?: (chapter: number, total: number) => void,
 ): EpubChapter[] {
   const buffer = new Uint8Array(source)
-  const files = unzipSync(buffer, {
-    filter: (entry) => entry.originalSize <= MAX_ENTRY_BYTES,
-  })
+  const entries = inspectZipArchive(buffer, EPUB_ARCHIVE_BUDGET, 'EPUB')
 
   const decoder = new TextDecoder('utf-8')
-  const read = (path: string): string | null => {
+  const entryNameFor = (path: string): string | null => {
     // Manifest/NCX/nav hrefs are URIs — an entry named "My Chapter.xhtml" is
     // referenced as "My%20Chapter.xhtml", so match the decoded form too.
-    let decoded = path
+    const raw = normalizeArchivePath(path)
+    let decoded = raw
     try {
-      decoded = decodeURIComponent(path)
+      decoded = decodeURIComponent(raw)
     } catch {
       /* malformed escape — fall back to the raw href */
     }
-    const key = Object.keys(files).find((k) => {
-      const normalized = k.replace(/^\//, '')
-      return k === path || normalized === path || k === decoded || normalized === decoded
-    })
-    return key ? decoder.decode(files[key]) : null
+    return entries.find((entry) => entry.normalizedName === raw || entry.normalizedName === decoded)?.normalizedName ?? null
+  }
+  const extractPaths = (paths: Iterable<string>, label: string): Record<string, Uint8Array> => {
+    const names = new Set<string>()
+    for (const path of paths) {
+      const name = entryNameFor(path)
+      if (name) names.add(name)
+    }
+    return extractInspectedZipEntries(buffer, entries, names, EPUB_SELECTION_BUDGET, label)
+  }
+  const read = (files: Record<string, Uint8Array>, path: string): string | null => {
+    const key = entryNameFor(path)
+    return key && files[key] ? decoder.decode(files[key]) : null
   }
 
   // 1. Find the rootfile from META-INF/container.xml
-  const containerXml = read('META-INF/container.xml')
+  const metadataFiles = extractPaths(['META-INF/container.xml'], 'EPUB container')
+  const containerXml = read(metadataFiles, 'META-INF/container.xml')
   if (!containerXml) throw new Error('Not a valid EPUB — missing META-INF/container.xml')
 
   const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml')
@@ -49,7 +79,8 @@ export function parseEpubFromArrayBuffer(
   if (!rootfilePath) throw new Error('EPUB container has no rootfile reference')
 
   // 2. Parse the OPF to get the spine order + manifest
-  const opfXml = read(rootfilePath)
+  const packageFiles = extractPaths([rootfilePath], 'EPUB package')
+  const opfXml = read(packageFiles, rootfilePath)
   if (!opfXml) throw new Error(`EPUB missing content file: ${rootfilePath}`)
   const opfDoc = new DOMParser().parseFromString(opfXml, 'application/xml')
   const opfDir = rootfilePath.includes('/') ? rootfilePath.slice(0, rootfilePath.lastIndexOf('/') + 1) : ''
@@ -66,13 +97,27 @@ export function parseEpubFromArrayBuffer(
     const idref = itemref.getAttribute('idref')
     if (idref) spineOrder.push(idref)
   }
+  if (spineOrder.length > MAX_EPUB_CHAPTERS) {
+    throw new Error(`EPUB exceeds the ${MAX_EPUB_CHAPTERS}-chapter limit.`)
+  }
 
   // 3. Try to extract chapter titles from the NCX TOC or nav document
   const tocTitles = new Map<string, string>()
   const tocId = opfDoc.querySelector('spine')?.getAttribute('toc')
   const tocPath = tocId ? manifest.get(tocId) : null
+  const navItem = opfDoc.querySelector('manifest > item[properties~="nav"]')
+  const navHref = navItem?.getAttribute('href')
+  const contentPaths = new Set<string>()
+  for (const idref of spineOrder) {
+    const href = manifest.get(idref)
+    if (href) contentPaths.add(href)
+  }
+  if (tocPath) contentPaths.add(tocPath)
+  if (navHref) contentPaths.add(opfDir + navHref)
+  const contentFiles = extractPaths(contentPaths, 'EPUB reading order')
+
   if (tocPath) {
-    const ncxXml = read(tocPath)
+    const ncxXml = read(contentFiles, tocPath)
     if (ncxXml) {
       const ncxDoc = new DOMParser().parseFromString(ncxXml, 'application/xml')
       for (const navPoint of ncxDoc.querySelectorAll('navPoint')) {
@@ -87,11 +132,9 @@ export function parseEpubFromArrayBuffer(
   }
 
   // Also check for EPUB 3 nav document
-  const navItem = opfDoc.querySelector('manifest > item[properties~="nav"]')
   if (navItem) {
-    const navHref = navItem.getAttribute('href')
     if (navHref) {
-      const navXml = read(opfDir + navHref)
+      const navXml = read(contentFiles, opfDir + navHref)
       if (navXml) {
         const navDoc = new DOMParser().parseFromString(navXml, 'application/xhtml+xml')
         const tocNav = navDoc.querySelector('nav[*|type="toc"], nav.toc')
@@ -112,10 +155,11 @@ export function parseEpubFromArrayBuffer(
   // 4. Extract text from each spine document
   const chapters: EpubChapter[] = []
   let chapterNum = 0
+  let totalTextChars = 0
   for (const idref of spineOrder) {
     const href = manifest.get(idref)
     if (!href) continue
-    const xhtml = read(href)
+    const xhtml = read(contentFiles, href)
     if (!xhtml) continue
 
     let doc = new DOMParser().parseFromString(xhtml, 'application/xhtml+xml')
@@ -129,6 +173,13 @@ export function parseEpubFromArrayBuffer(
 
     const text = extractText(body).replace(/\n{3,}/g, '\n\n').trim()
     if (!text) continue
+    if (text.length > MAX_EPUB_CHAPTER_CHARS) {
+      throw new Error(`EPUB chapter ${chapterNum + 1} exceeds the ${MAX_EPUB_CHAPTER_CHARS.toLocaleString()}-character limit.`)
+    }
+    totalTextChars += text.length
+    if (totalTextChars > MAX_EPUB_TEXT_CHARS) {
+      throw new Error(`EPUB exceeds the ${MAX_EPUB_TEXT_CHARS.toLocaleString()}-character text limit.`)
+    }
 
     chapterNum++
     const title = tocTitles.get(href) ?? `Chapter ${chapterNum}`

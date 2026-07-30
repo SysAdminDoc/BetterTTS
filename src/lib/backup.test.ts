@@ -140,6 +140,15 @@ describe('portable backup', () => {
     expect((await listJobs()).map((entry) => entry.id)).toEqual([job.id])
   })
 
+  it('rejects archive files not declared by the manifest', async () => {
+    const backup = await createPortableBackup()
+    const withHiddenPayload = await rewriteBackup(backup.blob, (files) => {
+      files['media/undeclared.bin'] = new Uint8Array(1024)
+    })
+
+    await expect(inspectPortableBackup(withHiddenPayload)).rejects.toThrow('do not match the manifest')
+  })
+
   it('preflights browser quota before replacing local state', async () => {
     await saveClip({
       id: 'clip',
