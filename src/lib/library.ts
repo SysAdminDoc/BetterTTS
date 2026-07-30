@@ -25,6 +25,54 @@ const BLOBS_STORE = 'blobs'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+export function migrateClipRecord(raw: unknown): ClipRecord | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Partial<ClipRecord>
+  if (
+    typeof record.id !== 'string'
+    || !record.id
+    || record.id.length > 200
+    || typeof record.filename !== 'string'
+    || !record.filename
+    || record.filename.length > 300
+    || typeof record.label !== 'string'
+    || record.label.length > 500
+    || typeof record.voice !== 'string'
+    || record.voice.length > 200
+    || !Number.isFinite(record.createdAt)
+    || !Number.isFinite(record.speed)
+    || !Number.isSafeInteger(record.size)
+    || Number(record.size) < 0
+    || typeof record.duration !== 'string'
+    || record.duration.length > 50
+  ) return null
+  const cues = Array.isArray(record.cues)
+    ? record.cues.filter((value): value is Cue => {
+        const cue = value as Partial<Cue>
+        return (
+          Number.isSafeInteger(cue.index)
+          && Number(cue.index) > 0
+          && Number.isFinite(cue.startSec)
+          && Number(cue.startSec) >= 0
+          && Number.isFinite(cue.endSec)
+          && Number(cue.endSec) > Number(cue.startSec)
+          && typeof cue.text === 'string'
+        )
+      })
+    : undefined
+  return {
+    id: record.id,
+    filename: record.filename,
+    label: record.label,
+    voice: record.voice,
+    speed: Math.max(0.5, Math.min(2, Number(record.speed))),
+    createdAt: Number(record.createdAt),
+    size: Number(record.size),
+    duration: record.duration,
+    cues,
+  }
+}
+
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
@@ -98,7 +146,9 @@ export async function listClips(): Promise<ClipRecord[]> {
     const tx = db.transaction(CLIPS_STORE, 'readonly')
     const req = tx.objectStore(CLIPS_STORE).getAll()
     req.onsuccess = () => {
-      const records = req.result as ClipRecord[]
+      const records = (req.result as unknown[])
+        .map(migrateClipRecord)
+        .filter((record): record is ClipRecord => record !== null)
       records.sort((a, b) => b.createdAt - a.createdAt)
       resolve(records)
     }

@@ -94,7 +94,9 @@ import {
   nextCueIndex,
   previousCueIndex,
   savePlaybackState,
+  shouldPersistPlayback,
 } from './lib/playback.ts'
+import { readLruEntry, writeLruEntry } from './lib/bounded-cache.ts'
 import {
   KITTEN_DEFAULT_MODEL,
   KITTEN_MODELS,
@@ -404,6 +406,7 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
           ref={audioRef}
           preload="metadata"
           src={result.url}
+          aria-label={`Monitor ${result.filename}`}
           onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
           onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
           onPlay={() => setPlaying(true)}
@@ -459,10 +462,12 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
   const [activeIdx, setActiveIdx] = useState(-1)
   const [resumeNote, setResumeNote] = useState<string | null>(null)
   const restoredRef = useRef(false)
+  const lastPersistedTimeRef = useRef(Number.NaN)
   const cues = useMemo(() => cueList ?? [], [cueList])
 
   useEffect(() => {
     restoredRef.current = false
+    lastPersistedTimeRef.current = Number.NaN
     setActiveIdx(-1)
     setResumeNote(null)
   }, [playbackKey, src])
@@ -472,13 +477,15 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
     if (!el) return
 
     const activeCue = () => cueIndexAtTime(cues, el.currentTime)
-    const persist = () => {
+    const persist = (force = false) => {
       const idx = activeCue()
       setActiveIdx((current) => (current === idx ? current : idx))
+      if (!shouldPersistPlayback(lastPersistedTimeRef.current, el.currentTime, force)) return
       savePlaybackState(playbackKey, {
         timeSec: el.currentTime,
         cueIndex: idx >= 0 ? idx : undefined,
       })
+      lastPersistedTimeRef.current = el.currentTime
     }
     const restore = () => {
       if (restoredRef.current) return
@@ -504,16 +511,18 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
     }
 
     el.addEventListener('loadedmetadata', restore)
-    el.addEventListener('timeupdate', persist)
-    el.addEventListener('pause', persist)
-    el.addEventListener('seeked', persist)
+    const persistProgress = () => persist()
+    const persistImmediately = () => persist(true)
+    el.addEventListener('timeupdate', persistProgress)
+    el.addEventListener('pause', persistImmediately)
+    el.addEventListener('seeked', persistImmediately)
     el.addEventListener('ended', end)
     if (el.readyState >= 1) restore()
     return () => {
       el.removeEventListener('loadedmetadata', restore)
-      el.removeEventListener('timeupdate', persist)
-      el.removeEventListener('pause', persist)
-      el.removeEventListener('seeked', persist)
+      el.removeEventListener('timeupdate', persistProgress)
+      el.removeEventListener('pause', persistImmediately)
+      el.removeEventListener('seeked', persistImmediately)
       el.removeEventListener('ended', end)
     }
   }, [playbackKey, cues])
@@ -1767,16 +1776,40 @@ function App() {
     if (!('mediaSession' in navigator)) return
     const shell = document.querySelector('.app-shell')
     if (!shell) return
-    const handler = (e: Event) => {
+    let activeAudio: HTMLAudioElement | null = null
+    const onPlay = (e: Event) => {
       const el = e.target as HTMLAudioElement
       if (el.tagName !== 'AUDIO') return
+      activeAudio = el
       const label = el.getAttribute('aria-label') ?? 'BetterTTS'
       navigator.mediaSession.metadata = new MediaMetadata({ title: label, artist: 'BetterTTS' })
-      navigator.mediaSession.setActionHandler('play', () => el.play())
-      navigator.mediaSession.setActionHandler('pause', () => el.pause())
+      navigator.mediaSession.playbackState = 'playing'
     }
-    shell.addEventListener('play', handler, true)
-    return () => shell.removeEventListener('play', handler, true)
+    const onPause = (e: Event) => {
+      if (e.target === activeAudio) navigator.mediaSession.playbackState = 'paused'
+    }
+    const onEnded = (e: Event) => {
+      if (e.target !== activeAudio) return
+      activeAudio = null
+      navigator.mediaSession.playbackState = 'none'
+    }
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (activeAudio?.isConnected) activeAudio.play().catch(() => {})
+    })
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (activeAudio?.isConnected) activeAudio.pause()
+    })
+    shell.addEventListener('play', onPlay, true)
+    shell.addEventListener('pause', onPause, true)
+    shell.addEventListener('ended', onEnded, true)
+    return () => {
+      shell.removeEventListener('play', onPlay, true)
+      shell.removeEventListener('pause', onPause, true)
+      shell.removeEventListener('ended', onEnded, true)
+      navigator.mediaSession.setActionHandler('play', null)
+      navigator.mediaSession.setActionHandler('pause', null)
+      navigator.mediaSession.playbackState = 'none'
+    }
   }, [])
 
   useEffect(() => {
@@ -2563,7 +2596,7 @@ function App() {
     if (previewingVoice || isGenerating) return
     setPreviewingVoice(id)
     try {
-      const cached = previewCacheRef.current.get(id)
+      const cached = readLruEntry(previewCacheRef.current, id)
       if (cached) {
         const audio = new Audio(cached)
         await audio.play()
@@ -2575,7 +2608,7 @@ function App() {
       if (preview) {
         const blob = new Blob([encodeWav(preview.samples, preview.sampleRate)], { type: 'audio/wav' })
         const url = URL.createObjectURL(blob)
-        previewCacheRef.current.set(id, url)
+        writeLruEntry(previewCacheRef.current, id, url, 12, (staleUrl) => URL.revokeObjectURL(staleUrl))
         const player = new Audio(url)
         await player.play()
         refreshModelCacheStatus().catch(() => {})

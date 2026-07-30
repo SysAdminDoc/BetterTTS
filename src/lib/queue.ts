@@ -260,7 +260,9 @@ export function replaceQueueChunk(
 }
 
 export function migrateQueueJob(raw: unknown): QueueJob {
-  const job = raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
+  const job = raw && typeof raw === 'object'
+    ? raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
+    : {}
   const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' || job.engine === 'piper' ? job.engine : 'kokoro'
   const speedBounds = engine === 'supertonic' ? [0.8, 1.2] : engine === 'kitten' ? [0.5, 2] : [0.5, 1.5]
   const requestedSpeed = Number(job.speed)
@@ -274,14 +276,18 @@ export function migrateQueueJob(raw: unknown): QueueJob {
   const bitrate = Number.isFinite(requestedBitrate)
     ? Math.round(Math.max(32, Math.min(320, requestedBitrate)))
     : 128
+  const id = typeof job.id === 'string' && job.id && job.id.length <= 200 ? job.id : crypto.randomUUID()
+  const title = typeof job.title === 'string' && job.title ? job.title.slice(0, 500) : 'Untitled job'
+  const voice = typeof job.voice === 'string' && job.voice && job.voice.length <= 200 ? job.voice : 'af_heart'
+  const language = typeof job.language === 'string' && job.language.length <= 50 ? job.language : undefined
   return {
     schemaVersion: 2,
-    id: String(job.id ?? crypto.randomUUID()),
-    title: String(job.title ?? 'Untitled job'),
+    id,
+    title,
     createdAt: Number.isFinite(job.createdAt) && Number(job.createdAt) >= 0 ? Number(job.createdAt) : Date.now(),
     engine,
-    voice: job.voice ?? 'af_heart',
-    language: engine === 'kokoro' || engine === 'piper' ? job.language : undefined,
+    voice,
+    language: engine === 'kokoro' || engine === 'piper' ? language : undefined,
     speed,
     format,
     bitrate,
@@ -296,21 +302,21 @@ export function migrateQueueJob(raw: unknown): QueueJob {
 }
 
 function migrateQueueChunk(raw: unknown, index: number): QueueChunk {
-  const chunk = raw as Partial<QueueChunk>
+  const chunk = raw && typeof raw === 'object' ? raw as Partial<QueueChunk> : {}
   // 'generating' is an in-memory state only: a persisted 'generating' chunk is
   // a zombie from a crashed session, so demote it to 'pending' for clean resume.
   const status = chunk.status === 'done' || chunk.status === 'failed' ? chunk.status : 'pending'
   return {
     index: Number.isSafeInteger(chunk.index) && Number(chunk.index) >= 0 ? Number(chunk.index) : index,
-    text: String(chunk.text ?? ''),
+    text: typeof chunk.text === 'string' ? chunk.text.slice(0, 10_000) : '',
     status,
-    chapterTitle: chunk.chapterTitle,
-    chapterIndex: chunk.chapterIndex,
-    duration: typeof chunk.duration === 'string' ? chunk.duration : undefined,
+    chapterTitle: typeof chunk.chapterTitle === 'string' ? chunk.chapterTitle.slice(0, 500) : undefined,
+    chapterIndex: Number.isSafeInteger(chunk.chapterIndex) && Number(chunk.chapterIndex) >= 0 ? Number(chunk.chapterIndex) : undefined,
+    duration: typeof chunk.duration === 'string' ? chunk.duration.slice(0, 50) : undefined,
     cues: Array.isArray(chunk.cues) ? chunk.cues.filter(isCue) : undefined,
-    blobKey: chunk.blobKey,
-    error: chunk.error,
-    warning: typeof chunk.warning === 'string' ? chunk.warning : undefined,
+    blobKey: typeof chunk.blobKey === 'string' ? chunk.blobKey.slice(0, 500) : undefined,
+    error: typeof chunk.error === 'string' ? chunk.error.slice(0, 1000) : undefined,
+    warning: typeof chunk.warning === 'string' ? chunk.warning.slice(0, 1000) : undefined,
   }
 }
 

@@ -219,6 +219,30 @@ describe('queue', () => {
     expect(migrated.chunks[0].cues).toEqual([{ index: 2, startSec: 0, endSec: 1, text: 'Valid.' }])
   })
 
+  it('removes non-string persisted metadata before rendering or synthesis', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('typed', 1),
+      title: { unsafe: true },
+      voice: ['af_heart'],
+      language: { locale: 'en-us' },
+      chunks: [{
+        index: 0,
+        text: { nested: true },
+        status: 'failed',
+        chapterTitle: 7,
+        chapterIndex: -1,
+        error: { message: 'bad' },
+      }],
+    })
+
+    expect(migrated).toMatchObject({ title: 'Untitled job', voice: 'af_heart' })
+    expect(migrated.language).toBeUndefined()
+    expect(migrated.chunks[0]).toMatchObject({ text: '', status: 'failed' })
+    expect(migrated.chunks[0].chapterTitle).toBeUndefined()
+    expect(migrated.chunks[0].error).toBeUndefined()
+    expect(migrateQueueJob(null)).toMatchObject({ title: 'Untitled job', chunks: [] })
+  })
+
   it('clamps engine-specific persisted speed and Supertonic quality bounds', () => {
     expect(migrateQueueJob({ ...makeJob('slow', 0), engine: 'supertonic', speed: 0.1, supertonicSteps: 99 }))
       .toMatchObject({ speed: 0.8, supertonicSteps: 10 })

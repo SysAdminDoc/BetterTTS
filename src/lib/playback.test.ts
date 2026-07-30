@@ -9,6 +9,7 @@ import {
   nextCueIndex,
   previousCueIndex,
   savePlaybackState,
+  shouldPersistPlayback,
   type PlaybackStorage,
 } from './playback.ts'
 
@@ -35,6 +36,13 @@ const cues: Cue[] = [
 ]
 
 describe('playback resume state', () => {
+  it('throttles routine progress writes but always permits terminal writes', () => {
+    expect(shouldPersistPlayback(Number.NaN, 0.2)).toBe(true)
+    expect(shouldPersistPlayback(10, 10.5)).toBe(false)
+    expect(shouldPersistPlayback(10, 11)).toBe(true)
+    expect(shouldPersistPlayback(10, 10.1, true)).toBe(true)
+  })
+
   it('round-trips time and cue position', () => {
     const storage = new MemoryStorage()
     savePlaybackState('clip:a', { timeSec: 3.25, cueIndex: 1, updatedAt: 100 }, storage)

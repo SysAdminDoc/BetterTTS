@@ -1,14 +1,17 @@
 import { installKokoroAssetFallback, kokoroRemoteAssetUrl } from './kokoro-assets.ts'
+import { readLruEntry, writeLruEntry } from './bounded-cache.ts'
 import type { VoiceId } from './voices.ts'
 
 const CACHE_NAME = 'kokoro-voices'
 export const VOICE_STYLE_FLOATS = 510 * 256
 const VOICE_STYLE_BYTES = VOICE_STYLE_FLOATS * 4
+const MAX_MEMORY_VOICE_BINS = 12
 
 const binCache = new Map<string, Float32Array>()
 
 export async function fetchVoiceBin(voiceId: string): Promise<Float32Array> {
-  if (binCache.has(voiceId)) return binCache.get(voiceId)!
+  const memoryCached = readLruEntry(binCache, voiceId)
+  if (memoryCached) return memoryCached
   installKokoroAssetFallback()
   const url = kokoroRemoteAssetUrl(`voices/${voiceId}.bin`)
 
@@ -20,7 +23,7 @@ export async function fetchVoiceBin(voiceId: string): Promise<Float32Array> {
       const buf = await cached.arrayBuffer()
       const data = voiceBinFromBuffer(buf, voiceId)
       if (data) {
-        binCache.set(voiceId, data)
+        writeLruEntry(binCache, voiceId, data, MAX_MEMORY_VOICE_BINS)
         return data
       }
       await cache.delete(url)
@@ -35,7 +38,7 @@ export async function fetchVoiceBin(voiceId: string): Promise<Float32Array> {
   }
   const data = voiceBinFromBuffer(buf, voiceId)
   if (!data) throw new Error(`Invalid voice bin payload for ${voiceId}`)
-  binCache.set(voiceId, data)
+  writeLruEntry(binCache, voiceId, data, MAX_MEMORY_VOICE_BINS)
   return data
 }
 

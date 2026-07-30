@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { type ClipRecord, clearLibrary, clearLibraryWithSnapshot, deleteClip, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './library.ts'
+import { type ClipRecord, clearLibrary, clearLibraryWithSnapshot, deleteClip, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, migrateClipRecord, restoreClipSnapshots, saveClip } from './library.ts'
 
 function record(id: string, createdAt: number): ClipRecord {
   return {
@@ -26,6 +26,12 @@ describe('library', () => {
     await saveClip(record('c', 200), new Blob(['cccc']))
     const clips = await listClips()
     expect(clips.map((c) => c.id)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('filters malformed persisted clip metadata before it reaches the UI', () => {
+    expect(migrateClipRecord({ ...record('valid', 1), speed: 99 })).toMatchObject({ id: 'valid', speed: 2 })
+    expect(migrateClipRecord({ ...record('bad', 1), label: { nested: true } })).toBeNull()
+    expect(migrateClipRecord({ ...record('bad', 1), size: Number.NaN })).toBeNull()
   })
 
   it('round-trips the audio blob', async () => {

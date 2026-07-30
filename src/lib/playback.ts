@@ -15,6 +15,14 @@ export type PlaybackStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'
 
 const STORAGE_KEY = 'bettertts-playback-v1'
 const MAX_ITEMS = 80
+const PLAYBACK_PERSIST_INTERVAL_SECONDS = 1
+
+export function shouldPersistPlayback(previousTimeSec: number, nextTimeSec: number, force = false): boolean {
+  if (force) return Number.isFinite(nextTimeSec)
+  if (!Number.isFinite(nextTimeSec)) return false
+  if (!Number.isFinite(previousTimeSec)) return true
+  return Math.abs(nextTimeSec - previousTimeSec) >= PLAYBACK_PERSIST_INTERVAL_SECONDS
+}
 
 function browserStorage(): PlaybackStorage | null {
   if (typeof window === 'undefined') return null
