@@ -57,6 +57,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
+- **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
 - **Native save dialog** via `showSaveFilePicker` on Chromium, with `<a download>` fallback
 
@@ -156,7 +157,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (299 tests across 42 files) + Playwright smoke |
+| Testing | Vitest (302 tests across 43 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

@@ -41,6 +41,7 @@ import {
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
+import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
@@ -904,6 +905,7 @@ function App() {
   const [isImportingFile, setIsImportingFile] = useState(false)
   const [library, setLibrary] = useState<ClipRecord[]>([])
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
+  const [persistenceOutcome, setPersistenceOutcome] = useState(getPersistenceOutcome)
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [regeneratingChunkKey, setRegeneratingChunkKey] = useState<string | null>(null)
@@ -912,6 +914,7 @@ function App() {
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
+  const persistenceWarnedRef = useRef(false)
   const projectSaveQueueRef = useRef(new SerialTaskQueue())
   const projectRevisionRef = useRef(0)
   const suppressProjectDirtyRef = useRef(false)
@@ -1076,13 +1079,35 @@ function App() {
     ? `${speed.toFixed(2)}x / ${pitchSemitones > 0 ? `+${pitchSemitones}` : pitchSemitones} st`
     : `${speed.toFixed(2)}x`
 
+  function persistSetting(key: string, value: string) {
+    let storage: Storage | null = null
+    try {
+      storage = window.localStorage
+    } catch {
+      // Some privacy modes reject access at the property boundary.
+    }
+    const outcome = writePersistentSetting(storage, key, value)
+    setPersistenceOutcome(outcome)
+    if (outcome.state !== 'durable') {
+      recordDiagnosticEvent('warn', outcome.reason ?? 'Browser persistence failed.', `persistence.${key}`)
+      if (!persistenceWarnedRef.current) {
+        persistenceWarnedRef.current = true
+        showToast({
+          tone: 'warn',
+          message: 'Settings and crash-recovery text cannot be saved by this browser. This session still works, but export or save a project before closing.',
+        })
+      }
+    }
+    return outcome
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     // Keep the browser/PWA chrome color in sync — a light UI under a
     // near-black Android status bar reads as a theming bug.
     const chromeColor = window.getComputedStyle(document.documentElement).getPropertyValue('--bg-strong').trim()
     if (chromeColor) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', chromeColor)
-    try { window.localStorage.setItem('bettertts-theme', theme) } catch { /* storage blocked */ }
+    persistSetting('bettertts-theme', theme)
   }, [theme])
 
   useEffect(() => {
@@ -1150,17 +1175,15 @@ function App() {
   }, [])
 
   useEffect(() => {
-    try { window.localStorage.setItem('bettertts-pronunciations', JSON.stringify(pronunciations)) } catch {}
+    persistSetting('bettertts-pronunciations', JSON.stringify(pronunciations))
   }, [pronunciations])
 
   useEffect(() => {
-    try { window.localStorage.setItem('bettertts-cleanup', JSON.stringify(cleanup)) } catch {}
+    persistSetting('bettertts-cleanup', JSON.stringify(cleanup))
   }, [cleanup])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
-    } catch {}
+    persistSetting(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
     if (!experimentalPiperEnabled && engine === 'piper') setEngine('kokoro')
   }, [experimentalPiperEnabled, engine])
 
@@ -1593,7 +1616,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    try { window.localStorage.setItem('bettertts-current-text', text) } catch {}
+    persistSetting('bettertts-current-text', text)
   }, [text])
 
   useEffect(() => {
@@ -4056,6 +4079,7 @@ function App() {
                   <div><dt>Native FFmpeg</dt><dd>{ffmpegStatus?.available ? ffmpegStatus.version ?? 'Ready' : ffmpegStatus?.message ?? 'Not checked'}</dd></div>
                   <div><dt>M4B export</dt><dd>{m4bExportReady ? (ffmpegStatus?.available ? 'Native chapters ready' : 'WebCodecs AAC ready') : 'ZIP fallback'}</dd></div>
                   <div><dt>Storage</dt><dd title={storageEstimate ?? 'Unknown'}>{storageEstimate ?? 'Unknown'}</dd></div>
+                  <div><dt>Settings persistence</dt><dd title={persistenceOutcome.reason ?? 'Verified localStorage writes'}>{persistenceOutcome.state === 'durable' ? 'Durable' : persistenceOutcome.state === 'degraded' ? 'Session only' : 'Unavailable'}</dd></div>
                   <div><dt>Storage mode</dt><dd title={crossOriginStorage.message}>{crossOriginStorageShortLabel(crossOriginStorage.usable)}</dd></div>
                   <div>
                     <dt>Transformers</dt>
@@ -4456,9 +4480,7 @@ function App() {
                           const next = event.target.checked
                           setForceWasm(next)
                           setForceNative(false)
-                          try {
-                            window.localStorage.setItem('bettertts-backend', next ? 'wasm' : 'auto')
-                          } catch { /* storage blocked */ }
+                          persistSetting('bettertts-backend', next ? 'wasm' : 'auto')
                           resetKokoroSession()
                           resetTimestampedKokoroSession()
                           resetWorker()
@@ -4479,9 +4501,7 @@ function App() {
                             const next = event.target.checked
                             setForceNative(next)
                             if (next) setForceWasm(false)
-                            try {
-                              window.localStorage.setItem('bettertts-backend', next ? 'native' : 'auto')
-                            } catch { /* storage blocked */ }
+                            persistSetting('bettertts-backend', next ? 'native' : 'auto')
                             resetKokoroSession()
                             resetTimestampedKokoroSession()
                             resetWorker()
@@ -4839,7 +4859,7 @@ function App() {
             <span>BetterTTS v{APP_VERSION}</span>
             <span><span className="status-dot" aria-hidden="true" /> Local only</span>
             <span>{runtimeLabel}</span>
-            <span>{storageEstimate ?? 'Storage ready'}</span>
+            <span>{persistenceOutcome.state === 'durable' ? storageEstimate ?? 'Storage ready' : 'Session only — export before closing'}</span>
           </div>
           <button
             type="button"

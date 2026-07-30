@@ -1,6 +1,7 @@
 import { opusSupported } from './encode.ts'
 import { checkM4bCapability, type M4bCapability } from './m4b.ts'
 import { readModelCacheStatus, type ModelCacheSummary } from './model-cache.ts'
+import { getPersistenceOutcome, type PersistenceOutcome } from './persistence.ts'
 import { piperPlusRuntimeSupport, type PiperPlusRuntimeSupport } from './piper-plus.ts'
 import {
   detectCrossOriginStorage,
@@ -78,11 +79,12 @@ export type DiagnosticsBundle = {
     crossOriginStorage: CrossOriginStorageStatus
     transformers: TransformersUpgradeReadiness
     piperPlus: PiperPlusRuntimeSupport
-      coordination: {
-        broadcastChannel: boolean
-        webLocks: boolean
-        fallback: 'indexedDB'
+    coordination: {
+      broadcastChannel: boolean
+      webLocks: boolean
+      fallback: 'indexedDB'
     }
+    persistence: PersistenceOutcome
   }
   storage: {
     browser: StorageDiagnostics
@@ -256,6 +258,7 @@ export async function collectDiagnostics(
         webLocks: typeof navigator !== 'undefined' && Boolean(navigator.locks?.request),
         fallback: 'indexedDB',
       },
+      persistence: getPersistenceOutcome(),
     },
     storage: {
       browser: storage,
