@@ -46,6 +46,7 @@ import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
 import { subscribeToStoreChanges, withJobLease } from './lib/coordination.ts'
 import { queueExportSizeError } from './lib/export-guards.ts'
+import { commitBlobToFile, FileSaveError } from './lib/file-save.ts'
 import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
 import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
@@ -2486,7 +2487,6 @@ function App() {
 
   async function saveWithPicker(result: AudioResult) {
     if (!result.url) return
-    let writable: FileSystemWritableFileStream | null = null
     try {
       const ext = result.filename.slice(result.filename.lastIndexOf('.'))
       const typeMap: Record<string, { description: string; accept: Record<string, string[]> }> = {
@@ -2495,25 +2495,28 @@ function App() {
         '.wav': { description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } },
       }
       const picker = window as unknown as { showSaveFilePicker(opts: unknown): Promise<FileSystemFileHandle> }
+      const res = await fetch(result.url)
+      if (!res.ok) throw new Error(`Generated audio is unavailable (HTTP ${res.status}).`)
+      const blob = await res.blob()
       const handle = await picker.showSaveFilePicker({
         suggestedName: result.filename,
         types: [typeMap[ext] ?? typeMap['.wav']],
       })
-      writable = await handle.createWritable()
-      const res = await fetch(result.url)
-      const blob = await res.blob()
-      await writable.write(blob)
-      await writable.close()
-      writable = null
+      await commitBlobToFile(
+        () => handle.createWritable() as Promise<FileSystemWritableFileStream>,
+        blob,
+      )
       showToast({ tone: 'ok', message: `Saved ${result.filename}` })
     } catch (err) {
-      if (writable) {
-        try {
-          await writable.close()
-        } catch { /* discard partial native-save handle */ }
-      }
       if (err instanceof Error && err.name !== 'AbortError') {
-        showToast({ tone: 'warn', message: err.name === 'NotAllowedError' ? 'Save cancelled.' : 'Could not save this audio file.' })
+        showToast({
+          tone: 'warn',
+          message: err.name === 'NotAllowedError'
+            ? 'Save cancelled.'
+            : err instanceof FileSaveError
+              ? err.message
+              : 'Could not save this audio file. The destination was not changed.',
+        })
       }
     }
   }

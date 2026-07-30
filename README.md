@@ -138,7 +138,7 @@ The Windows app can create and open portable `.bettertts` projects from System t
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
 
-When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Optional two-pass EBU R128 normalization targets -16 LUFS / -1.5 dBTP; queue M4B exports include chapter metadata and optional JPEG/PNG cover art. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
+When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Optional two-pass EBU R128 normalization targets -16 LUFS / -1.5 dBTP; queue M4B exports include chapter metadata and optional JPEG/PNG cover art. Before processing, BetterTTS checks decoded duration/bytes, worst-case temporary space, and actual free disk; defaults are 24 hours and 4 GB and can be lowered with `BETTERTTS_MAX_EXPORT_DURATION_SECONDS` and `BETTERTTS_MAX_EXPORT_TEMP_BYTES`. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
 
 Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingual Tsukuyomi-chan pack download only when selected, and Piper jobs use the same resumable queue, clip library, project, and native export paths as other local engines. The web/PWA build keeps Piper behind its explicit experimental toggle because the WASM/G2P payload is large.
 
@@ -156,7 +156,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (294 tests across 41 files) + Playwright smoke |
+| Testing | Vitest (299 tests across 42 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

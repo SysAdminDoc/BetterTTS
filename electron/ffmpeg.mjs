@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, statfs, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 const MAX_PCM_BYTES = 512 * 1024 * 1024
+const DEFAULT_MAX_DURATION_SECONDS = 24 * 60 * 60
+const DEFAULT_MAX_TEMP_BYTES = 4 * 1024 * 1024 * 1024
+const DISK_RESERVE_BYTES = 64 * 1024 * 1024
 const FORMAT_ARGS = {
   wav: ['-c:a', 'pcm_s16le'],
   mp3: ['-c:a', 'libmp3lame'],
@@ -46,12 +49,81 @@ export function outputArguments(format, bitrate = 128, title = '') {
   return args
 }
 
+function configuredPositiveNumber(name, fallback) {
+  const value = Number(process.env[name])
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function outputUpperBound(format, durationSeconds, sampleCount, bitrate) {
+  if (format === 'wav') return sampleCount * 2 + 1024 * 1024
+  if (format === 'flac') return sampleCount * 4 + 8 * 1024 * 1024
+  return Math.ceil(durationSeconds * Math.max(32, Math.min(320, bitrate)) * 1000 / 8 * 1.25) + 16 * 1024 * 1024
+}
+
+export function buildExportResourcePlan({
+  durationSeconds,
+  decodedBytes,
+  inputBytes,
+  outputBytes,
+  label = 'Native export',
+}) {
+  const tempBytes = inputBytes + decodedBytes + outputBytes + DISK_RESERVE_BYTES
+  return { label, durationSeconds, decodedBytes, inputBytes, outputBytes, tempBytes }
+}
+
+export function formatByteEstimate(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown'
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  return `${Math.ceil(bytes / 1024 ** 2)} MB`
+}
+
+export function assertExportResourcePlan(plan, availableBytes = Number.POSITIVE_INFINITY) {
+  const maxDuration = configuredPositiveNumber('BETTERTTS_MAX_EXPORT_DURATION_SECONDS', DEFAULT_MAX_DURATION_SECONDS)
+  const maxTempBytes = configuredPositiveNumber('BETTERTTS_MAX_EXPORT_TEMP_BYTES', DEFAULT_MAX_TEMP_BYTES)
+  if (!Number.isFinite(plan.durationSeconds) || plan.durationSeconds <= 0 || plan.durationSeconds > maxDuration) {
+    throw new Error(`${plan.label} needs ${Math.ceil(plan.durationSeconds / 60)} minutes of decoded audio; the configured limit is ${Math.ceil(maxDuration / 60)} minutes. Destination unchanged.`)
+  }
+  if (!Number.isSafeInteger(Math.ceil(plan.decodedBytes)) || plan.decodedBytes <= 0 || plan.tempBytes > maxTempBytes) {
+    throw new Error(`${plan.label} needs about ${formatByteEstimate(plan.tempBytes)} of temporary space; the configured limit is ${formatByteEstimate(maxTempBytes)}. Destination unchanged.`)
+  }
+  if (Number.isFinite(availableBytes) && availableBytes < plan.tempBytes) {
+    throw new Error(`${plan.label} needs about ${formatByteEstimate(plan.tempBytes)} of temporary space, but only ${formatByteEstimate(availableBytes)} is available. Free disk space or shorten the export. Destination unchanged.`)
+  }
+  return plan
+}
+
+async function availableTemporaryBytes() {
+  const info = await statfs(tmpdir())
+  return Number(info.bavail) * Number(info.bsize)
+}
+
+async function preflightExport(plan) {
+  return assertExportResourcePlan(plan, await availableTemporaryBytes())
+}
+
+async function cleanupOperationRoot(root, prefix) {
+  const expectedParent = resolve(await realpath(tmpdir())).toLowerCase()
+  const actualParent = resolve(await realpath(dirname(root))).toLowerCase()
+  if (actualParent !== expectedParent || !basename(root).startsWith(prefix)) {
+    throw new Error('Refusing to clean an unverified export temporary path.')
+  }
+  await rm(root, { recursive: true, force: true })
+}
+
 export async function transcodePcm({ samples, sampleRate, format, bitrate, title, loudnessTarget }) {
   const pcm = samples instanceof Float32Array ? samples : new Float32Array(samples)
   if (pcm.byteLength === 0 || pcm.byteLength > MAX_PCM_BYTES) throw new Error('Native export PCM must be between 1 byte and 512 MB.')
   if (!Number.isInteger(sampleRate) || sampleRate < 8000 || sampleRate > 192000) throw new Error('Native export sample rate is invalid.')
   const extension = EXTENSIONS[format]
   if (!extension) throw new Error(`Unsupported native audio format: ${format}`)
+  const durationSeconds = pcm.length / sampleRate
+  await preflightExport(buildExportResourcePlan({
+    durationSeconds,
+    decodedBytes: pcm.byteLength,
+    inputBytes: pcm.byteLength,
+    outputBytes: outputUpperBound(format, durationSeconds, pcm.length, bitrate),
+    label: `${String(format).toUpperCase()} export`,
+  }))
 
   const root = await mkdtemp(join(tmpdir(), 'bettertts-ffmpeg-'))
   const input = join(root, 'input.f32le')
@@ -66,7 +138,7 @@ export async function transcodePcm({ samples, sampleRate, format, bitrate, title
     await run(args, 5 * 60 * 1000)
     return { bytes: await readFile(output), extension, mime: MIMES[format] }
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await cleanupOperationRoot(root, 'bettertts-ffmpeg-')
   }
 }
 
@@ -78,13 +150,28 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
   try {
     const inputs = []
     const durations = []
+    const audioInfo = []
     for (let index = 0; index < chunks.length; index += 1) {
       const bytes = chunks[index].bytes instanceof Uint8Array ? chunks[index].bytes : new Uint8Array(chunks[index].bytes)
       const path = join(root, `chunk-${String(index).padStart(4, '0')}.audio`)
       await writeFile(path, bytes)
       inputs.push(path)
-      durations.push(await probeDuration(path))
+      const info = await probeAudio(path)
+      durations.push(info.duration)
+      audioInfo.push(info)
     }
+    const durationSeconds = audioInfo.reduce((sum, info) => sum + info.duration, 0)
+    const decodedBytes = audioInfo.reduce(
+      (sum, info) => sum + Math.ceil(info.duration * info.sampleRate * info.channels * Float32Array.BYTES_PER_ELEMENT),
+      0,
+    )
+    await preflightExport(buildExportResourcePlan({
+      durationSeconds,
+      decodedBytes,
+      inputBytes: total + (cover?.bytes?.byteLength ?? 0),
+      outputBytes: outputUpperBound('m4b', durationSeconds, Math.ceil(decodedBytes / 4), bitrate),
+      label: 'M4B audiobook export',
+    }))
     const combined = join(root, 'combined.wav')
     const concatArgs = ['-hide_banner', '-nostdin', '-y']
     for (const input of inputs) concatArgs.push('-i', input)
@@ -117,7 +204,7 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
     await run(args, 10 * 60 * 1000)
     return { bytes: await readFile(output), extension: '.m4b', mime: MIMES.m4b, chapterCount: chunks.length }
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await cleanupOperationRoot(root, 'bettertts-m4b-')
   }
 }
 
@@ -133,15 +220,26 @@ export function buildChapterMetadata(title, chunks, durations) {
   return `${lines.join('\n')}\n`
 }
 
-async function probeDuration(path) {
+async function probeAudio(path) {
   const executable = process.env.BETTERTTS_FFPROBE_PATH || ffmpegExecutable().replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1')
   try {
     const { stdout } = await execFileAsync(executable, [
-      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', path,
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-show_entries', 'stream=sample_rate,channels:format=duration',
+      '-of', 'json',
+      path,
     ], { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 })
-    const duration = Number(stdout.trim())
-    if (!Number.isFinite(duration) || duration <= 0) throw new Error('invalid duration')
-    return duration
+    const parsed = JSON.parse(stdout)
+    const duration = Number(parsed.format?.duration)
+    const sampleRate = Number(parsed.streams?.[0]?.sample_rate)
+    const channels = Number(parsed.streams?.[0]?.channels)
+    if (
+      !Number.isFinite(duration) || duration <= 0
+      || !Number.isInteger(sampleRate) || sampleRate < 8000 || sampleRate > 384000
+      || !Number.isInteger(channels) || channels < 1 || channels > 32
+    ) throw new Error('invalid audio metadata')
+    return { duration, sampleRate, channels }
   } catch {
     throw new Error('FFprobe could not read an audiobook chunk. Install the complete FFmpeg package and retry.')
   }
@@ -175,6 +273,6 @@ async function run(args, timeout, allowFailure = false) {
   } catch (error) {
     if (allowFailure && error && typeof error === 'object' && 'stderr' in error) return error
     const message = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : String(error)
-    throw new Error(`FFmpeg export failed: ${message.replaceAll(process.cwd(), '<app>').slice(-500)}`)
+    throw new Error(`FFmpeg export failed: ${message.replaceAll(process.cwd(), '<app>').slice(-500)} Destination unchanged.`)
   }
 }
