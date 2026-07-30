@@ -186,6 +186,46 @@ describe('queue', () => {
     expect(migrated.chunks[0].cues).toEqual([{ index: 1, startSec: 0, endSec: 1.2, text: 'Chunk text.' }])
   })
 
+  it('sanitizes malformed persisted synthesis settings and chunk indexes', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('malformed', 1),
+      createdAt: Number.POSITIVE_INFINITY,
+      engine: 'kitten',
+      speed: Number.NaN,
+      format: 'exe',
+      bitrate: 9999,
+      kittenModel: 'unknown',
+      chunks: [{
+        index: -4,
+        text: 'Recovered.',
+        status: 'generating',
+        cues: [
+          { index: 0, startSec: 0, endSec: 1, text: 'Invalid index.' },
+          { index: 1, startSec: -1, endSec: 1, text: 'Invalid start.' },
+          { index: 2, startSec: 0, endSec: 1, text: 'Valid.' },
+        ],
+      }],
+    })
+
+    expect(migrated.createdAt).toBeGreaterThan(0)
+    expect(migrated).toMatchObject({
+      engine: 'kitten',
+      speed: 1,
+      format: 'wav',
+      bitrate: 320,
+      kittenModel: 'nano',
+    })
+    expect(migrated.chunks[0]).toMatchObject({ index: 0, status: 'pending' })
+    expect(migrated.chunks[0].cues).toEqual([{ index: 2, startSec: 0, endSec: 1, text: 'Valid.' }])
+  })
+
+  it('clamps engine-specific persisted speed and Supertonic quality bounds', () => {
+    expect(migrateQueueJob({ ...makeJob('slow', 0), engine: 'supertonic', speed: 0.1, supertonicSteps: 99 }))
+      .toMatchObject({ speed: 0.8, supertonicSteps: 10 })
+    expect(migrateQueueJob({ ...makeJob('fast', 0), engine: 'kitten', speed: 9 }))
+      .toMatchObject({ speed: 2 })
+  })
+
   it('preserves Piper engine and language across restart migration', () => {
     const migrated = migrateQueueJob({
       ...makeJob('piper', 1),

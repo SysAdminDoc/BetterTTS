@@ -36,17 +36,17 @@ class FakeWorker {
     this.terminated = true
   }
 
-  private emit(type: string, event: MessageEvent<unknown> | Event) {
+  protected emit(type: string, event: MessageEvent<unknown> | Event) {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 }
 
-function fixtureFile(name = 'fixture.pdf'): File {
+function fixtureFile(name = 'fixture.pdf', size = 3, arrayBuffer = async () => new Uint8Array([1, 2, 3]).buffer): File {
   return {
     name,
     type: 'application/pdf',
-    size: 3,
-    arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    size,
+    arrayBuffer,
   } as File
 }
 
@@ -83,6 +83,42 @@ describe('document worker client', () => {
     controller.abort()
 
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(FakeWorker.instances[0].terminated).toBe(true)
+  })
+
+  it('rejects oversized documents before allocating their contents', async () => {
+    const { importDocumentInWorker, MAX_PDF_IMPORT_BYTES } = await import('./document-worker.ts')
+    const read = vi.fn(async () => new ArrayBuffer(0))
+
+    await expect(importDocumentInWorker(fixtureFile('huge.pdf', MAX_PDF_IMPORT_BYTES + 1, read), () => {}))
+      .rejects.toThrow('limited to 100 MB')
+    expect(read).not.toHaveBeenCalled()
+    expect(FakeWorker.instances).toHaveLength(0)
+  })
+
+  it('terminates and rejects when worker transfer cannot start', async () => {
+    class ThrowingWorker extends FakeWorker {
+      override postMessage() {
+        throw new DOMException('Could not clone', 'DataCloneError')
+      }
+    }
+    vi.stubGlobal('Worker', ThrowingWorker)
+    const { importDocumentInWorker } = await import('./document-worker.ts')
+
+    await expect(importDocumentInWorker(fixtureFile(), () => {})).rejects.toThrow('Could not start the document parser')
+    expect(FakeWorker.instances[0].terminated).toBe(true)
+  })
+
+  it('rejects unreadable worker responses without leaving the parser running', async () => {
+    class UnreadableWorker extends FakeWorker {
+      override postMessage() {
+        queueMicrotask(() => this.emit('messageerror', new Event('messageerror')))
+      }
+    }
+    vi.stubGlobal('Worker', UnreadableWorker)
+    const { importDocumentInWorker } = await import('./document-worker.ts')
+
+    await expect(importDocumentInWorker(fixtureFile(), () => {})).rejects.toThrow('unreadable data')
     expect(FakeWorker.instances[0].terminated).toBe(true)
   })
 })

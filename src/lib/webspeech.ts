@@ -6,15 +6,20 @@ function getBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
   if (voices.length > 0) return Promise.resolve(voices)
 
   return new Promise((resolve) => {
-    const onReady = () => {
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (timeout !== undefined) clearTimeout(timeout)
       synth.removeEventListener('voiceschanged', onReady)
       resolve(synth.getVoices())
     }
+    const onReady = () => {
+      finish()
+    }
     synth.addEventListener('voiceschanged', onReady)
-    setTimeout(() => {
-      synth.removeEventListener('voiceschanged', onReady)
-      resolve(synth.getVoices())
-    }, 2000)
+    timeout = setTimeout(finish, 2000)
   })
 }
 
@@ -50,7 +55,7 @@ export async function speakBrowser(
       const watchdogMs = Math.max(10000, Math.round((chunk.length * 120) / rate))
       const watchdog = setTimeout(() => {
         synth.cancel()
-        resolve()
+        reject(new Error('Browser speech playback timed out. Try another system voice or the local Kokoro engine.'))
       }, watchdogMs)
       const abortPoll = shouldAbort
         ? setInterval(() => {
@@ -72,7 +77,12 @@ export async function speakBrowser(
         else reject(new Error('Browser speech playback failed.'))
       }
 
-      synth.speak(utt)
+      try {
+        synth.speak(utt)
+      } catch (error) {
+        cleanup()
+        reject(error instanceof Error ? error : new Error('Browser speech playback could not start.'))
+      }
     })
     if (shouldAbort?.()) return
   }

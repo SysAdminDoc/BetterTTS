@@ -108,17 +108,32 @@ function safePath(path: string): boolean {
 function collectSettings(overrides: Record<string, string> = {}): Record<string, string> {
   const settings: Record<string, string> = {}
   for (const key of SETTINGS_KEYS) {
-    const value = overrides[key] ?? window.localStorage.getItem(key)
-    if (value !== null) settings[key] = value
+    let value: string | undefined = overrides[key]
+    if (value === undefined) {
+      try {
+        value = window.localStorage.getItem(key) ?? undefined
+      } catch {
+        continue
+      }
+    }
+    if (typeof value === 'string') settings[key] = value
   }
   return settings
 }
 
 function restoreSettings(settings: Record<string, string>) {
+  const failures: string[] = []
   for (const key of SETTINGS_KEYS) {
     const value = settings[key]
-    if (typeof value === 'string') window.localStorage.setItem(key, value)
-    else window.localStorage.removeItem(key)
+    try {
+      if (typeof value === 'string') window.localStorage.setItem(key, value)
+      else window.localStorage.removeItem(key)
+    } catch {
+      failures.push(key)
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Could not restore ${failures.length} local setting${failures.length === 1 ? '' : 's'}; browser storage rejected the write.`)
   }
 }
 
@@ -157,7 +172,7 @@ export async function createPortableBackup(
   for (const record of await listClips()) {
     const blob = await getClipBlob(record.id)
     if (!blob) continue
-    clips.push(record)
+    clips.push({ ...record, size: blob.size })
     await addAsset(files, assets, `library/${encodeURIComponent(record.id)}.bin`, blob, assetBudget)
   }
 
@@ -206,6 +221,70 @@ function previewFor(manifest: BackupManifest): BackupPreview {
   }
 }
 
+function validateManifestRecords(manifest: BackupManifest): void {
+  if (!Number.isFinite(Date.parse(manifest.createdAt))) {
+    throw new Error('Backup creation date is invalid.')
+  }
+  const settingKeys = Object.keys(manifest.settings)
+  if (settingKeys.some((key) => !SETTINGS_KEYS.includes(key as typeof SETTINGS_KEYS[number]) || typeof manifest.settings[key] !== 'string')) {
+    throw new Error('Backup contains unsupported settings.')
+  }
+
+  const assetsByPath = new Map(manifest.assets.map((asset) => [asset.path, asset]))
+  const usedAssets = new Set<string>()
+  const clipIds = new Set<string>()
+  for (const record of manifest.clips) {
+    if (
+      !record
+      || typeof record.id !== 'string'
+      || !record.id
+      || record.id.length > 200
+      || clipIds.has(record.id)
+      || typeof record.filename !== 'string'
+      || !record.filename
+      || typeof record.label !== 'string'
+      || typeof record.voice !== 'string'
+      || !Number.isFinite(record.createdAt)
+      || !Number.isSafeInteger(record.size)
+      || record.size < 0
+    ) {
+      throw new Error('Backup contains an invalid or duplicate clip record.')
+    }
+    clipIds.add(record.id)
+    const path = `library/${encodeURIComponent(record.id)}.bin`
+    const asset = assetsByPath.get(path)
+    if (!asset || asset.size !== record.size) {
+      throw new Error(`Backup clip size does not match its audio asset: ${record.label || record.id}.`)
+    }
+    usedAssets.add(path)
+  }
+
+  const jobIds = new Set<string>()
+  let totalChunks = 0
+  for (const rawJob of manifest.jobs) {
+    if (!rawJob || typeof rawJob.id !== 'string' || !rawJob.id || rawJob.id.length > 200 || jobIds.has(rawJob.id) || !Array.isArray(rawJob.chunks)) {
+      throw new Error('Backup contains an invalid or duplicate queue job.')
+    }
+    jobIds.add(rawJob.id)
+    totalChunks += rawJob.chunks.length
+    if (totalChunks > MAX_BACKUP_ENTRIES) throw new Error('Backup contains too many queue chunks.')
+    const chunkIndexes = new Set<number>()
+    for (const rawChunk of rawJob.chunks) {
+      const index = Number(rawChunk?.index)
+      if (!Number.isSafeInteger(index) || index < 0 || chunkIndexes.has(index)) {
+        throw new Error(`Backup queue job ${rawJob.title || rawJob.id} contains an invalid or duplicate chunk index.`)
+      }
+      chunkIndexes.add(index)
+      const path = `queue/${encodeURIComponent(rawJob.id)}/${index}.bin`
+      if (assetsByPath.has(path)) usedAssets.add(path)
+    }
+  }
+
+  if (usedAssets.size !== manifest.assets.length) {
+    throw new Error('Backup contains audio assets that are not linked to a clip or queue chunk.')
+  }
+}
+
 async function prepareBackup(file: Blob): Promise<PreparedBackup> {
   if (file.size > MAX_BACKUP_BYTES) throw new Error('Backup is larger than 512 MB.')
   const source = new Uint8Array(await readBlob(file))
@@ -251,6 +330,7 @@ async function prepareBackup(file: Blob): Promise<PreparedBackup> {
       || asset.size < 0
       || !/^[a-f0-9]{64}$/i.test(asset.sha256)
       || typeof asset.type !== 'string'
+      || asset.type.length > 200
     ) {
       throw new Error('Backup contains invalid or duplicate asset metadata.')
     }
@@ -258,6 +338,7 @@ async function prepareBackup(file: Blob): Promise<PreparedBackup> {
     assetSizes.push(asset.size)
   }
   assertArchivePayloadSizes(assetSizes, BACKUP_ASSET_BUDGET, 'Portable backup')
+  validateManifestRecords(manifest)
 
   const archivePaths = new Set(entries.map((entry) => entry.normalizedName))
   if (
@@ -314,7 +395,6 @@ async function clearQueue() {
 async function applyPreparedBackup(prepared: PreparedBackup) {
   await clearLibrary()
   await clearQueue()
-  restoreSettings(prepared.manifest.settings)
 
   for (const record of prepared.manifest.clips) {
     if (!record?.id || !record.filename || !Number.isFinite(record.createdAt) || !Number.isFinite(record.size)) {
@@ -348,6 +428,7 @@ async function applyPreparedBackup(prepared: PreparedBackup) {
     }
     await restoreQueueJob({ job, blobs })
   }
+  restoreSettings(prepared.manifest.settings)
 }
 
 export async function restorePortableBackup(file: Blob): Promise<BackupPreview> {
@@ -359,9 +440,9 @@ export async function restorePortableBackup(file: Blob): Promise<BackupPreview> 
     try {
       await clearLibrary()
       await clearQueue()
-      restoreSettings(previous.settings)
       await restoreClipSnapshots(previous.clips)
       for (const job of previous.jobs) await restoreQueueJob(job)
+      restoreSettings(previous.settings)
     } catch {
       throw new Error('Backup restore failed and the previous local state could not be fully restored.')
     }

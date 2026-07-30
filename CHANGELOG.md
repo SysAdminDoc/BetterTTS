@@ -2,8 +2,20 @@
 
 ## Unreleased
 
+### Security
+- Hardened untrusted desktop and archive boundaries: native inference IPC now validates every renderer message, `app://` navigation no longer serves the shell for missing script/model assets, and portable backups reject duplicate, dangling, inconsistent, or excessive records before replacing local data.
+- Document imports now reject empty, invalid-size, and oversized PDF/DOCX/EPUB files before allocating their contents; background audio receives the same empty/invalid-size preflight.
+
 ### Changed
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
+
+### Fixed
+- Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
+- Browser speech now surfaces stalled or synchronously failed playback instead of silently skipping text, clears voice-discovery timers promptly, and document workers terminate on transfer or message-decoding failures.
+- Portable backup creation records the actual clip blob size, tolerates blocked settings reads, restores data before settings, and attempts every settings write before reporting storage rejection.
+
+### Tests
+- Added regression coverage for malformed backups and queue records, oversized document imports, worker transfer failures, stalled Web Speech playback, invalid background audio, desktop protocol routing, and native inference IPC validation.
 
 ## v0.21.0 - 2026-07-29
 

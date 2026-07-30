@@ -2,13 +2,15 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, utilityP
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
-import { basename, extname, join, normalize, sep } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import {
   ProjectConflictError,
   readProjectSnapshot,
   writeProjectFile,
 } from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
+import { validateNativeTtsRequest } from './native-ipc.ts'
+import { resolveRendererRequest } from './app-protocol.ts'
 
 // In dev the renderer is served by Vite; in production it is served from the
 // packaged dist/ over a custom app:// scheme so we control the response headers
@@ -86,21 +88,19 @@ function rendererDir(): string {
 }
 
 function registerAppProtocol(): void {
-  const root = normalize(rendererDir())
+  const root = rendererDir()
   protocol.handle('app', async (request) => {
-    const { pathname } = new URL(request.url)
-    let rel = decodeURIComponent(pathname)
-    if (rel === '/' || rel === '') rel = '/index.html'
-    const filePath = normalize(join(root, rel))
-    // Contain the resolved path to the renderer directory.
-    if (filePath !== root && !filePath.startsWith(root + sep)) {
-      return new Response('Forbidden', { status: 403 })
-    }
+    const resolution = resolveRendererRequest(root, request.url, request.headers.get('accept') ?? '')
+    if (!resolution) return new Response('Forbidden', { status: 403, headers: SECURITY_HEADERS })
     try {
-      const data = await readFile(filePath)
-      return new Response(data, { headers: { 'Content-Type': contentType(filePath), ...SECURITY_HEADERS } })
+      const data = await readFile(resolution.filePath)
+      return new Response(data, { headers: { 'Content-Type': contentType(resolution.filePath), ...SECURITY_HEADERS } })
     } catch {
-      // SPA fallback so deep links resolve to the app shell.
+      if (!resolution.allowSpaFallback) {
+        return new Response('Not found', { status: 404, headers: SECURITY_HEADERS })
+      }
+      // HTML navigation fallback so deep links resolve to the app shell,
+      // without turning missing scripts/models into misleading 200 HTML.
       const html = await readFile(join(root, 'index.html'))
       return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS } })
     }
@@ -158,18 +158,25 @@ function ensureTtsHost(): UtilityProcess {
 }
 
 ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  const request = validateNativeTtsRequest(message)
+  if (!request) {
+    const candidate = message as { type?: unknown; id?: unknown }
+    if (candidate?.type === 'generate' && Number.isSafeInteger(candidate.id) && Number(candidate.id) >= 0) {
+      event.sender.send(NATIVE_TTS_CHANNEL, { type: 'generateError', message: 'Invalid native inference request.', id: Number(candidate.id) })
+    } else {
+      event.sender.send(NATIVE_TTS_CHANNEL, { type: 'loadError', message: 'Invalid native inference request.', key: 'cpu:q8' })
+    }
+    return
+  }
   ttsHostSubscriber = event.sender
-  if (
-    message
-    && typeof message === 'object'
-    && ['reset', 'cancel-all', 'cancel'].includes((message as { type?: string }).type ?? '')
-  ) {
+  if (request.type === 'reset' || request.type === 'cancel-all' || request.type === 'cancel') {
     const host = ttsHost
     ttsHost = null
     host?.kill()
     return
   }
-  ensureTtsHost().postMessage(message)
+  ensureTtsHost().postMessage(request)
 })
 
 type UpdateStatus = {

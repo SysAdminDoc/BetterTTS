@@ -12,12 +12,26 @@ export type WorkerImportedDocument =
   | ImportedDocument
   | { kind: 'epub'; title: string; chapters: EpubChapter[] }
 
+export const MAX_PDF_IMPORT_BYTES = 100 * 1024 * 1024
+export const MAX_ZIP_DOCUMENT_IMPORT_BYTES = 25 * 1024 * 1024
+
 function importKind(file: File): WorkerImportedDocument['kind'] {
   const name = file.name.toLowerCase()
   if (file.type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf'
   if (file.type === 'application/epub+zip' || name.endsWith('.epub')) return 'epub'
   if (name.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx'
   throw new Error('Import supports TXT, EPUB, PDF, and DOCX files.')
+}
+
+function validateImportSize(file: File, kind: WorkerImportedDocument['kind']): void {
+  const maxBytes = kind === 'pdf' ? MAX_PDF_IMPORT_BYTES : MAX_ZIP_DOCUMENT_IMPORT_BYTES
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    throw new Error('The selected document is empty or has an invalid size.')
+  }
+  if (file.size > maxBytes) {
+    const limitMb = Math.round(maxBytes / (1024 * 1024))
+    throw new Error(`${kind.toUpperCase()} import is limited to ${limitMb} MB.`)
+  }
 }
 
 function cancellationError(): DOMException {
@@ -42,6 +56,7 @@ export async function importDocumentInWorker(
   signal?: AbortSignal,
 ): Promise<WorkerImportedDocument> {
   const kind = importKind(file)
+  validateImportSize(file, kind)
   if (signal?.aborted) throw cancellationError()
   onProgress({ phase: 'read', done: 0, total: file.size })
   const buffer = await file.arrayBuffer()
@@ -78,7 +93,16 @@ export async function importDocumentInWorker(
       cleanup()
       reject(new Error('Document parser stopped unexpectedly. The previous script was kept.'))
     })
+    worker.addEventListener('messageerror', () => {
+      cleanup()
+      reject(new Error('Document parser returned unreadable data. The previous script was kept.'))
+    })
     const request: DocumentWorkerRequest = { type: 'import', id, kind, name: file.name, buffer }
-    worker.postMessage(request, [buffer])
+    try {
+      worker.postMessage(request, [buffer])
+    } catch (error) {
+      cleanup()
+      reject(error instanceof Error ? error : new Error('Could not start the document parser.'))
+    }
   })
 }

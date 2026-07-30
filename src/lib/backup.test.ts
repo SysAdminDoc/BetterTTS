@@ -169,7 +169,7 @@ describe('portable backup', () => {
     expect((await listClips()).map((clip) => clip.id)).toEqual(['clip'])
   })
 
-  it('rolls back local data when applying a validated archive fails', async () => {
+  it('rejects invalid records before changing local data', async () => {
     await saveClip({
       id: 'source',
       filename: 'source.wav',
@@ -192,9 +192,47 @@ describe('portable backup', () => {
     await saveJob(job)
     window.localStorage.setItem('bettertts-theme', 'dark')
 
-    await expect(restorePortableBackup(invalidRecord)).rejects.toThrow('invalid clip record')
+    await expect(restorePortableBackup(invalidRecord)).rejects.toThrow('invalid or duplicate clip record')
     expect(await listClips()).toEqual([])
     expect((await listJobs()).map((entry) => entry.id)).toEqual([job.id])
     expect(window.localStorage.getItem('bettertts-theme')).toBe('dark')
+  })
+
+  it('rejects duplicate queue chunk indexes before changing local data', async () => {
+    await saveJob(job)
+    const backup = await createPortableBackup()
+    const duplicateChunk = await rewriteBackup(backup.blob, (files) => {
+      const manifest = JSON.parse(new TextDecoder().decode(files['manifest.json'])) as {
+        jobs: Array<{ chunks: Array<Record<string, unknown>> }>
+      }
+      manifest.jobs[0].chunks.push({ ...manifest.jobs[0].chunks[0] })
+      files['manifest.json'] = new TextEncoder().encode(JSON.stringify(manifest))
+    })
+
+    await expect(restorePortableBackup(duplicateChunk)).rejects.toThrow('duplicate chunk index')
+    expect((await listJobs()).map((entry) => entry.id)).toEqual([job.id])
+  })
+
+  it('rejects clip metadata that disagrees with the archived audio size', async () => {
+    await saveClip({
+      id: 'clip',
+      filename: 'clip.wav',
+      label: 'Saved clip',
+      voice: 'af_heart',
+      speed: 1,
+      createdAt: 1,
+      size: 10,
+      duration: '1.0s',
+    }, new Blob(['clip-audio'], { type: 'audio/wav' }))
+    const backup = await createPortableBackup()
+    const mismatched = await rewriteBackup(backup.blob, (files) => {
+      const manifest = JSON.parse(new TextDecoder().decode(files['manifest.json'])) as {
+        clips: Array<{ size: number }>
+      }
+      manifest.clips[0].size += 1
+      files['manifest.json'] = new TextEncoder().encode(JSON.stringify(manifest))
+    })
+
+    await expect(inspectPortableBackup(mismatched)).rejects.toThrow('size does not match')
   })
 })

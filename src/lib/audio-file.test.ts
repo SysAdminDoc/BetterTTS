@@ -13,4 +13,9 @@ describe('validateBackgroundMusicFile', () => {
   it('rejects oversized audio files before decode', () => {
     expect(validateBackgroundMusicFile({ name: 'long.wav', size: MAX_BGM_FILE_BYTES + 1, type: 'audio/wav' })).toContain('or smaller')
   })
+
+  it('rejects empty and invalid-size files before decode', () => {
+    expect(validateBackgroundMusicFile({ name: 'empty.wav', size: 0, type: 'audio/wav' })).toContain('empty')
+    expect(validateBackgroundMusicFile({ name: 'invalid.wav', size: Number.NaN, type: 'audio/wav' })).toContain('invalid size')
+  })
 })

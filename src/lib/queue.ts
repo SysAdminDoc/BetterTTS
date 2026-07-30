@@ -262,19 +262,35 @@ export function replaceQueueChunk(
 export function migrateQueueJob(raw: unknown): QueueJob {
   const job = raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
   const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' || job.engine === 'piper' ? job.engine : 'kokoro'
+  const speedBounds = engine === 'supertonic' ? [0.8, 1.2] : engine === 'kitten' ? [0.5, 2] : [0.5, 1.5]
+  const requestedSpeed = Number(job.speed)
+  const speed = Number.isFinite(requestedSpeed)
+    ? Math.max(speedBounds[0], Math.min(speedBounds[1], requestedSpeed))
+    : 1
+  const format: AudioFormat = job.format === 'mp3' || job.format === 'opus' || job.format === 'flac' || job.format === 'm4b'
+    ? job.format
+    : 'wav'
+  const requestedBitrate = Number(job.bitrate)
+  const bitrate = Number.isFinite(requestedBitrate)
+    ? Math.round(Math.max(32, Math.min(320, requestedBitrate)))
+    : 128
   return {
     schemaVersion: 2,
     id: String(job.id ?? crypto.randomUUID()),
     title: String(job.title ?? 'Untitled job'),
-    createdAt: typeof job.createdAt === 'number' ? job.createdAt : Date.now(),
+    createdAt: Number.isFinite(job.createdAt) && Number(job.createdAt) >= 0 ? Number(job.createdAt) : Date.now(),
     engine,
     voice: job.voice ?? 'af_heart',
     language: engine === 'kokoro' || engine === 'piper' ? job.language : undefined,
-    speed: typeof job.speed === 'number' ? job.speed : 1,
-    format: job.format ?? 'wav',
-    bitrate: typeof job.bitrate === 'number' ? job.bitrate : 128,
-    supertonicSteps: engine === 'supertonic' ? job.supertonicSteps : undefined,
-    kittenModel: engine === 'kitten' ? job.kittenModel ?? 'nano' : undefined,
+    speed,
+    format,
+    bitrate,
+    supertonicSteps: engine === 'supertonic' && Number.isFinite(job.supertonicSteps)
+      ? Math.round(Math.max(1, Math.min(10, Number(job.supertonicSteps))))
+      : engine === 'supertonic' ? 5 : undefined,
+    kittenModel: engine === 'kitten' && (job.kittenModel === 'micro' || job.kittenModel === 'mini')
+      ? job.kittenModel
+      : engine === 'kitten' ? 'nano' : undefined,
     chunks: Array.isArray(job.chunks) ? job.chunks.map((chunk, index) => migrateQueueChunk(chunk, index)) : [],
   }
 }
@@ -285,7 +301,7 @@ function migrateQueueChunk(raw: unknown, index: number): QueueChunk {
   // a zombie from a crashed session, so demote it to 'pending' for clean resume.
   const status = chunk.status === 'done' || chunk.status === 'failed' ? chunk.status : 'pending'
   return {
-    index: typeof chunk.index === 'number' ? chunk.index : index,
+    index: Number.isSafeInteger(chunk.index) && Number(chunk.index) >= 0 ? Number(chunk.index) : index,
     text: String(chunk.text ?? ''),
     status,
     chapterTitle: chunk.chapterTitle,
@@ -303,8 +319,10 @@ function isCue(value: unknown): value is Cue {
   const startSec = Number(cue.startSec)
   const endSec = Number(cue.endSec)
   return (
-    typeof cue.index === 'number'
+    Number.isSafeInteger(cue.index)
+    && Number(cue.index) > 0
     && Number.isFinite(startSec)
+    && startSec >= 0
     && Number.isFinite(endSec)
     && endSec > startSec
     && typeof cue.text === 'string'
