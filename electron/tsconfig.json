@@ -11,5 +11,5 @@
     "esModuleInterop": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["main.ts", "preload.ts"]
+  "include": ["*.ts"]
 }

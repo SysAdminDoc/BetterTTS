@@ -573,8 +573,11 @@ async function runSmoke() {
     const title = await desktop.page.title()
     if (!title.includes('BetterTTS')) throw new Error(`Unexpected page title: ${title}`)
     const body = await desktop.page.locator('body').innerText()
-    const bodyLower = body.toLowerCase()
-    if (!bodyLower.includes('script') || !bodyLower.includes('properties')) throw new Error('App shell did not render expected content')
+    await desktop.page.getByRole('main').waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('navigation', { name: 'Workspace' }).waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('heading', { level: 1, name: 'BetterTTS local speech studio' }).waitFor({ timeout: 20000 })
+    await desktop.page.getByLabel('Text to synthesize').waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('button', { name: 'Generate audio' }).first().waitFor({ timeout: 20000 })
     if (/Vite Error|Internal Server Error|Failed to compile/i.test(body)) throw new Error('Framework error overlay detected')
 
     console.log('Checking semantic structure, keyboard access, and display preferences...')
@@ -604,8 +607,9 @@ async function runSmoke() {
     console.log('Checking experimental Piper-plus controls...')
     await desktop.page.getByRole('checkbox', { name: 'Enable experimental Piper-plus' }).check()
     await desktop.page.getByRole('button', { name: /Piper-plus/ }).click()
-    await desktop.page.getByLabel('Piper language').selectOption('en')
-    await desktop.page.getByText(/Experimental Piper-plus jobs can generate clips/).waitFor({ timeout: 20000 })
+    const piperLanguage = desktop.page.getByLabel('Piper language')
+    await piperLanguage.selectOption('en')
+    if (await piperLanguage.inputValue() !== 'en') throw new Error('Piper engine controls did not become active')
 
     await desktop.page.getByRole('button', { name: 'Advanced options' }).click()
     for (const label of ['Skip citations', 'Drop page headers', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
@@ -783,8 +787,7 @@ async function runSmoke() {
       throw new Error('Mobile editor-level Generate audio action is not visible')
     }
     await mobile.page.getByRole('tab', { name: /Queue/ }).click()
-    const fallbackText = await mobile.page.locator('.capability-strip').innerText()
-    if (!fallbackText.includes('chaptered ZIP fallback')) throw new Error(`Missing M4B fallback copy: ${fallbackText}`)
+    await mobile.page.locator('.capability-strip').waitFor({ state: 'visible', timeout: 20000 })
     await mobile.page.getByRole('button', { name: 'ZIP fallback' }).waitFor({ timeout: 20000 })
     const m4bButton = mobile.page.getByRole('button', { name: 'M4B' })
     if (!(await m4bButton.isDisabled())) throw new Error('M4B button should be disabled in unsupported AAC smoke state')
@@ -802,6 +805,20 @@ async function runSmoke() {
     await mobile.page.waitForTimeout(200)
     await mobile.page.screenshot({ path: join(smokeDir, 'mobile.png'), fullPage: false })
     await mobileContext.close()
+    const expectedScreenshots = [
+      'desktop.png',
+      'desktop-light.png',
+      'mobile.png',
+      'queue-dark.png',
+      'library-dark.png',
+      'diagnostics-light.png',
+      'models-dark.png',
+      'docs-dark.png',
+    ]
+    for (const screenshot of expectedScreenshots) {
+      const info = await stat(join(smokeDir, screenshot))
+      if (!info.isFile() || info.size < 10_000) throw new Error(`Rendered smoke capture is missing or empty: ${screenshot}`)
+    }
     const allMessages = [...desktop.messages, ...companionMessages, ...mobile.messages]
     const unexpected = allMessages.filter((msg) => !allowedConsole.some((allowed) => msg.includes(allowed)))
     if (unexpected.length > 0) throw new Error(`Unexpected console messages:\n${unexpected.join('\n')}`)
@@ -810,16 +827,7 @@ async function runSmoke() {
     const summary = {
       ok: true,
       url: baseUrl,
-      screenshots: [
-        'dist/smoke/desktop.png',
-        'dist/smoke/desktop-light.png',
-        'dist/smoke/mobile.png',
-        'dist/smoke/queue-dark.png',
-        'dist/smoke/library-dark.png',
-        'dist/smoke/diagnostics-light.png',
-        'dist/smoke/models-dark.png',
-        'dist/smoke/docs-dark.png',
-      ],
+      screenshots: expectedScreenshots.map((name) => `dist/smoke/${name}`),
       allowedConsoleMessages: allMessages,
       performance: {
         timeToInteractiveMs: Math.round(desktop.timeToInteractiveMs),

@@ -296,13 +296,14 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
       })
       activeProjectPath = saved.path
       activeProjectIdentity = saved.identity
-      return { canceled: false, name: basename(activeProjectPath) }
+      return { canceled: false, name: basename(saved.path) }
     } catch (error) {
       if (!(error instanceof ProjectConflictError) || !activeProjectPath) throw error
+      const conflictPath = activeProjectPath
       const choice = await dialog.showMessageBox(owner, {
         type: 'warning',
         title: 'Project changed outside BetterTTS',
-        message: `${basename(activeProjectPath)} was modified by another app window or process.`,
+        message: `${basename(conflictPath)} was modified by another app window or process.`,
         detail: 'Reload the external version, save your current workspace as a copy, or explicitly overwrite the changed file.',
         buttons: ['Reload external version', 'Save current workspace as a copy', 'Overwrite external version', 'Cancel'],
         defaultId: 0,
@@ -310,11 +311,11 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
         noLink: true,
       })
       if (choice.response === 0) {
-        const opened = await readProjectSnapshot(activeProjectPath)
+        const opened = await readProjectSnapshot(conflictPath)
         activeProjectIdentity = opened.identity
         return {
           canceled: false,
-          name: basename(activeProjectPath),
+          name: basename(conflictPath),
           bytes: opened.bytes,
           conflictResolution: 'reload',
         }
@@ -322,19 +323,19 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
       if (choice.response === 1) {
         const copyChoice = await dialog.showSaveDialog(owner, {
           title: 'Save BetterTTS project copy',
-          defaultPath: `${basename(activeProjectPath, '.bettertts')} copy.bettertts`,
+          defaultPath: `${basename(conflictPath, '.bettertts')} copy.bettertts`,
           filters: [{ name: 'BetterTTS project', extensions: ['bettertts'] }],
         })
         if (copyChoice.canceled || !copyChoice.filePath) return { canceled: true }
         const saved = await writeProjectFile(copyChoice.filePath, message.bytes)
         activeProjectPath = saved.path
         activeProjectIdentity = saved.identity
-        return { canceled: false, name: basename(activeProjectPath), conflictResolution: 'save-copy' }
+        return { canceled: false, name: basename(saved.path), conflictResolution: 'save-copy' }
       }
       if (choice.response === 2) {
-        const saved = await writeProjectFile(activeProjectPath, message.bytes)
+        const saved = await writeProjectFile(conflictPath, message.bytes)
         activeProjectIdentity = saved.identity
-        return { canceled: false, name: basename(activeProjectPath), conflictResolution: 'overwrite' }
+        return { canceled: false, name: basename(conflictPath), conflictResolution: 'overwrite' }
       }
       return { canceled: true, conflictResolution: 'cancel' }
     }

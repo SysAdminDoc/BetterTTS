@@ -35,6 +35,7 @@
 - Restored a single ordered workspace heading hierarchy and explicit tab/tabpanel naming for screen-reader navigation; the light-theme muted token now clears WCAG AA against the primary surface.
 
 ### Tests
+- `npm run typecheck` now covers every Electron TypeScript entry (main, preload, native host/model policy, and tests) plus declared `.mjs` IPC boundaries. Browser smoke uses semantic roles/capability state instead of marketing prose and verifies all eight rendered captures exist and are non-empty before success.
 - Added security-policy unit coverage and made web deploys and Windows distributions fail on unresolved high/critical production advisories; packaged distributions also verify the fixed dependency versions inside app.asar.
 - Browser smoke now enforces landmarks, heading order, skip-link and focus behavior, reduced-motion and forced-colors rendering, dark/light contrast tokens, and mobile layout.
 - `npm run release:smoke` now rebuilds the installer and verifies real synthesis through both browser Worker and packaged Electron utility-process paths while the default smoke stays fast and model-free.

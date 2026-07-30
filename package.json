@@ -10,7 +10,7 @@
     "postinstall": "patch-package",
     "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "dev": "vite",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p electron/tsconfig.json",
     "build": "npm run clean && npm run typecheck && vite build && node scripts/check-build-budget.mjs",
     "budget:build": "node scripts/check-build-budget.mjs",
     "test": "vitest run",
