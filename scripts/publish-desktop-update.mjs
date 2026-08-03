@@ -1,22 +1,39 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { buildStaticUpdateMetadata, readDesktopUpdateArtifacts, verifyMetadataChecksum } from './desktop-update-feed.mjs'
+import { assertRemoteReleaseTag, readReleaseIdentity } from './release-identity.mjs'
 
 const repoRoot = process.cwd()
+const identity = readReleaseIdentity(repoRoot)
+assertRemoteReleaseTag(repoRoot, identity)
 const artifacts = readDesktopUpdateArtifacts(repoRoot)
 await verifyMetadataChecksum(artifacts.metadata, artifacts.installerPath)
+const staticMetadata = buildStaticUpdateMetadata(artifacts.metadata, { ...artifacts, ...identity })
 
-const releaseExists = (() => {
+const existingRelease = (() => {
   try {
-    execFileSync('gh', ['release', 'view', artifacts.tag], { cwd: repoRoot, stdio: 'ignore' })
-    return true
-  } catch {
-    return false
+    const json = execFileSync('gh', ['release', 'view', artifacts.tag, '--json', 'body,tagName'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return JSON.parse(json)
+  } catch (error) {
+    const detail = `${String(error?.stderr ?? '')} ${String(error?.stdout ?? '')}`
+    if (/not found|404/i.test(detail)) return null
+    throw new Error(`Could not inspect GitHub Release ${artifacts.tag}: ${detail.trim() || 'gh release view failed'}`)
   }
 })()
 
+if (existingRelease) {
+  const sourceSha = existingRelease.body?.match(/^BetterTTS source SHA:\s*([a-f0-9]{40})$/im)?.[1]
+  if (sourceSha !== identity.sourceSha) {
+    throw new Error(`GitHub Release ${artifacts.tag} is already associated with a different source commit.`)
+  }
+}
+
 const assetPaths = [artifacts.installerPath, artifacts.blockmapPath]
-if (releaseExists) {
+if (existingRelease) {
   execFileSync('gh', ['release', 'upload', artifacts.tag, ...assetPaths, '--clobber'], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -30,11 +47,12 @@ if (releaseExists) {
     '--title',
     `BetterTTS ${artifacts.tag}`,
     '--notes',
-    `Unsigned Windows update artifacts for BetterTTS ${artifacts.packageVersion}.`,
+    `BetterTTS source SHA: ${identity.sourceSha}\nBetterTTS release tag: ${identity.tag}\n\nUnsigned Windows update artifacts for BetterTTS ${artifacts.packageVersion}.`,
+    '--verify-tag',
   ], { cwd: repoRoot, stdio: 'inherit' })
 }
 
-const { assetUrl } = buildStaticUpdateMetadata(artifacts.metadata, artifacts)
+const { assetUrl } = staticMetadata
 const response = await fetch(assetUrl, { headers: { Range: 'bytes=0-0' }, redirect: 'follow' })
 await response.body?.cancel()
 if (!response.ok) throw new Error(`Published update asset is unavailable: HTTP ${response.status}`)

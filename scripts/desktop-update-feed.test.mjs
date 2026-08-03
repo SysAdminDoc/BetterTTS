@@ -17,18 +17,22 @@ path: BetterTTS Setup 0.20.0.exe
 sha512: checksum
 releaseDate: '2026-07-25T00:00:00.000Z'
 `
+const sourceSha = '0123456789abcdef0123456789abcdef01234567'
 
 describe('desktop update feed', () => {
   it('points generic-provider metadata at an absolute GitHub Release asset', () => {
     const result = buildStaticUpdateMetadata(metadata, {
       tag: 'v0.20.0',
       installerName: 'BetterTTS Setup 0.20.0.exe',
+      sourceSha,
     })
     expect(result.assetUrl).toBe(
       'https://github.com/SysAdminDoc/BetterTTS/releases/download/v0.20.0/BetterTTS.Setup.0.20.0.exe',
     )
     expect(result.metadata).toContain(`- url: ${result.assetUrl}`)
     expect(result.metadata).toContain(`path: ${result.assetUrl}`)
+    expect(result.metadata).toContain(`betterttsSourceSha: ${sourceSha}`)
+    expect(result.metadata).toContain('betterttsReleaseTag: v0.20.0')
   })
 
   it('rejects stale metadata and unsafe artifact paths', () => {

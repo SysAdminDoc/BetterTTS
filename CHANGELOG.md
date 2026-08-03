@@ -5,6 +5,7 @@
 ### Security
 - Hardened untrusted desktop and archive boundaries: native inference IPC now validates every renderer message, `app://` navigation no longer serves the shell for missing script/model assets, and portable backups reject duplicate, dangling, inconsistent, or excessive records before replacing local data.
 - Document imports now reject empty, invalid-size, and oversized PDF/DOCX/EPUB files before allocating their contents; background audio receives the same empty/invalid-size preflight.
+- Release publishing now requires synchronized version metadata, a clean source checkout, and an annotated tag at the exact commit being built. Pages and the static Windows update feed expose that source SHA, while existing GitHub Releases reject binaries from a different source commit; failed live verification now preserves disposable-worktree cleanup.
 
 ### Changed
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.

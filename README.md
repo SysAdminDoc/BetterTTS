@@ -211,9 +211,9 @@ This project does not use GitHub Actions. Build and publish locally:
 npm run deploy
 ```
 
-The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
+The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Publishing requires a clean checkout plus an annotated `v<version>` tag at the exact source commit, and the deployed `release.json` records that commit for rollback/debugging. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
 
-To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`. The command verifies the installer checksum, uploads the installer and blockmap to the versioned GitHub Release, and publishes version-matched `latest.yml` under the static `/updates/` feed. This split keeps the 200+ MB binary outside GitHub Pages' 100 MB per-file limit.
+To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`. The command verifies the installer checksum, refuses to upload into an existing release associated with another source commit, uploads the installer and blockmap to the versioned GitHub Release, and publishes source-stamped `latest.yml` under the static `/updates/` feed. This split keeps the 200+ MB binary outside GitHub Pages' 100 MB per-file limit.
 
 ## Voice Catalog
 
