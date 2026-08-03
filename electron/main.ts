@@ -10,6 +10,7 @@ import {
 } from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 import { validateNativeTtsRequest } from './native-ipc.ts'
+import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
 import { resolveSmokeOutputDirectory } from './smoke-output.ts'
 
@@ -128,6 +129,8 @@ const PROJECT_CHANNEL = 'bettertts:project'
 const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
+let whisperHost: UtilityProcess | null = null
+let whisperHostSubscriber: WebContents | null = null
 let activeProjectPath: string | null = null
 let activeProjectIdentity: {
   revision: string
@@ -187,6 +190,57 @@ ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
     return
   }
   ensureTtsHost().postMessage(request)
+})
+
+// --- whisper.cpp caption host (TF-117) --------------------------------------
+// Caption inference follows the same isolated utility-process boundary as
+// native TTS. The host owns the optional whisper.cpp executable, the model
+// path, temporary audio files, and child-process cancellation.
+function sendToWhisperSubscriber(message: unknown): void {
+  if (whisperHostSubscriber && !whisperHostSubscriber.isDestroyed()) {
+    whisperHostSubscriber.send(WHISPER_CHANNEL, message)
+  }
+}
+
+function ensureWhisperHost(): UtilityProcess {
+  if (whisperHost) return whisperHost
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    BETTERTTS_WHISPER_MODEL_DIR: join(app.getPath('userData'), 'models', 'whisper'),
+  }
+  delete env.ELECTRON_RUN_AS_NODE
+  const host = utilityProcess.fork(join(__dirname, 'whisper-host.mjs'), [], {
+    serviceName: 'BetterTTS whisper captions',
+    env: env as Record<string, string>,
+  })
+  host.on('message', (message) => sendToWhisperSubscriber(message))
+  host.on('exit', () => {
+    if (whisperHost === host) {
+      whisperHost = null
+      sendToWhisperSubscriber({ type: 'error', id: 0, code: 'failed', message: 'The whisper.cpp caption host stopped. Try captioning the audio again.' })
+    }
+  })
+  whisperHost = host
+  return host
+}
+
+ipcMain.on(WHISPER_CHANNEL, (event, message: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  const request = validateWhisperRequest(message)
+  const candidate = message as { id?: unknown }
+  if (!request) {
+    if (Number.isSafeInteger(candidate?.id) && Number(candidate.id) >= 0) {
+      event.sender.send(WHISPER_CHANNEL, {
+        type: 'error',
+        id: Number(candidate.id),
+        code: 'failed',
+        message: 'Invalid whisper caption request.',
+      })
+    }
+    return
+  }
+  whisperHostSubscriber = event.sender
+  ensureWhisperHost().postMessage(request)
 })
 
 type UpdateStatus = {
@@ -404,6 +458,27 @@ function probeTtsHostInfo(timeoutMs = 8000): Promise<unknown> {
   })
 }
 
+function probeWhisperHostStatus(timeoutMs = 8000): Promise<unknown> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const host = ensureWhisperHost()
+    const id = 92001
+    const timer = setTimeout(() => {
+      host.removeListener('message', onMessage)
+      rejectPromise(new Error('whisper host status timeout'))
+    }, timeoutMs)
+    const onMessage = (message: unknown) => {
+      if (!message || typeof message !== 'object') return
+      const response = message as { type?: string; id?: number; status?: unknown }
+      if (response.type !== 'status' || response.id !== id) return
+      clearTimeout(timer)
+      host.removeListener('message', onMessage)
+      resolvePromise(response.status)
+    }
+    host.on('message', onMessage)
+    host.postMessage({ type: 'status', id })
+  })
+}
+
 function probeTtsHostLoad(timeoutMs = 180000): Promise<unknown> {
   return new Promise((resolvePromise, rejectPromise) => {
     const host = ensureTtsHost()
@@ -573,9 +648,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -658,11 +733,18 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       result.nativeHostError = err instanceof Error ? err.message : String(err)
     }
 
+    try {
+      result.whisperStatus = await probeWhisperHostStatus()
+    } catch (err) {
+      result.whisperStatusError = err instanceof Error ? err.message : String(err)
+    }
+
     result.ok =
       probe.brand === 'BetterTTS' &&
       probe.railItems >= 5 &&
       probe.generate &&
       Boolean(probe.platform) &&
+      probe.platform?.whisper === true &&
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&
@@ -678,6 +760,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         && (result.ffmpeg as { extension?: string } | undefined)?.extension === '.flac'
       )) &&
       Boolean(result.nativeHost) &&
+      Boolean(result.whisperStatus) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)
         && Boolean((result.nativeCancellation as { ok?: boolean } | undefined)?.ok)

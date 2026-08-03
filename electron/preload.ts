@@ -5,6 +5,7 @@ const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
 const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 const PROJECT_CHANNEL = 'bettertts:project'
 const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
+const WHISPER_CHANNEL = 'bettertts:whisper'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -67,6 +68,18 @@ const bridge = {
     },
     audiobook(request: unknown): Promise<unknown> {
       return ipcRenderer.invoke(FFMPEG_CHANNEL, { action: 'audiobook', ...(request as object) })
+    },
+  },
+  whisper: {
+    post(message: unknown): void {
+      ipcRenderer.send(WHISPER_CHANNEL, message)
+    },
+    onMessage(listener: (message: unknown) => void): () => void {
+      const handler = (_event: unknown, message: unknown) => listener(message)
+      ipcRenderer.on(WHISPER_CHANNEL, handler)
+      return () => {
+        ipcRenderer.removeListener(WHISPER_CHANNEL, handler)
+      }
     },
   },
 }

@@ -5,13 +5,13 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-344%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-352%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, and an experimental Piper-plus path run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -50,13 +50,14 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
+- **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
 ### Export & Output
 - **WAV** (lossless), **MP3** (96/128/160 kbps), **Opus/WebM**, and **chaptered M4B audiobook** export with AAC capability preflight
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
-- **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model
+- **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
@@ -136,6 +137,8 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
+Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing.
+
 The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
@@ -151,6 +154,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4 |
+| Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
@@ -159,7 +163,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (344 tests across 54 files) + Playwright smoke |
+| Testing | Vitest (352 tests across 56 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -185,6 +189,7 @@ src/
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser
 │   ├── chatterbox.ts        # Consent-gated reference audio decode and worker client
 │   ├── chatterbox-config.ts # Chatterbox model IDs, languages, limits, and controls
+│   ├── whisper.ts            # whisper.cpp JSON word-cue parser and audio bounds
 │   ├── piper-plus.ts        # Experimental Piper-plus lazy wrapper and support diagnostics
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
@@ -201,9 +206,18 @@ src/
 └── signalsmith-stretch.d.ts        # Type declarations
 ```
 
+```
+electron/
+├── main.ts                   # Window, IPC, and isolated utility-process routing
+├── whisper-host.ts           # Isolated whisper.cpp subprocess and temp-file host
+├── whisper-ipc.ts            # Bounded desktop caption IPC protocol
+└── tts-host.ts               # Isolated Sherpa native inference host
+```
+
 **Key design decisions:**
 - WASM q8 model files (~107 MB including tokenizer and 28 voice bins) load from the GitHub Pages site first, then fall back to Hugging Face with 429-aware retry
 - Word-level SRT/VTT is opt-in and uses the HF-hosted `Kokoro-82M-v1.0-ONNX-timestamped` q8 graph plus duration-output alignment
+- Desktop imported-audio word-level SRT/VTT uses whisper.cpp `-ml 1 -sow` forced alignment; the CLI is pinned and bundled by the Windows build, while `ggml-base.bin` remains a user-managed multilingual model
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
 - Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages
@@ -281,6 +295,7 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | `kitten-tts-webgpu` | MIT | KittenTTS browser runtime; Kitten model weights are Apache-2.0 |
 | `piper-plus`, `@piper-plus/g2p`, `onnxruntime-web` | MIT | Experimental Piper-plus engine; Tsukuyomi-chan model assets load on demand |
 | `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro and Piper CPU utility-process runtime |
+| whisper.cpp Windows CLI and GGML model path | MIT | Optional desktop imported-audio word alignment; runtime is bundled, model weights are user-managed |
 | Sherpa Kokoro int8 archive | Apache-2.0 | Pinned multilingual Kokoro model pack, downloaded on first native Kokoro load |
 | Sherpa Piper Cori archive | Public domain training data | Pinned English Cori model pack, downloaded on first native English Piper load |
 | Supertonic ONNX model | OpenRAIL | HF-hosted English speed engine |

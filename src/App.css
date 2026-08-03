@@ -1217,6 +1217,78 @@ ul.queue-chunk-list > li {
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
+.caption-import-card {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
+}
+
+.caption-import-card .section-heading {
+  margin-bottom: 0;
+}
+
+.caption-import-note,
+.caption-runtime,
+.caption-file-label {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.caption-import-note,
+.caption-runtime,
+.caption-file-label,
+.caption-result-meta {
+  min-width: 0;
+}
+
+.caption-import-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.caption-import-controls select {
+  min-width: 140px;
+}
+
+.caption-runtime {
+  display: grid;
+  gap: 3px;
+}
+
+.caption-runtime small {
+  overflow-wrap: anywhere;
+}
+
+.caption-result {
+  display: grid;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
+
+.caption-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.caption-result-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inspector-summary span {
   display: grid;
   min-width: 0;

@@ -59,6 +59,11 @@ export type DesktopFfmpegBridge = {
   }) => Promise<{ bytes: Uint8Array; extension: '.m4b'; mime: 'audio/mp4'; chapterCount: number }>
 }
 
+export type WhisperBridge = {
+  post: (message: unknown) => void
+  onMessage: (listener: (message: unknown) => void) => () => void
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -67,6 +72,7 @@ export type DesktopBridge = {
   updater?: DesktopUpdaterBridge
   projects?: DesktopProjectBridge
   ffmpeg?: DesktopFfmpegBridge
+  whisper?: WhisperBridge
 }
 
 declare global {
@@ -110,4 +116,9 @@ export function getDesktopProjectBridge(): DesktopProjectBridge | null {
 export function getDesktopFfmpegBridge(): DesktopFfmpegBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.ffmpeg ?? null
+}
+
+export function getWhisperBridge(): WhisperBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.whisper ?? null
 }

@@ -58,6 +58,7 @@ import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
+import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -133,6 +134,15 @@ import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WO
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
+import {
+  MAX_WHISPER_AUDIO_BYTES,
+  MAX_WHISPER_AUDIO_SECONDS,
+  WHISPER_LANGUAGES,
+  WHISPER_SAMPLE_RATE,
+  formatWhisperRuntimeRecovery,
+  resampleMonoAudio,
+  type WhisperRuntimeStatus,
+} from './lib/whisper.ts'
 import { speakBrowser } from './lib/webspeech.ts'
 
 const APP_VERSION = '0.22.0'
@@ -163,6 +173,17 @@ type AudioResult = {
   cues?: Cue[]
   srtUrl?: string
   vttUrl?: string
+  language?: string
+}
+
+type ImportedCaption = {
+  id: string
+  filename: string
+  audioUrl: string
+  language: string
+  cues: Cue[]
+  srtUrl: string
+  vttUrl: string
 }
 
 type Toast = {
@@ -284,6 +305,28 @@ function importSizeError(file: File): Toast | null {
   }
 }
 
+async function prepareWhisperAudio(file: File): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error('The audio file is empty or has an invalid size.')
+  if (file.size > MAX_WHISPER_AUDIO_BYTES) {
+    throw new Error(`Caption audio must be ${formatBytes(MAX_WHISPER_AUDIO_BYTES)} or smaller.`)
+  }
+
+  const context = new AudioContext()
+  try {
+    const decoded = await context.decodeAudioData(await file.arrayBuffer())
+    if (!Number.isFinite(decoded.duration) || decoded.duration <= 0) throw new Error('The audio file contains no playable audio.')
+    if (decoded.duration > MAX_WHISPER_AUDIO_SECONDS) {
+      throw new Error(`Caption audio must be ${Math.round(MAX_WHISPER_AUDIO_SECONDS / 60)} minutes or shorter.`)
+    }
+    const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index))
+    const samples = resampleMonoAudio(channels, decoded.sampleRate, WHISPER_SAMPLE_RATE)
+    if (samples.length === 0) throw new Error('The audio file contains no samples.')
+    return new Uint8Array(encodeWav(samples, WHISPER_SAMPLE_RATE))
+  } finally {
+    await context.close().catch(() => undefined)
+  }
+}
+
 function queueJobStatus(job: QueueJob): 'ready' | 'running' | 'failed' | 'pending' {
   if (job.chunks.some((chunk) => chunk.status === 'failed')) return 'failed'
   if (job.chunks.some((chunk) => chunk.status === 'generating')) return 'running'
@@ -388,6 +431,7 @@ type PlaybackAudioProps = {
   label: string
   cues?: Cue[]
   vttUrl?: string
+  srcLang?: string
 }
 
 type OutputMonitorTransportProps = {
@@ -521,7 +565,7 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
           src={result.url}
           aria-label={`Monitor ${result.filename}`}
         >
-          <track kind="captions" src={result.vttUrl ?? EMPTY_VTT_URL} srcLang="en" label={result.vttUrl ? 'English' : 'No captions'} />
+          <track kind="captions" src={result.vttUrl ?? EMPTY_VTT_URL} srcLang={result.language ?? 'en'} label={result.vttUrl ? result.language ?? 'English' : 'No captions'} />
         </audio>
       ) : null}
       <button
@@ -585,7 +629,7 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
   )
 }
 
-function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: PlaybackAudioProps) {
+function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang = 'en' }: PlaybackAudioProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeCueRef = useRef<HTMLButtonElement | null>(null)
   const [followAlong, setFollowAlong] = useState(false)
@@ -689,7 +733,7 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
   return (
     <div className="playback-block">
       <audio ref={audioRef} controls preload="metadata" src={src} aria-label={label}>
-        <track kind="captions" src={vttUrl ?? EMPTY_VTT_URL} srcLang="en" label={vttUrl ? 'English' : 'No captions'} />
+        <track kind="captions" src={vttUrl ?? EMPTY_VTT_URL} srcLang={srcLang} label={vttUrl ? srcLang : 'No captions'} />
       </audio>
       <div className="playback-tools" aria-label={`Playback controls for ${label}`}>
         {cues.length > 0 ? (
@@ -1162,6 +1206,12 @@ function App() {
   const [importUrlValue, setImportUrlValue] = useState('')
   const [importingUrl, setImportingUrl] = useState(false)
   const [isImportingFile, setIsImportingFile] = useState(false)
+  const [whisperLanguage, setWhisperLanguage] = useState<'auto' | Exclude<typeof WHISPER_LANGUAGES[number]['id'], 'auto'>>('auto')
+  const [whisperStatus, setWhisperStatus] = useState<WhisperRuntimeStatus | null>(null)
+  const [captionFile, setCaptionFile] = useState<File | null>(null)
+  const [captionResult, setCaptionResult] = useState<ImportedCaption | null>(null)
+  const [isCaptioning, setIsCaptioning] = useState(false)
+  const [captionProgress, setCaptionProgress] = useState<number | null>(null)
   const [library, setLibrary] = useState<ClipRecord[]>([])
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
   const [persistenceOutcome, setPersistenceOutcome] = useState(getPersistenceOutcome)
@@ -1183,6 +1233,7 @@ function App() {
   const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
   const systemToolsSectionRef = useRef<HTMLDivElement | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
+  const captionInputRef = useRef<HTMLInputElement | null>(null)
   const chatterboxReferenceInputRef = useRef<HTMLInputElement | null>(null)
   const pronunciationsToggleRef = useRef<HTMLButtonElement | null>(null)
   const pronunciationsSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1221,7 +1272,9 @@ function App() {
   const generationAbortRef = useRef<AbortController | null>(null)
   const importAbortRef = useRef<AbortController | null>(null)
   const articleImportAbortRef = useRef<AbortController | null>(null)
+  const captionAbortRef = useRef<AbortController | null>(null)
   const generatingRef = useRef(false)
+  const captionUrlsRef = useRef<string[]>([])
 
   // A run scheduled 700 ms after the previous one ends must not have its
   // progress bar wiped by the previous run's reset timer.
@@ -1964,10 +2017,32 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!whisperDesktopAvailable()) return
+    let cancelled = false
+    getWhisperRuntimeStatus()
+      .then((next) => {
+        if (!cancelled) setWhisperStatus(next)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'whisper.cpp status is unavailable.'
+          setWhisperStatus({ available: false, message, recovery: formatWhisperRuntimeRecovery({}) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     const objectUrls = objectUrlsRef.current
     const previewCache = previewCacheRef.current
+    const captionUrls = captionUrlsRef.current
     return () => {
       for (const url of objectUrls) {
+        URL.revokeObjectURL(url)
+      }
+      for (const url of captionUrls) {
         URL.revokeObjectURL(url)
       }
       for (const url of previewCache.values()) {
@@ -1980,6 +2055,17 @@ function App() {
   function rememberUrl(url: string) {
     objectUrlsRef.current.push(url)
     return url
+  }
+
+  function rememberCaptionUrl(url: string) {
+    captionUrlsRef.current.push(url)
+    return url
+  }
+
+  function clearCaptionResult() {
+    for (const url of captionUrlsRef.current) URL.revokeObjectURL(url)
+    captionUrlsRef.current = []
+    setCaptionResult(null)
   }
 
   function clearOutputs() {
@@ -3700,6 +3786,90 @@ function App() {
     showToast({ tone: 'ok', message: `Background music selected: ${shortUiLabel(file.name, 48)}` })
   }
 
+  function handleCaptionFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    if (!file) return
+    const lowerName = file.name.toLowerCase()
+    const knownAudioExtension = /\.(?:wav|mp3|m4a|aac|ogg|flac|webm|opus)$/u.test(lowerName)
+    if (file.type && !file.type.toLowerCase().startsWith('audio/') && !knownAudioExtension) {
+      showToast({ tone: 'warn', message: 'Caption import requires an audio file.' })
+      return
+    }
+    if (file.size > MAX_WHISPER_AUDIO_BYTES) {
+      showToast({ tone: 'warn', message: `Caption audio must be ${formatBytes(MAX_WHISPER_AUDIO_BYTES)} or smaller.` })
+      return
+    }
+    clearCaptionResult()
+    setCaptionFile(file)
+    showToast({ tone: 'ok', message: `Caption source selected: ${shortUiLabel(file.name, 56)}` })
+  }
+
+  function cancelCaptioning() {
+    captionAbortRef.current?.abort()
+    setStatus('Cancelling captions…')
+  }
+
+  async function generateImportedCaption() {
+    if (isCaptioning) {
+      cancelCaptioning()
+      return
+    }
+    if (!captionFile) {
+      showToast({ tone: 'warn', message: 'Choose an audio file before generating captions.' })
+      return
+    }
+    if (!whisperDesktopAvailable()) {
+      showToast({ tone: 'warn', message: 'Imported-audio captions require the BetterTTS desktop app and its whisper.cpp runtime.' })
+      return
+    }
+
+    const controller = new AbortController()
+    captionAbortRef.current = controller
+    setIsCaptioning(true)
+    setCaptionProgress(2)
+    setStatus('Preparing caption audio')
+    try {
+      const status = whisperStatus ?? await getWhisperRuntimeStatus()
+      setWhisperStatus(status)
+      if (!status.available) throw new Error(status.recovery)
+      const audio = await prepareWhisperAudio(captionFile)
+      setCaptionProgress(10)
+      setStatus('Aligning words with whisper.cpp')
+      const alignment = await transcribeWhisper(audio, whisperLanguage, (next) => {
+        setCaptionProgress(10 + Math.round(next * 0.85))
+        setStatus(`Aligning words with whisper.cpp (${Math.round(next)}%)`)
+      }, controller.signal)
+      if (alignment.cues.length === 0) throw new Error('No speech was detected in the imported audio.')
+      const audioUrl = rememberCaptionUrl(URL.createObjectURL(captionFile))
+      const srtUrl = rememberCaptionUrl(URL.createObjectURL(new Blob([toSRT(alignment.cues)], { type: 'text/plain' })))
+      const vttUrl = rememberCaptionUrl(URL.createObjectURL(new Blob([toVTT(alignment.cues)], { type: 'text/vtt' })))
+      setCaptionResult({
+        id: crypto.randomUUID(),
+        filename: captionFile.name,
+        audioUrl,
+        language: alignment.language,
+        cues: alignment.cues,
+        srtUrl,
+        vttUrl,
+      })
+      setCaptionProgress(100)
+      setStatus('Ready')
+      showToast({ tone: 'ok', message: `Generated ${alignment.cues.length} word cues for ${shortUiLabel(captionFile.name, 48)}.` })
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === 'AbortError'
+      setStatus('Ready')
+      showToast({
+        tone: aborted ? 'warn' : 'error',
+        message: aborted ? 'Caption generation cancelled.' : error instanceof Error ? error.message : 'Caption generation failed.',
+      })
+    } finally {
+      if (captionAbortRef.current === controller) captionAbortRef.current = null
+      setIsCaptioning(false)
+      setCaptionProgress(null)
+    }
+  }
+
   async function handleChatterboxReferenceChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0] ?? null
     event.currentTarget.value = ''
@@ -4010,6 +4180,89 @@ function App() {
                   ) : null}
                 </ul>
               )}
+              <section className="caption-import-card" aria-labelledby="caption-import-heading">
+                <div className="section-heading">
+                  <h3 id="caption-import-heading">Caption an audio file</h3>
+                  <span>Desktop whisper.cpp</span>
+                </div>
+                <p className="caption-import-note">
+                  Import an existing recording and create multilingual word-level SRT/VTT cues locally. Audio is converted to a temporary 16 kHz mono buffer and removed after alignment.
+                </p>
+                <div className="caption-import-controls">
+                  <input
+                    ref={captionInputRef}
+                    type="file"
+                    accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm,.opus"
+                    onChange={handleCaptionFileChange}
+                    hidden
+                  />
+                  <button type="button" onClick={() => captionInputRef.current?.click()} disabled={isCaptioning}>
+                    <Upload size={16} aria-hidden="true" />
+                    {captionFile ? 'Replace audio' : 'Choose audio'}
+                  </button>
+                  <select
+                    value={whisperLanguage}
+                    onChange={(event) => setWhisperLanguage(event.target.value as typeof whisperLanguage)}
+                    disabled={isCaptioning}
+                    aria-label="Caption language"
+                  >
+                    {WHISPER_LANGUAGES.map((language) => <option key={language.id} value={language.id}>{language.label}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className={isCaptioning ? 'secondary-action cancel' : undefined}
+                    onClick={generateImportedCaption}
+                    disabled={!isCaptioning && (!captionFile || (whisperStatus !== null && !whisperStatus.available))}
+                  >
+                    {isCaptioning ? <X size={16} aria-hidden="true" /> : <Captions size={16} aria-hidden="true" />}
+                    {isCaptioning ? 'Cancel captioning' : 'Generate captions'}
+                  </button>
+                </div>
+                <div className="caption-runtime" role="status">
+                  <span className={whisperStatus?.available ? 'status-ready' : 'status-warn'}>
+                    {whisperDesktopAvailable()
+                      ? whisperStatus?.message ?? 'Checking whisper.cpp runtime…'
+                      : 'Desktop whisper.cpp captioning is unavailable in the web app.'}
+                  </span>
+                  {whisperStatus && !whisperStatus.available ? <small>{whisperStatus.recovery}</small> : null}
+                </div>
+                {captionFile ? <small className="caption-file-label">Source: {shortUiLabel(captionFile.name, 72)}</small> : null}
+                {captionProgress !== null ? (
+                  <div className="progress-wrap" role="progressbar" aria-valuenow={captionProgress} aria-valuemin={0} aria-valuemax={100} aria-label="Caption progress">
+                    <span style={{ width: `${captionProgress}%` }} />
+                  </div>
+                ) : null}
+                {captionResult ? (
+                  <div className="caption-result" aria-label="Imported audio caption result">
+                    <div className="caption-result-meta">
+                      <strong>{captionResult.filename}</strong>
+                      <span>{captionResult.cues.length} word cues · {captionResult.language}</span>
+                    </div>
+                    <PlaybackAudio
+                      playbackKey={`caption:${captionResult.id}`}
+                      src={captionResult.audioUrl}
+                      label={`Captioned ${captionResult.filename}`}
+                      cues={captionResult.cues}
+                      vttUrl={captionResult.vttUrl}
+                      srcLang={captionResult.language}
+                    />
+                    <div className="playback-tools">
+                      <a href={captionResult.srtUrl} download={captionResult.filename.replace(/\.[^.]+$/u, '.srt')}>
+                        <FileText size={15} aria-hidden="true" />
+                        Download SRT
+                      </a>
+                      <a href={captionResult.vttUrl} download={captionResult.filename.replace(/\.[^.]+$/u, '.vtt')}>
+                        <FileText size={15} aria-hidden="true" />
+                        Download VTT
+                      </a>
+                      <button type="button" onClick={clearCaptionResult}>
+                        <X size={15} aria-hidden="true" />
+                        Clear captions
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
               <p className="privacy-note">
                 <Info size={16} aria-hidden="true" />
                 100% private — your text and audio stay on this device. Model files are cached locally after first use.

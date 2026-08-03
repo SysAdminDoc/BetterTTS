@@ -19,6 +19,7 @@ publish:
 files:
   - dist/**/*
   - dist-electron/**/*
+  - "!dist-electron/whisper/**/*"
   - "!dist-electron/model-cache/**/*"
   - "!dist-electron/smoke.png"
   # Browser dependencies are already bundled into dist/ by Vite. The native
@@ -54,8 +55,20 @@ asarUnpack:
 # Large model weights are fetched at runtime and cached natively, never bundled.
 asar: true
 
+# whisper.cpp is a native executable plus companion DLLs. Keep it outside the
+# asar so Windows can launch it from the packaged resources directory.
+extraResources:
+  - from: dist-electron/whisper
+    to: whisper
+    filter:
+      - "**/*"
+
 win:
   icon: build/icon.ico
+  # BetterTTS ships unsigned; never invoke Authenticode even when a machine
+  # happens to have a certificate or signtool available.
+  signExecutable: false
+  signAndEditExecutable: false
   target:
     - target: nsis
       arch:

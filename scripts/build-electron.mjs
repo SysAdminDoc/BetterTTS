@@ -31,6 +31,12 @@ await Promise.all([
     outfile: 'dist-electron/tts-host.mjs',
     external: ['electron', 'onnxruntime-node', '@huggingface/transformers', 'kokoro-js', 'phonemizer', 'sherpa-onnx-node', 'sherpa-onnx-win-x64'],
   }),
+  build({
+    ...common,
+    format: 'esm',
+    entryPoints: ['electron/whisper-host.ts'],
+    outfile: 'dist-electron/whisper-host.mjs',
+  }),
 ])
 
 console.log('Built Electron main + preload + tts-host → dist-electron/')
