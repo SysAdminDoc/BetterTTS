@@ -9,7 +9,7 @@
 
 ### Changed
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
-- The render monitor transport now plays, pauses, seeks, reports elapsed/total time, and explains why playback is unavailable instead of presenting decorative controls.
+- The render monitor transport now selects generated clips, renders a bounded decoded peak envelope with progress, plays/pauses/seeks, navigates sentence cues, reports elapsed/total time, and explains unavailable actions instead of presenting decorative controls. Result, library, and queue audio share one playback controller and Media Session state.
 - Playback resume writes are now throttled to one-second progress intervals while pause/seek state remains immediate. In-memory voice previews and decoded voice bins use bounded least-recently-used caches with object-URL disposal.
 
 ### Fixed

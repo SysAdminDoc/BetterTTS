@@ -40,6 +40,7 @@ import {
   type EngineId,
 } from './lib/engine-registry.ts'
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
+import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
@@ -96,6 +97,7 @@ import {
   savePlaybackState,
   shouldPersistPlayback,
 } from './lib/playback.ts'
+import { playbackController } from './lib/playback-controller.ts'
 import { readLruEntry, writeLruEntry } from './lib/bounded-cache.ts'
 import {
   KITTEN_DEFAULT_MODEL,
@@ -122,6 +124,7 @@ const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
+const waveformCache = new Map<string, number[]>()
 
 type Engine = EngineId
 type Theme = 'dark' | 'light'
@@ -341,7 +344,9 @@ async function getDurationLabel(blob: Blob) {
 
 type ResultRowProps = {
   result: AudioResult
+  selected: boolean
   isSpeaking: boolean
+  onSelect: () => void
   onReplay: (text: string) => void
   onShare: (result: AudioResult) => void
   onSave: (result: AudioResult) => void
@@ -365,16 +370,58 @@ type OutputMonitorTransportProps = {
 
 function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutputs }: OutputMonitorTransportProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
+  const playbackKey = result ? `monitor:${result.id}` : 'monitor:empty'
+  const [snapshot, setSnapshot] = useState(() => playbackController.getSnapshot())
+  const [peaks, setPeaks] = useState<number[]>([])
+  const [waveformError, setWaveformError] = useState<string | null>(null)
+  const cues = useMemo(() => result?.cues ?? [], [result?.cues])
   const playable = Boolean(result?.url)
+  const playing = snapshot.key === playbackKey && snapshot.playing
+  const currentTime = snapshot.key === playbackKey ? snapshot.currentTime : 0
+  const duration = snapshot.key === playbackKey ? snapshot.duration : 0
+
+  useEffect(() => {
+    const unsubscribe = playbackController.subscribe((next) => {
+      setSnapshot(next.key === playbackKey ? next : {
+        key: playbackKey,
+        label: result?.filename ?? null,
+        playing: false,
+        currentTime: 0,
+        duration: 0,
+      })
+    })
+    return unsubscribe
+  }, [playbackKey, result?.filename])
 
   useEffect(() => {
     const audio = audioRef.current
-    setPlaying(false)
-    setCurrentTime(0)
-    setDuration(0)
+    if (!audio || !result?.url) return undefined
+    return playbackController.register(playbackKey, audio, result.filename)
+  }, [playbackKey, result?.filename, result?.url])
+
+  useEffect(() => {
+    let cancelled = false
+    setPeaks([])
+    setWaveformError(null)
+    if (!result?.url) return () => { cancelled = true }
+    const cacheKey = `${result.id}:${result.url}`
+    const cached = readLruEntry(waveformCache, cacheKey)
+    if (cached) {
+      setPeaks(cached)
+      return () => { cancelled = true }
+    }
+    decodeAudioPeaks(result.url).then((next) => {
+      if (cancelled) return
+      writeLruEntry(waveformCache, cacheKey, next, 24)
+      setPeaks(next)
+    }).catch((error) => {
+      if (!cancelled) setWaveformError(error instanceof Error ? error.message : 'Waveform unavailable.')
+    })
+    return () => { cancelled = true }
+  }, [result?.id, result?.url])
+
+  useEffect(() => {
+    const audio = audioRef.current
     return () => audio?.pause()
   }, [result?.id, result?.url])
 
@@ -382,39 +429,67 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
     const audio = audioRef.current
     if (!audio || !playable) return
     if (!audio.paused) {
-      audio.pause()
+      playbackController.pause(playbackKey)
       return
     }
     try {
-      await audio.play()
+      await playbackController.play(playbackKey)
     } catch {
       onError('The current output could not be played. Export it or try another audio device.')
     }
   }
 
   const seek = (value: number) => {
-    const audio = audioRef.current
-    if (!audio || !Number.isFinite(value)) return
-    audio.currentTime = Math.max(0, Math.min(duration, value))
-    setCurrentTime(audio.currentTime)
+    if (!Number.isFinite(value)) return
+    playbackController.seek(playbackKey, value)
   }
 
+  const seekCue = (index: number) => {
+    const cue = cues[index]
+    if (!cue || !playable) return
+    playbackController.seek(playbackKey, cue.startSec + 0.001)
+    playbackController.play(playbackKey).catch(() => onError('The selected sentence could not be played.'))
+  }
+
+  const seekRelativeCue = (direction: -1 | 1) => {
+    if (cues.length === 0) return
+    const index = direction < 0 ? previousCueIndex(cues, currentTime) : nextCueIndex(cues, currentTime)
+    if (index >= 0) seekCue(index)
+  }
+
+  const playedRatio = duration > 0 ? Math.min(1, currentTime / duration) : 0
+
   return (
-    <div className="output-transport" aria-label="Current output transport">
+    <>
+      <div className={result ? 'output-waveform has-output' : 'output-waveform'} aria-hidden="true">
+        {peaks.length > 0 ? (
+          <div className="waveform-bars">
+            {peaks.map((peak, index) => (
+              <span
+                key={`${result?.id ?? 'output'}-${index}`}
+                className={duration > 0 && index / peaks.length <= playedRatio ? 'waveform-bar played' : 'waveform-bar'}
+                style={{ height: `${Math.max(4, peak * 100)}%` }}
+              />
+            ))}
+          </div>
+        ) : result?.url && waveformError ? (
+          <span className="waveform-empty">Waveform unavailable — playback remains available.</span>
+        ) : result?.url ? (
+          <span className="waveform-empty">Loading bounded waveform…</span>
+        ) : (
+          <span className="waveform-empty">
+            <Volume2 size={22} aria-hidden="true" />
+            <span>Generate audio to begin the waveform</span>
+          </span>
+        )}
+      </div>
+      <div className="output-transport" aria-label={`Current output transport${result?.filename ? ` for ${result.filename}` : ''}`}>
       {result?.url ? (
         <audio
           ref={audioRef}
           preload="metadata"
           src={result.url}
           aria-label={`Monitor ${result.filename}`}
-          onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
-          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => {
-            setPlaying(false)
-            setCurrentTime(0)
-          }}
         >
           <track kind="captions" src={result.vttUrl ?? EMPTY_VTT_URL} srcLang="en" label={result.vttUrl ? 'English' : 'No captions'} />
         </audio>
@@ -439,6 +514,7 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
         onChange={(event) => seek(Number(event.target.value))}
         disabled={!playable || duration <= 0}
         aria-label="Current output position"
+        aria-valuetext={`${formatPlaybackTime(currentTime)} of ${formatPlaybackTime(duration)}`}
       />
       <span>{sampleRate}</span>
       <button
@@ -451,7 +527,31 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
       >
         <Trash2 size={15} aria-hidden="true" />
       </button>
-    </div>
+      <div className="transport-cue-controls" aria-label="Current output sentence navigation">
+        <button
+          type="button"
+          onClick={() => seekRelativeCue(-1)}
+          disabled={!playable || cues.length === 0}
+          aria-label="Previous sentence in current output"
+          title={playable && cues.length > 0 ? 'Previous sentence' : 'Sentence navigation is unavailable for this output'}
+        >
+          <ChevronLeft size={14} aria-hidden="true" />
+          Previous sentence
+        </button>
+        <span>{cues.length > 0 ? `${cues.length} sentence${cues.length === 1 ? '' : 's'}` : 'No sentence cues'}</span>
+        <button
+          type="button"
+          onClick={() => seekRelativeCue(1)}
+          disabled={!playable || cues.length === 0}
+          aria-label="Next sentence in current output"
+          title={playable && cues.length > 0 ? 'Next sentence' : 'Sentence navigation is unavailable for this output'}
+        >
+          Next sentence
+          <ChevronRight size={14} aria-hidden="true" />
+        </button>
+      </div>
+      </div>
+    </>
   )
 }
 
@@ -528,6 +628,12 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
   }, [playbackKey, cues])
 
   useEffect(() => {
+    const el = audioRef.current
+    if (!el) return undefined
+    return playbackController.register(playbackKey, el, label)
+  }, [label, playbackKey, src])
+
+  useEffect(() => {
     if (!followAlong || activeIdx < 0) return
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     activeCueRef.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
@@ -600,17 +706,26 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl }: Playb
   )
 }
 
-function ResultRow({ result, isSpeaking, onReplay, onShare, onSave }: ResultRowProps) {
+function ResultRow({ result, selected, isSpeaking, onSelect, onReplay, onShare, onSave }: ResultRowProps) {
   const cues = result.cues ?? []
 
   return (
     <div className="result-row">
-      <div className="result-meta">
-        <span className="ready-dot" aria-hidden="true" />
-        <strong>{result.filename}</strong>
-        <span>{result.duration}</span>
-        <span>{result.size}</span>
-      </div>
+      <button
+        type="button"
+        className={selected ? 'result-select selected' : 'result-select'}
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={`${selected ? 'Selected' : 'Select'} ${result.filename} for the output monitor`}
+        title="Show this clip in the output monitor"
+      >
+        <div className="result-meta">
+          <span className="ready-dot" aria-hidden="true" />
+          <strong>{result.filename}</strong>
+          <span>{result.duration}</span>
+          <span>{result.size}</span>
+        </div>
+      </button>
       {result.url ? (
         <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} />
       ) : null}
@@ -955,6 +1070,7 @@ function App() {
   })
   const [text, setText] = useState(STARTER_TEXT)
   const [results, setResults] = useState<AudioResult[]>([])
+  const [activeOutputId, setActiveOutputId] = useState<string | null>(null)
   const [zipUrl, setZipUrl] = useState<string | null>(null)
   const [zipName, setZipName] = useState('bettertts-audio.zip')
   const [toast, setToast] = useState<Toast | null>(null)
@@ -1119,6 +1235,7 @@ function App() {
       || clip.filename.toLocaleLowerCase().includes(normalizedProjectSearch),
     )
     : library, [library, normalizedProjectSearch])
+  const activeOutput = results.find((result) => result.id === activeOutputId) ?? results[0]
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
     : !usableText.trim()
@@ -1725,6 +1842,10 @@ function App() {
   }, [])
 
   useEffect(() => {
+    setActiveOutputId((current) => current && results.some((result) => result.id === current) ? current : results[0]?.id ?? null)
+  }, [results])
+
+  useEffect(() => {
     persistSetting('bettertts-current-text', text)
   }, [text])
 
@@ -1773,46 +1894,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-    const shell = document.querySelector('.app-shell')
-    if (!shell) return
-    let activeAudio: HTMLAudioElement | null = null
-    const onPlay = (e: Event) => {
-      const el = e.target as HTMLAudioElement
-      if (el.tagName !== 'AUDIO') return
-      activeAudio = el
-      const label = el.getAttribute('aria-label') ?? 'BetterTTS'
-      navigator.mediaSession.metadata = new MediaMetadata({ title: label, artist: 'BetterTTS' })
-      navigator.mediaSession.playbackState = 'playing'
-    }
-    const onPause = (e: Event) => {
-      if (e.target === activeAudio) navigator.mediaSession.playbackState = 'paused'
-    }
-    const onEnded = (e: Event) => {
-      if (e.target !== activeAudio) return
-      activeAudio = null
-      navigator.mediaSession.playbackState = 'none'
-    }
-    navigator.mediaSession.setActionHandler('play', () => {
-      if (activeAudio?.isConnected) activeAudio.play().catch(() => {})
-    })
-    navigator.mediaSession.setActionHandler('pause', () => {
-      if (activeAudio?.isConnected) activeAudio.pause()
-    })
-    shell.addEventListener('play', onPlay, true)
-    shell.addEventListener('pause', onPause, true)
-    shell.addEventListener('ended', onEnded, true)
-    return () => {
-      shell.removeEventListener('play', onPlay, true)
-      shell.removeEventListener('pause', onPause, true)
-      shell.removeEventListener('ended', onEnded, true)
-      navigator.mediaSession.setActionHandler('play', null)
-      navigator.mediaSession.setActionHandler('pause', null)
-      navigator.mediaSession.playbackState = 'none'
-    }
-  }, [])
-
-  useEffect(() => {
     const objectUrls = objectUrlsRef.current
     const previewCache = previewCacheRef.current
     return () => {
@@ -1837,6 +1918,7 @@ function App() {
     }
     objectUrlsRef.current = []
     setResults([])
+    setActiveOutputId(null)
     setZipUrl(null)
   }
 
@@ -3729,16 +3811,8 @@ function App() {
                   <strong>{engine === 'browser' ? 'Device audio' : activeSampleRate}</strong>
                   <small>{status}</small>
                 </div>
-                <div className={results.length > 0 ? 'output-waveform has-output' : 'output-waveform'} aria-hidden="true">
-                  {results.length === 0 ? (
-                    <span className="waveform-empty">
-                      <Volume2 size={22} aria-hidden="true" />
-                      <span>Generate audio to begin the waveform</span>
-                    </span>
-                  ) : null}
-                </div>
                 <OutputMonitorTransport
-                  result={results[0]}
+                  result={activeOutput}
                   sampleRate={engine === 'browser' ? 'Device' : activeSampleRate}
                   hasOutputs={results.length > 0 || zipUrl !== null}
                   onClear={handleClearOutputs}
@@ -3753,7 +3827,9 @@ function App() {
                     <li key={result.id}>
                       <ResultRow
                         result={result}
+                        selected={result.id === activeOutput?.id}
                         isSpeaking={isSpeaking}
+                        onSelect={() => setActiveOutputId(result.id)}
                         onReplay={replayBrowser}
                         onShare={shareResult}
                         onSave={saveWithPicker}
