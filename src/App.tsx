@@ -55,7 +55,7 @@ import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } 
 import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
-import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
+import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
@@ -201,6 +201,9 @@ const RUNTIME_LICENSE_ROWS = [
   ['electron-updater', 'MIT', 'Opt-in Windows update download and restart install'],
   ['KittenTTS browser wrapper', 'MIT', 'Kitten model weights are Apache-2.0'],
   ['piper-plus, @piper-plus/g2p, onnxruntime-web', 'MIT', 'Experimental Piper-plus engine; lazy package/WASM/model path'],
+  ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro and English Piper CPU utility process'],
+  ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
+  ['Sherpa Piper Cori pack', 'Public-domain source data', 'Pinned English native Piper archive; downloaded and verified on first use'],
   ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
   ['lamejs MP3 encoder', 'LGPL-3.0', 'MP3 export path'],
   ['pdfjs-dist', 'Apache-2.0', 'Local PDF text extraction'],
@@ -1415,7 +1418,7 @@ function App() {
 
   useEffect(() => {
     if (forceNative) {
-      setRuntimeLabel('Native ORT CPU q8')
+      setRuntimeLabel('Sherpa-ONNX CPU')
     } else if (forceWasm) {
       setRuntimeLabel('WebAssembly q8')
     } else {
@@ -1549,7 +1552,8 @@ function App() {
 
     const nativeRuntime = nativeAvailable ? getNativeRuntimeInfo() : null
     if (nativeRuntime) {
-      modelRoutes.nativeRuntime = `onnxruntime-node ${nativeRuntime.ortVersion} (${nativeRuntime.ep})`
+      const version = nativeRuntime.sherpaVersion ?? nativeRuntime.ortVersion ?? 'unknown'
+      modelRoutes.nativeRuntime = `${nativeRuntime.runtime} ${version} (${nativeRuntime.ep})`
       if (nativeRuntime.modelPack) {
         const pack = nativeRuntime.modelPack
         modelRoutes.nativeModelPack = `${pack.modelId}@${pack.revision.slice(0, 12)} · ${pack.license.spdx} · ${pack.verified ? 'verified' : pack.installed ? 'present (unverified)' : 'not installed'}`
@@ -2058,7 +2062,7 @@ function App() {
     if (forceNative && nativeAvailable) {
       const runtime = await loadNativeKokoro(onProgress)
       const packSuffix = runtime.modelPack?.verified ? ' · verified pack' : ''
-      setRuntimeLabel(`Native ORT ${runtime.ep.toUpperCase()} q8 · onnxruntime-node ${runtime.ortVersion}${packSuffix}`)
+      setRuntimeLabel(`Sherpa-ONNX ${runtime.ep.toUpperCase()} q8 · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}${packSuffix}`)
       return {
         synthesize: async (text, voice, spd, bin, signal) => {
           if (needsDirectKokoroPath(voice, bin)) {
@@ -2068,7 +2072,7 @@ function App() {
             return { samples: await generateWorker(text, voice, spd, bin, signal), sampleRate: KOKORO_SAMPLE_RATE }
           }
           try {
-            return { samples: await generateNative(text, voice, spd, signal), sampleRate: KOKORO_SAMPLE_RATE }
+            return { samples: await generateNative(text, voice, spd, signal), sampleRate: runtime.sampleRate ?? KOKORO_SAMPLE_RATE }
           } catch (err) {
             // A host crash fails only the in-flight chunk; the process respawns
             // lazily, so reload once and retry before surfacing the failure —
@@ -2076,7 +2080,7 @@ function App() {
             if (err instanceof Error && err.name !== 'AbortError' && /crashed|not loaded/i.test(err.message)) {
               recordDiagnosticEvent('warn', err, 'native.synthesize-retry')
               await loadNativeKokoro(onProgress)
-              return { samples: await generateNative(text, voice, spd, signal), sampleRate: KOKORO_SAMPLE_RATE }
+              return { samples: await generateNative(text, voice, spd, signal), sampleRate: runtime.sampleRate ?? KOKORO_SAMPLE_RATE }
             }
             throw err
           }
@@ -2130,6 +2134,16 @@ function App() {
       }
     }
     if (engine === 'piper') {
+      if (forceNative && nativeAvailable && piperLanguage === 'en') {
+        const runtime = await loadNativePiper(onProgress)
+        setRuntimeLabel(`Sherpa-ONNX Piper CPU · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}`)
+        return {
+          synthesize: async (text, _voice, spd, _bin, signal) => ({
+            samples: await generateNative(text, 'en', spd, signal, 'piper'),
+            sampleRate: runtime.sampleRate ?? PIPER_PLUS_SAMPLE_RATE,
+          }),
+        }
+      }
       if (!piperPlusSupport.supported) throw new Error('Piper-plus requires WebAssembly and IndexedDB support in this browser.')
       const tts = await loadPiperPlus(onProgress)
       setRuntimeLabel(`Piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`)
@@ -2163,6 +2177,18 @@ function App() {
     }
 
     if (job.engine === 'piper') {
+      const jobLanguage = (job.language as PiperPlusLanguage | undefined) ?? 'en'
+      if (forceNative && nativeAvailable && jobLanguage === 'en') {
+        const runtime = await loadNativePiper(onProgress)
+        setRuntimeLabel(`Sherpa-ONNX Piper CPU · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}`)
+        return {
+          sampleRate: runtime.sampleRate ?? PIPER_PLUS_SAMPLE_RATE,
+          synthesize: async (text, _voice, spd, _bin, signal) => ({
+            samples: await generateNative(text, 'en', spd, signal, 'piper'),
+            sampleRate: runtime.sampleRate ?? PIPER_PLUS_SAMPLE_RATE,
+          }),
+        }
+      }
       const tts = await loadPiperPlus(onProgress)
       setRuntimeLabel(`Piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`)
       return {
@@ -4771,7 +4797,7 @@ function App() {
                         />
                         <span>
                           Native engine (desktop)
-                          <small>Synthesize with onnxruntime-node on the CPU — outside browser WASM limits.</small>
+                          <small>Synthesize with Sherpa-ONNX on the CPU — outside browser WASM limits.</small>
                         </span>
                       </label>
                     ) : null}

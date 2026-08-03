@@ -1,53 +1,92 @@
-// Native Kokoro inference host (TF-99). Runs as an Electron utilityProcess in
-// the desktop app, or as a plain Node child (child_process.fork with advanced
-// serialization) in scripts/probe-native-host.mjs. Mirrors the browser worker
-// protocol in src/worker/tts.worker.ts: load / generate / info requests,
-// progress / loaded / generated / error replies.
-//
-// Inference goes through kokoro-js, whose @huggingface/transformers Node
-// backend binds onnxruntime-node. The CPU EP is forced: DirectML fails Kokoro's
-// ConvTranspose at op level regardless of dtype (see ROADMAP TF-99 probe notes).
+// Native Sherpa-ONNX inference host (TF-115). Runs in an Electron
+// utilityProcess, or as a plain Node child in scripts/probe-native-host.mjs.
+// The renderer/main process only sees the small load/generate/info protocol;
+// native addon loading, model archive extraction, and inference stay isolated
+// here.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { KOKORO_Q8_PACK, ensurePack, readPackStatus, type PackStatus } from './native-models.ts'
 import {
-  initializeNativeRuntimeWithPack,
-  type NativePackFailure,
-} from './native-pack-policy.ts'
+  ensureSherpaModelPack,
+  readSherpaPackStatus,
+  sherpaKokoroSpeakerId,
+  SHERPA_KOKORO_PACK,
+  SHERPA_PIPER_PACK,
+  type SherpaEngineId,
+  type SherpaModelPack,
+} from './sherpa-models.ts'
+import type { NativePackFailure } from './native-pack-policy.ts'
+import type { PackProgress, PackStatus } from './native-models.ts'
 
-type KokoroModule = typeof import('kokoro-js')
-type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
+type SherpaGeneratedAudio = {
+  samples: Float32Array
+  sampleRate: number
+}
 
-// Kept in sync with KOKORO_MODEL_ID in src/lib/kokoro-assets.ts — the host must
-// not import renderer modules (they assume a browser global environment).
-const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
+type SherpaProgress = {
+  samples?: Float32Array
+  progress?: number
+}
+
+type SherpaGenerationConfig = {
+  sid: number
+  speed: number
+  silenceScale: number
+}
+
+type SherpaTts = {
+  sampleRate: number
+  generate: (request: { text: string; generationConfig: SherpaGenerationConfig }) => SherpaGeneratedAudio
+  generateAsync?: (request: {
+    text: string
+    generationConfig: SherpaGenerationConfig
+    onProgress?: (info: SherpaProgress) => number
+  }) => Promise<SherpaGeneratedAudio>
+}
+
+type SherpaModule = {
+  OfflineTts: new (config: unknown) => SherpaTts
+  GenerationConfig: new (config: SherpaGenerationConfig) => SherpaGenerationConfig
+}
+
+async function loadSherpaModule(): Promise<SherpaModule> {
+  const imported = await import('sherpa-onnx-node') as unknown as SherpaModule & { default?: SherpaModule }
+  return imported.default ?? imported
+}
+
+const KOKORO_SAMPLE_RATE = 24_000
+const PIPER_SAMPLE_RATE = 22_050
 
 export type NativeRuntimeInfo = {
-  runtime: 'onnxruntime-node'
+  runtime: 'sherpa-onnx-node'
   ep: 'cpu'
-  ortVersion: string
-  transformersVersion: string
-  kokoroJsVersion: string
+  sherpaVersion: string
+  nativeAddon: {
+    package: 'sherpa-onnx-win-x64'
+    version: string
+    present: boolean
+  }
   node: string
   modelCacheDir: string
+  engine?: SherpaEngineId
+  sampleRate?: number
   modelPack?: PackStatus
   modelPackFailure?: NativePackFailure
 }
 
 export type HostRequest =
-  | { type: 'load'; dtype?: 'q8' | 'fp32' }
-  | { type: 'generate'; text: string; voice: string; speed: number; id: number }
+  | { type: 'load'; dtype?: 'q8'; engine?: SherpaEngineId }
+  | { type: 'generate'; text: string; voice: string; speed: number; id: number; engine?: SherpaEngineId }
   | { type: 'cancel'; id: number }
   | { type: 'cancel-all' }
   | { type: 'info' }
 
 export type HostResponse =
-  | { type: 'progress'; info: unknown }
+  | { type: 'progress'; info: PackProgress | SherpaProgress | unknown }
   | { type: 'loaded'; key: string; runtime: NativeRuntimeInfo }
   | { type: 'loadError'; message: string; key: string }
-  | { type: 'generated'; samples: Float32Array; id: number }
+  | { type: 'generated'; samples: Float32Array; sampleRate: number; id: number }
   | { type: 'generateError'; message: string; id: number }
   | { type: 'info'; runtime: NativeRuntimeInfo }
 
@@ -69,8 +108,6 @@ function getPort(): Port {
       onMessage: (handler) => parentPort.on('message', (event) => handler(event.data)),
     }
   }
-  // Plain-Node fallback for the probe script (fork with serialization:'advanced'
-  // so Float32Array survives the channel like it does over utilityProcess).
   return {
     post: (message) => process.send?.(message),
     onMessage: (handler) => process.on('message', handler as (message: unknown) => void),
@@ -83,8 +120,6 @@ function packageVersion(name: string): string {
   try {
     return (hostRequire(`${name}/package.json`) as { version?: string }).version ?? 'unknown'
   } catch {
-    // ESM-only packages (kokoro-js, transformers) don't expose ./package.json
-    // through their exports map — resolve the entry and walk up to the manifest.
     try {
       const entry = fileURLToPath(import.meta.resolve(name))
       let dir = dirname(entry)
@@ -110,47 +145,91 @@ function modelCacheDir(): string {
   try {
     mkdirSync(dir, { recursive: true })
   } catch {
-    // transformers creates it lazily on first cache write if this fails
+    // The model manager will report a useful failure if the path is unusable.
   }
   return dir
 }
 
-function runtimeInfo(modelPack?: PackStatus, modelPackFailure?: NativePackFailure): NativeRuntimeInfo {
+function nativeAddonPresent(): boolean {
+  try {
+    hostRequire('sherpa-onnx-win-x64')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function runtimeInfo(
+  engine?: SherpaEngineId,
+  sampleRate?: number,
+  modelPack?: PackStatus,
+  modelPackFailure?: NativePackFailure,
+): NativeRuntimeInfo {
   return {
-    runtime: 'onnxruntime-node',
+    runtime: 'sherpa-onnx-node',
     ep: 'cpu',
-    ortVersion: packageVersion('onnxruntime-node'),
-    transformersVersion: packageVersion('@huggingface/transformers'),
-    kokoroJsVersion: packageVersion('kokoro-js'),
+    sherpaVersion: packageVersion('sherpa-onnx-node'),
+    nativeAddon: {
+      package: 'sherpa-onnx-win-x64',
+      version: packageVersion('sherpa-onnx-win-x64'),
+      present: nativeAddonPresent(),
+    },
     node: process.versions.node,
     modelCacheDir: modelCacheDir(),
+    ...(engine ? { engine } : {}),
+    ...(sampleRate ? { sampleRate } : {}),
     ...(modelPack ? { modelPack } : {}),
     ...(modelPackFailure ? { modelPackFailure } : {}),
   }
 }
 
-async function configureTransformersEnv(localModelRoot: string | null): Promise<void> {
-  const { env } = await import('@huggingface/transformers')
-  env.cacheDir = modelCacheDir()
-  if (localModelRoot) {
-    // Every core model file was hash-verified against the pinned manifest —
-    // point transformers at the verified copy so nothing else is fetched for
-    // the graph/tokenizer/config.
-    env.localModelPath = localModelRoot
-    env.allowLocalModels = true
-    return
+function packForEngine(engine: SherpaEngineId): SherpaModelPack {
+  return engine === 'piper' ? SHERPA_PIPER_PACK : SHERPA_KOKORO_PACK
+}
+
+function keyForEngine(engine: SherpaEngineId): string {
+  return engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
+}
+
+function createSherpaConfig(engine: SherpaEngineId, root: string): unknown {
+  const pack = packForEngine(engine)
+  const paths = {
+    model: join(root, pack.layout.model),
+    ...(pack.layout.voices ? { voices: join(root, pack.layout.voices) } : {}),
+    tokens: join(root, pack.layout.tokens),
+    dataDir: join(root, pack.layout.dataDir),
+    ...(pack.layout.lexicon ? { lexicon: pack.layout.lexicon.split(',').map((path) => join(root, path)).join(',') } : {}),
   }
-  // This branch is reachable only behind the explicit non-packaged
-  // BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK flag.
-  const localModels = resolve('dist', 'models')
-  if (existsSync(join(localModels, KOKORO_MODEL_ID))) {
-    env.localModelPath = localModels
-    env.allowLocalModels = true
+  const model = engine === 'piper'
+    ? {
+      vits: {
+        model: paths.model,
+        tokens: paths.tokens,
+        dataDir: paths.dataDir,
+      },
+    }
+    : {
+      kokoro: {
+        model: paths.model,
+        voices: paths.voices,
+        tokens: paths.tokens,
+        dataDir: paths.dataDir,
+        ...(paths.lexicon ? { lexicon: paths.lexicon } : {}),
+      },
+    }
+  return {
+    model,
+    maxNumSentences: 1,
+    silenceScale: 0.2,
+    numThreads: 2,
+    provider: 'cpu',
   }
 }
 
-let tts: KokoroInstance | null = null
+let tts: SherpaTts | null = null
+let loadedEngine: SherpaEngineId | null = null
 let loadedKey = ''
+let loadedSampleRate = 0
 let lastPackStatus: PackStatus | undefined
 let lastPackFailure: NativePackFailure | undefined
 const cancelledIds = new Set<number>()
@@ -165,88 +244,87 @@ port.onMessage(async (msg) => {
     return
   }
 
-  if (msg.type === 'cancel-all') {
-    return
-  }
+  if (msg.type === 'cancel-all') return
 
   if (msg.type === 'info') {
     let modelPack = lastPackStatus
-    if (!modelPack) {
-      try {
-        modelPack = await readPackStatus(modelCacheDir(), KOKORO_Q8_PACK)
-      } catch {
-        // status stays undefined when the cache dir is unreadable
-      }
+    if (!modelPack && loadedEngine) {
+      modelPack = await readSherpaPackStatus(modelCacheDir(), packForEngine(loadedEngine)).catch(() => undefined)
     }
-    port.post({ type: 'info', runtime: runtimeInfo(modelPack, lastPackFailure) })
+    port.post({ type: 'info', runtime: runtimeInfo(loadedEngine ?? undefined, loadedSampleRate || undefined, modelPack, lastPackFailure) })
     return
   }
 
   if (msg.type === 'load') {
-    const dtype = msg.dtype ?? 'q8'
-    const key = `cpu:${dtype}`
-    if (tts && loadedKey === key) {
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus, lastPackFailure) })
+    const engine = msg.engine ?? 'kokoro'
+    const key = keyForEngine(engine)
+    if (tts && loadedEngine === engine && loadedKey === key) {
+      port.post({ type: 'loaded', key, runtime: runtimeInfo(engine, loadedSampleRate, lastPackStatus, lastPackFailure) })
       return
     }
     try {
-      const initialized = await initializeNativeRuntimeWithPack({
-        ensure: () => ensurePack(modelCacheDir(), KOKORO_Q8_PACK, {
-          onProgress: (info) => port.post({ type: 'progress', info }),
-        }),
-        readStatus: () => readPackStatus(modelCacheDir(), KOKORO_Q8_PACK),
-        env: process.env,
-        onFailure: (failure, fallbackAllowed) => {
-          lastPackFailure = failure
-          port.post({
-            type: 'progress',
-            info: {
-              status: fallbackAllowed ? 'pack-dev-fallback' : 'pack-error',
-              kind: failure.kind,
-              message: failure.message,
-            },
-          })
-        },
-        createRuntime: async (localModelRoot) => {
-          await configureTransformersEnv(localModelRoot)
-          const { KokoroTTS } = await import('kokoro-js')
-          return KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-            device: 'cpu' as never,
-            dtype,
-            progress_callback: (info) => {
-              port.post({ type: 'progress', info })
-            },
-          })
-        },
+      const pack = packForEngine(engine)
+      const ensured = await ensureSherpaModelPack(modelCacheDir(), pack, {
+        onProgress: (info) => port.post({ type: 'progress', info }),
       })
-      tts = initialized.runtime
-      lastPackStatus = initialized.modelPack
-      lastPackFailure = initialized.failure
+      const module = await loadSherpaModule()
+      const instance = new module.OfflineTts(createSherpaConfig(engine, ensured.modelRoot))
+      tts = instance
+      loadedEngine = engine
       loadedKey = key
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(lastPackStatus, lastPackFailure) })
+      loadedSampleRate = engine === 'piper' ? PIPER_SAMPLE_RATE : KOKORO_SAMPLE_RATE
+      lastPackStatus = ensured.status
+      lastPackFailure = undefined
+      port.post({ type: 'loaded', key, runtime: runtimeInfo(engine, instance.sampleRate || loadedSampleRate, lastPackStatus) })
     } catch (err) {
       tts = null
+      loadedEngine = null
       loadedKey = ''
-      port.post({ type: 'loadError', message: err instanceof Error ? err.message : 'Native model load failed', key })
+      loadedSampleRate = 0
+      const failure: NativePackFailure = {
+        kind: err instanceof Error && 'kind' in err && (err as { kind?: unknown }).kind === 'integrity' ? 'integrity' : 'unavailable',
+        message: err instanceof Error ? err.message : 'Sherpa model load failed',
+      }
+      lastPackFailure = failure
+      port.post({ type: 'loadError', message: failure.message, key })
     }
     return
   }
 
   if (msg.type === 'generate') {
+    const engine = msg.engine ?? 'kokoro'
     if (cancelledIds.delete(msg.id)) {
       port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
       return
     }
-    if (!tts) {
+    if (!tts || loadedEngine !== engine) {
       port.post({ type: 'generateError', message: 'Native model not loaded', id: msg.id })
       return
     }
     try {
-      const audio = (await tts.generate(msg.text, { voice: msg.voice as never, speed: msg.speed })) as { audio?: Float32Array }
+      if (engine === 'piper' && !['en', 'en-gb', 'en-us'].includes(msg.voice.toLowerCase())) {
+        throw new Error('Native Sherpa Piper currently exposes the English Cori voice; choose English or use the web Piper engine.')
+      }
+      const module = await loadSherpaModule()
+      const generationConfig = new module.GenerationConfig({
+        sid: engine === 'piper' ? 0 : sherpaKokoroSpeakerId(msg.voice),
+        speed: msg.speed,
+        silenceScale: 0.2,
+      })
+      const generated = tts.generateAsync
+        ? await tts.generateAsync({
+          text: msg.text,
+          generationConfig,
+          onProgress: (info) => {
+            port.post({ type: 'progress', info })
+            return cancelledIds.has(msg.id) ? 0 : 1
+          },
+        })
+        : tts.generate({ text: msg.text, generationConfig })
       if (cancelledIds.delete(msg.id)) {
         port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
-      } else if (audio.audio) {
-        port.post({ type: 'generated', samples: audio.audio, id: msg.id })
+      } else if (generated.samples instanceof Float32Array && generated.samples.length > 0) {
+        port.post({ type: 'generated', samples: generated.samples, sampleRate: generated.sampleRate || loadedSampleRate, id: msg.id })
       } else {
         port.post({ type: 'generateError', message: 'No audio produced', id: msg.id })
       }
@@ -255,7 +333,7 @@ port.onMessage(async (msg) => {
         type: 'generateError',
         message: cancelledIds.delete(msg.id)
           ? 'Generation cancelled.'
-          : err instanceof Error ? err.message : 'Native generation failed',
+          : err instanceof Error ? err.message : 'Native Sherpa generation failed',
         id: msg.id,
       })
     }

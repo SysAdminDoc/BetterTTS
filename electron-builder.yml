@@ -13,7 +13,7 @@ publish:
 
 # The renderer (dist/) and the compiled main/preload/tts-host (dist-electron/)
 # ship alongside the production node_modules the native inference host resolves
-# at runtime (kokoro-js → @huggingface/transformers → onnxruntime-node).
+# at runtime (sherpa-onnx-node → sherpa-onnx-win-x64).
 # main.cjs/preload.cjs stay esbuild-bundled; the host's model deps cannot be
 # bundled because the ORT native addon loads from disk.
 files:
@@ -22,7 +22,7 @@ files:
   - "!dist-electron/model-cache/**/*"
   - "!dist-electron/smoke.png"
   # Browser dependencies are already bundled into dist/ by Vite. The native
-  # host only resolves kokoro-js, Transformers.js, phonemizer, and ORT Node.
+  # host resolves the Sherpa addon plus the existing browser/native engines.
   - "!node_modules/@breezystack/**/*"
   - "!node_modules/@mozilla/**/*"
   - "!node_modules/@piper-plus/**/*"
@@ -49,6 +49,7 @@ files:
 # Native addons must live outside the asar so the OS loader can dlopen them.
 asarUnpack:
   - "**/*.node"
+  - "**/*.dll"
 
 # Large model weights are fetched at runtime and cached natively, never bundled.
 asar: true

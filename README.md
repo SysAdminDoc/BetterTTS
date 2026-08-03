@@ -5,19 +5,19 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-238%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-340%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, and an experimental Piper-plus path run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro through **native ONNX Runtime** in an isolated utility process. Native model packs are pinned to immutable revisions and SHA-256 verified before use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
 ## Why BetterTTS?
 
-Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs the full Kokoro 82M neural model locally through WebGPU, WebAssembly, or native ONNX Runtime — your text never leaves your device. No API keys, cloud render queue, watermarks, or 10,000-character monthly cap.
+Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs the full Kokoro 82M neural model locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, watermarks, or 10,000-character monthly cap.
 
 | | BetterTTS | ElevenLabs Free | TTSMaker Free | voice-generator.com |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
 - **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
-- **Native desktop inference** — the Electron build runs Kokoro on onnxruntime-node (CPU EP) in an isolated utility process, loading SHA-256-verified model packs pinned to an immutable revision
+- **Native desktop inference** — the Electron build runs Kokoro and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
@@ -141,7 +141,7 @@ Packaged Windows inference fails closed if a native model pack is missing, modif
 
 When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Optional two-pass EBU R128 normalization targets -16 LUFS / -1.5 dBTP; queue M4B exports include chapter metadata and optional JPEG/PNG cover art. Before processing, BetterTTS checks decoded duration/bytes, worst-case temporary space, and actual free disk; defaults are 24 hours and 4 GB and can be lowered with `BETTERTTS_MAX_EXPORT_DURATION_SECONDS` and `BETTERTTS_MAX_EXPORT_TEMP_BYTES`. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
 
-Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingual Tsukuyomi-chan pack download only when selected, and Piper jobs use the same resumable queue, clip library, project, and native export paths as other local engines. The web/PWA build keeps Piper behind its explicit experimental toggle because the WASM/G2P payload is large.
+Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuyomi-chan pack download only when selected, and Piper jobs use the same resumable queue, clip library, project, and native export paths as other local engines. On Windows, selecting the native backend routes English Piper through the pinned public-domain Cori Sherpa pack; other Piper languages continue to use the multilingual web runtime. The web/PWA build keeps Piper behind its explicit experimental toggle because the WASM/G2P payload is large.
 
 ## Tech Stack
 
@@ -149,7 +149,8 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 |---|---|
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
-| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4 |
+| Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
 | Pitch Shifting | `signalsmith-stretch` (MIT, AudioWorklet/WASM) |
@@ -157,7 +158,7 @@ Piper-plus is a first-class lazy desktop engine: its MIT runtime and multilingua
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (328 tests across 49 files) + Playwright smoke |
+| Testing | Vitest (340 tests across 53 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -259,7 +260,7 @@ Supertonic is available as a separate English speed engine: 66M parameters, 10 v
 
 KittenTTS is available as a separate English lightweight engine: Nano 15M / 24 MB by default, Micro 40M / 41 MB, Mini 80M / 78 MB, 8 voices, 24,000 Hz output, WebGPU-only shader inference, MIT package code, and Apache-2.0 model weights. The package is lazy-loaded and model weights stay HF-hosted until the engine is selected.
 
-Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. The engine is direct-generation only in this prototype; it is not added to the persistent queue yet. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
+Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. On Windows, the native backend's English path uses `sherpa-onnx-node` with the pinned en-GB Cori model; non-English native selections remain on Piper-plus web. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
 
 Word timestamps are available as an opt-in Kokoro mode using `onnx-community/Kokoro-82M-v1.0-ONNX-timestamped`; the extra q8 model stays HF-hosted and powers word-level SRT/VTT plus follow-along highlighting.
 
@@ -275,6 +276,9 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | `electron-updater` | MIT | Opt-in Windows update download and restart install |
 | `kitten-tts-webgpu` | MIT | KittenTTS browser runtime; Kitten model weights are Apache-2.0 |
 | `piper-plus`, `@piper-plus/g2p`, `onnxruntime-web` | MIT | Experimental Piper-plus engine; Tsukuyomi-chan model assets load on demand |
+| `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro and Piper CPU utility-process runtime |
+| Sherpa Kokoro int8 archive | Apache-2.0 | Pinned multilingual Kokoro model pack, downloaded on first native Kokoro load |
+| Sherpa Piper Cori archive | Public domain training data | Pinned English Cori model pack, downloaded on first native English Piper load |
 | Supertonic ONNX model | OpenRAIL | HF-hosted English speed engine |
 | `@breezystack/lamejs` | LGPL-3.0 | MP3 export |
 | `pdfjs-dist` | Apache-2.0 | Local PDF text extraction |

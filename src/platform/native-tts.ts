@@ -17,16 +17,25 @@ export type NativeModelPackStatus = {
   expectedBytes: number
   blockedReason: string | null
   notCovered?: string
+  sourceSha256?: string
 }
 
 export type NativeRuntimeInfo = {
-  runtime: 'onnxruntime-node'
+  runtime: 'onnxruntime-node' | 'sherpa-onnx-node'
   ep: 'cpu'
-  ortVersion: string
-  transformersVersion: string
-  kokoroJsVersion: string
+  ortVersion?: string
+  transformersVersion?: string
+  kokoroJsVersion?: string
+  sherpaVersion?: string
+  nativeAddon?: {
+    package: string
+    version: string
+    present: boolean
+  }
   node: string
   modelCacheDir: string
+  engine?: 'kokoro' | 'piper'
+  sampleRate?: number
   modelPack?: NativeModelPackStatus
   modelPackFailure?: {
     kind: 'integrity' | 'license' | 'unavailable'
@@ -38,7 +47,7 @@ type HostMessage =
   | { type: 'progress'; info: ProgressInfo }
   | { type: 'loaded'; key: string; runtime: NativeRuntimeInfo }
   | { type: 'loadError'; message: string; key: string }
-  | { type: 'generated'; samples: Float32Array; id: number }
+  | { type: 'generated'; samples: Float32Array; sampleRate?: number; id: number }
   | { type: 'generateError'; message: string; id: number }
   | { type: 'info'; runtime: NativeRuntimeInfo }
   | { type: 'crashed' }
@@ -124,9 +133,9 @@ function ensureSubscription(): ReturnType<typeof getNativeTtsBridge> {
   return bridge
 }
 
-export function loadNativeKokoro(onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
+function loadNativeEngine(engine: 'kokoro' | 'piper', onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
   progressCallback = onProgress
-  const key = 'cpu:q8'
+  const key = engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
   if (loadPromise && loadKey === key) return loadPromise
   let bridge: ReturnType<typeof getNativeTtsBridge>
   try {
@@ -137,12 +146,26 @@ export function loadNativeKokoro(onProgress: (info: ProgressInfo) => void): Prom
   loadKey = key
   loadPromise = new Promise<NativeRuntimeInfo>((resolve, reject) => {
     loadWaiters.set(key, { resolve, reject })
-    bridge!.post({ type: 'load', dtype: 'q8' })
+    bridge!.post({ type: 'load', dtype: 'q8', ...(engine === 'piper' ? { engine } : {}) })
   })
   return loadPromise
 }
 
-export function generateNative(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<Float32Array> {
+export function loadNativeKokoro(onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
+  return loadNativeEngine('kokoro', onProgress)
+}
+
+export function loadNativePiper(onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
+  return loadNativeEngine('piper', onProgress)
+}
+
+export function generateNative(
+  text: string,
+  voice: string,
+  speed: number,
+  signal?: AbortSignal,
+  engine: 'kokoro' | 'piper' = 'kokoro',
+): Promise<Float32Array> {
   if (signal?.aborted) return Promise.reject(cancellationError())
   let bridge: ReturnType<typeof getNativeTtsBridge>
   try {
@@ -163,7 +186,7 @@ export function generateNative(text: string, voice: string, speed: number, signa
     const cleanup = () => signal?.removeEventListener('abort', onAbort)
     signal?.addEventListener('abort', onAbort, { once: true })
     pending.set(id, { resolve, reject, cleanup })
-    bridge!.post({ type: 'generate', text, voice, speed, id })
+    bridge!.post({ type: 'generate', text, voice, speed, id, ...(engine === 'piper' ? { engine } : {}) })
   })
 }
 

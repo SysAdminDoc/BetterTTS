@@ -18,6 +18,8 @@ const expectedLicenses = [
   ['piper-plus', 'MIT'],
   ['phonemizer', 'Apache-2.0'],
   ['signalsmith-stretch', 'MIT'],
+  ['sherpa-onnx-node', 'Apache-2.0'],
+  ['sherpa-onnx-win-x64', 'Apache-2.0'],
 ]
 
 function packageJsonPath(name) {

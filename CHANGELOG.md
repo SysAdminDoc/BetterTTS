@@ -11,6 +11,7 @@
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
 - The render monitor transport now selects generated clips, renders a bounded decoded peak envelope with progress, plays/pauses/seeks, navigates sentence cues, reports elapsed/total time, and explains unavailable actions instead of presenting decorative controls. Result, library, and queue audio share one playback controller and Media Session state.
 - Playback resume writes are now throttled to one-second progress intervals while pause/seek state remains immediate. In-memory voice previews and decoded voice bins use bounded least-recently-used caches with object-URL disposal.
+- Windows native inference now uses the Apache-2.0 `sherpa-onnx-node` 1.13.4 utility-process runtime. Kokoro int8 and English Piper Cori archives are pinned, resumable, SHA-256 verified, traversal-checked, and extracted atomically; diagnostics expose the active engine, native addon, sample rate, and pack provenance. English Piper uses Sherpa only when the desktop native backend is selected; the browser path is unchanged.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -29,6 +30,7 @@
 - Browser smoke now verifies recoverable script clearing and cancellable article import, and real-engine smoke exercises the monitor transport. Persisted editor-setting parsers have malformed, type, and size-boundary coverage.
 - Added bounded-cache eviction/disposal, playback-write throttling, and malformed IndexedDB clip/queue migration regressions.
 - Added packaged/development/report-path coverage for Electron smoke artifact routing.
+- Added Sherpa pack validation, immutable archive metadata, native engine IPC routing, and real Windows x64 host probes for Kokoro and Piper synthesis.
 
 ## v0.21.0 - 2026-07-29
 

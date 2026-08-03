@@ -20,8 +20,17 @@ const DEV_URL = process.env.BETTERTTS_DEV_URL
 const IS_DEV = Boolean(DEV_URL)
 const IS_SMOKE = process.argv.includes('--smoke')
 const LOAD_NATIVE_IN_SMOKE = process.env.BETTERTTS_SMOKE_NATIVE_LOAD === '1'
+// The normal smoke lane keeps the window hidden. Isolation-driven desktop
+// verification may opt into a visible window so the private-desktop harness
+// can prove placement before the smoke script exits.
+const SHOW_SMOKE_WINDOW = process.env.BETTERTTS_SMOKE_SHOW_WINDOW === '1'
 
 app.setName('BetterTTS')
+if (IS_SMOKE && process.env.BETTERTTS_SMOKE_USER_DATA) {
+  // Isolation smoke runs use a disposable profile so the user's existing
+  // Electron state is never opened or modified.
+  app.setPath('userData', process.env.BETTERTTS_SMOKE_USER_DATA)
+}
 
 // Serving the renderer over app:// keeps it a proper secure origin (needed for
 // crossOriginIsolated, service-worker-free storage, and a stable "self" for CSP).
@@ -532,7 +541,7 @@ function createWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => {
-    if (!IS_SMOKE) win.show()
+    if (!IS_SMOKE || SHOW_SMOKE_WINDOW) win.show()
   })
 
   win.loadURL(IS_DEV ? DEV_URL! : `${APP_ORIGIN}/index.html`)

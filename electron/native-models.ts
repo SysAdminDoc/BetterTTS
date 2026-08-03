@@ -87,6 +87,8 @@ export type PackStatus = {
   files: PackFileStatus[]
   blockedReason: string | null
   notCovered?: string
+  /** Archive/content digest when a runtime uses a verified bundle source. */
+  sourceSha256?: string
 }
 
 export type PackProgress = {

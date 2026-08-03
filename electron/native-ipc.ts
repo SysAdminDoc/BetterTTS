@@ -1,6 +1,6 @@
 export type ValidNativeTtsRequest =
-  | { type: 'load'; dtype?: 'q8' }
-  | { type: 'generate'; text: string; voice: string; speed: number; id: number }
+  | { type: 'load'; dtype?: 'q8'; engine?: 'kokoro' | 'piper' }
+  | { type: 'generate'; text: string; voice: string; speed: number; id: number; engine?: 'kokoro' | 'piper' }
   | { type: 'cancel'; id: number }
   | { type: 'cancel-all' }
   | { type: 'reset' }
@@ -13,8 +13,13 @@ export function validateNativeTtsRequest(value: unknown): ValidNativeTtsRequest 
   if (!value || typeof value !== 'object') return null
   const request = value as Record<string, unknown>
   if (request.type === 'load') {
-    return request.dtype === undefined || request.dtype === 'q8'
-      ? { type: 'load', ...(request.dtype ? { dtype: request.dtype } : {}) }
+    return (request.dtype === undefined || request.dtype === 'q8')
+      && (request.engine === undefined || request.engine === 'kokoro' || request.engine === 'piper')
+      ? {
+        type: 'load',
+        ...(request.dtype ? { dtype: request.dtype } : {}),
+        ...(request.engine ? { engine: request.engine } : {}),
+      }
       : null
   }
   if (request.type === 'generate') {
@@ -30,6 +35,7 @@ export function validateNativeTtsRequest(value: unknown): ValidNativeTtsRequest 
       || Number(request.speed) > 1.5
       || !Number.isSafeInteger(request.id)
       || Number(request.id) < 0
+      || (request.engine !== undefined && request.engine !== 'kokoro' && request.engine !== 'piper')
     ) return null
     return {
       type: 'generate',
@@ -37,6 +43,7 @@ export function validateNativeTtsRequest(value: unknown): ValidNativeTtsRequest 
       voice: request.voice,
       speed: Number(request.speed),
       id: Number(request.id),
+      ...(request.engine ? { engine: request.engine } : {}),
     }
   }
   if (request.type === 'cancel') {
