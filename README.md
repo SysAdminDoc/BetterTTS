@@ -5,9 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-340%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-344%20passing-53d889.svg)](#)
 
-**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, and an experimental Piper-plus path run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
+**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, and an experimental Piper-plus path run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
@@ -17,7 +17,7 @@
 
 ## Why BetterTTS?
 
-Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs the full Kokoro 82M neural model locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, watermarks, or 10,000-character monthly cap.
+Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs its engines locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, or 10,000-character monthly cap. Chatterbox is an explicit opt-in voice-cloning lab and retains its built-in PerTh watermark.
 
 | | BetterTTS | ElevenLabs Free | TTSMaker Free | voice-generator.com |
 |---|---|---|---|---|
@@ -42,6 +42,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
 - **Supertonic speed engine** via Transformers.js — 10 English F/M voices, 44.1 kHz fp32 output, lazy-loaded only when selected
 - **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
+- **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — opt-in reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, and disclosed PerTh watermark
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
 - **41 Kokoro voices** — 28 English voices plus Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
@@ -65,7 +66,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Pitch control** - +/-4 semitones via Signalsmith Stretch AudioWorklet/WASM rendering, without tempo change
 - **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume
 - **Silence insertion** — `[pause 2s]` tags splice real silence into the output
-- **Speed control** — engine-aware ranges: Kokoro 0.5x-1.5x, Supertonic 0.8x-1.2x, KittenTTS 0.5x-2.0x
+- **Speed control** — engine-aware ranges: Kokoro 0.5x-1.5x, Supertonic 0.8x-1.2x, KittenTTS 0.5x-2.0x; Chatterbox uses its emotion sampler instead
 
 ### Studio Features
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
@@ -149,7 +150,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 |---|---|
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
-| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4 |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4 |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
@@ -158,7 +159,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (340 tests across 53 files) + Playwright smoke |
+| Testing | Vitest (344 tests across 54 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -182,6 +183,8 @@ src/
 │   ├── playback.ts          # Read-along resume and sentence navigation
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser
+│   ├── chatterbox.ts        # Consent-gated reference audio decode and worker client
+│   ├── chatterbox-config.ts # Chatterbox model IDs, languages, limits, and controls
 │   ├── piper-plus.ts        # Experimental Piper-plus lazy wrapper and support diagnostics
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
@@ -193,7 +196,8 @@ src/
 │   ├── queue.ts             # IndexedDB persistent generation queue
 │   └── library.ts           # IndexedDB clip storage
 ├── worker/
-│   └── tts.worker.ts        # Off-thread Kokoro inference
+│   ├── tts.worker.ts         # Off-thread Kokoro inference
+│   └── chatterbox.worker.ts  # Off-thread Chatterbox inference and speaker cache
 └── signalsmith-stretch.d.ts        # Type declarations
 ```
 

@@ -8,6 +8,7 @@ describe('model cache inventory', () => {
     expect(classifyModelCacheEntry('kokoro-voices', 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af_heart.bin')).toBe('kokoro')
     expect(classifyModelCacheEntry('transformers-cache', 'https://huggingface.co/onnx-community/Supertonic-TTS-ONNX/resolve/main/model.onnx')).toBe('supertonic')
     expect(classifyModelCacheEntry('transformers-cache', 'https://huggingface.co/KittenML/kitten-tts-nano-0.1/resolve/main/model.json')).toBe('kitten')
+    expect(classifyModelCacheEntry('transformers-cache', 'https://huggingface.co/onnx-community/chatterbox-ONNX/resolve/main/config.json')).toBe('chatterbox')
     expect(classifyModelCacheEntry('other-cache', 'https://example.test/file.bin')).toBe('other')
   })
 

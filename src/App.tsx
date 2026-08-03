@@ -35,6 +35,7 @@ import {
   type DiagnosticsSelection,
 } from './lib/diagnostics.ts'
 import {
+  EXPERIMENTAL_CHATTERBOX_STORAGE_KEY,
   EXPERIMENTAL_PIPER_STORAGE_KEY,
   engineQueueable,
   type EngineId,
@@ -85,6 +86,21 @@ import {
   resetPiperPlusSession,
   synthesizePiperPlus,
 } from './lib/piper-plus.ts'
+import {
+  CHATTERBOX_DEFAULT_EXAGGERATION,
+  CHATTERBOX_LANGUAGES,
+  CHATTERBOX_SAMPLE_RATE,
+  chatterboxLanguageLabel,
+  chatterboxModelId,
+  chatterboxModelLabel,
+  decodeChatterboxReference,
+  formatChatterboxReference,
+  loadChatterboxWorker,
+  synthesizeChatterbox,
+  type ChatterboxLanguageId,
+  type ChatterboxModelVariant,
+  type ChatterboxReference,
+} from './lib/chatterbox.ts'
 import { type QueueEngine, type QueueJob, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
@@ -189,6 +205,7 @@ const MODEL_ROWS = [
   ['Kokoro timestamped', 'Kokoro local', '82M', 'Word-level timings', 'Opt-in'],
   ['Supertonic', 'Transformers.js', '66M', 'English speed engine', 'Ready'],
   ['KittenTTS', 'WebGPU shaders', '15M / 40M / 80M', 'English lightweight engine', 'Ready'],
+  ['Chatterbox', 'Transformers.js v4', '0.5B', 'English + 23 languages', 'Opt-in'],
   ['Piper-plus', 'WASM + ONNX Runtime', 'Tsukuyomi-chan', 'JA / EN / ZH / KO / ES / FR / PT / SV', 'Experimental'],
   ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT', 'Ready'],
   ['Browser voices', 'Web Speech', 'Native', 'Device voices', 'Fallback'],
@@ -200,6 +217,7 @@ const RUNTIME_LICENSE_ROWS = [
   ['ephone / eSpeak NG WASM', 'GPL-3.0-or-later', 'Loaded only for multilingual Kokoro voices: ES / FR / HI / IT / PT-BR'],
   ['electron-updater', 'MIT', 'Opt-in Windows update download and restart install'],
   ['KittenTTS browser wrapper', 'MIT', 'Kitten model weights are Apache-2.0'],
+  ['Chatterbox ONNX models', 'MIT', 'Opt-in reference-voice synthesis; generated audio carries the PerTh watermark'],
   ['piper-plus, @piper-plus/g2p, onnxruntime-web', 'MIT', 'Experimental Piper-plus engine; lazy package/WASM/model path'],
   ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro and English Piper CPU utility process'],
   ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
@@ -228,6 +246,15 @@ function getInitialPiperFlag(): boolean {
   try {
     const params = new URLSearchParams(window.location.search)
     return params.get('piper') === '1' || window.localStorage.getItem(EXPERIMENTAL_PIPER_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function getInitialChatterboxConsent(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(EXPERIMENTAL_CHATTERBOX_STORAGE_KEY) === '1'
   } catch {
     return false
   }
@@ -1049,6 +1076,11 @@ function App() {
   const [kittenModelSize, setKittenModelSize] = useState<KittenModelSize>(KITTEN_DEFAULT_MODEL)
   const [piperLanguage, setPiperLanguage] = useState<PiperPlusLanguage>('ja')
   const [experimentalPiperEnabled, setExperimentalPiperEnabled] = useState(getInitialPiperFlag)
+  const [chatterboxConsent, setChatterboxConsent] = useState(getInitialChatterboxConsent)
+  const [chatterboxModel, setChatterboxModel] = useState<ChatterboxModelVariant>('multilingual')
+  const [chatterboxLanguageId, setChatterboxLanguageId] = useState<ChatterboxLanguageId>('en')
+  const [chatterboxExaggeration, setChatterboxExaggeration] = useState(CHATTERBOX_DEFAULT_EXAGGERATION)
+  const [chatterboxReference, setChatterboxReference] = useState<ChatterboxReference | null>(null)
   const [speed, setSpeed] = useState(1)
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
@@ -1151,6 +1183,7 @@ function App() {
   const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
   const systemToolsSectionRef = useRef<HTMLDivElement | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
+  const chatterboxReferenceInputRef = useRef<HTMLInputElement | null>(null)
   const pronunciationsToggleRef = useRef<HTMLButtonElement | null>(null)
   const pronunciationsSectionRef = useRef<HTMLDivElement | null>(null)
 
@@ -1207,6 +1240,7 @@ function App() {
   const selectedPiperLanguage = PIPER_PLUS_LANGUAGES.find((language) => language.id === piperLanguage) ?? PIPER_PLUS_LANGUAGES[0]
   const selectedKokoroLanguage = kokoroLanguageForLocale(locale)
   const englishKokoro = isEnglishKokoroLocale(locale)
+  const chatterboxNeedsSetup = !chatterboxConsent || chatterboxReference === null
   const blendableVoices = useMemo(() => VOICES.filter((voice) => isEnglishKokoroLocale(voice.locale)), [])
   const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : 'WebGPU fp32 / WebAssembly q8') : runtimeLabel
   const kittenRuntimeReady = hasKittenWebGpu()
@@ -1241,42 +1275,56 @@ function App() {
   const activeOutput = results.find((result) => result.id === activeOutputId) ?? results[0]
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
-    : !usableText.trim()
-      ? 'Enter text before queueing.'
-      : null
+    : engine === 'chatterbox'
+      ? 'Chatterbox voice-cloning is direct-only; use Generate audio.'
+      : !usableText.trim()
+        ? 'Enter text before queueing.'
+        : null
   const engineStatus =
     engine === 'kokoro'
       ? `${selectedKokoroLanguage.label} - ${kokoroRuntimeLabel}${modelCached ? ' - cached' : ''}${storageEstimate ? ` - ${storageEstimate}` : ''}`
       : engine === 'supertonic'
         ? 'English speed engine - 44.1 kHz fp32'
         : engine === 'kitten'
-          ? `${selectedKittenModel.label} - ${selectedKittenModel.params} - ${kittenRuntimeReady ? 'WebGPU available' : 'WebGPU unavailable'}`
-          : engine === 'piper'
-            ? `${PIPER_PLUS_MODEL_LABEL} - ${selectedPiperLanguage.label} - experimental lazy engine`
-          : 'Device-native speech playback'
+        ? `${selectedKittenModel.label} - ${selectedKittenModel.params} - ${kittenRuntimeReady ? 'WebGPU available' : 'WebGPU unavailable'}`
+          : engine === 'chatterbox'
+            ? !chatterboxConsent
+              ? 'Opt-in required before reference-voice synthesis'
+              : !chatterboxReference
+                ? 'Reference clip required - kept in memory only'
+                : `${chatterboxModelLabel(chatterboxModel)} - ${chatterboxLanguageLabel(chatterboxLanguageId)} - GPU preferred; CPU is slow`
+            : engine === 'piper'
+              ? `${PIPER_PLUS_MODEL_LABEL} - ${selectedPiperLanguage.label} - experimental lazy engine`
+            : 'Device-native speech playback'
   const activeEngineName =
     engine === 'kokoro'
       ? 'Kokoro 82M'
       : engine === 'supertonic'
         ? 'Supertonic'
         : engine === 'kitten'
-          ? 'KittenTTS'
-          : engine === 'piper'
-            ? 'Piper-plus'
-            : 'Browser voices'
+        ? 'KittenTTS'
+          : engine === 'chatterbox'
+            ? 'Chatterbox'
+            : engine === 'piper'
+              ? 'Piper-plus'
+              : 'Browser voices'
   const activeVoiceName =
     engine === 'kokoro'
       ? selectedVoice.name
       : engine === 'supertonic'
         ? selectedSupertonicVoice.name
         : engine === 'kitten'
-          ? selectedKittenVoice.name
-          : engine === 'piper'
-            ? selectedPiperLanguage.label
-            : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
+        ? selectedKittenVoice.name
+          : engine === 'chatterbox'
+            ? chatterboxReference?.name ?? 'Reference clip required'
+            : engine === 'piper'
+              ? selectedPiperLanguage.label
+              : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
   const activeSampleRate =
     engine === 'supertonic'
       ? `${(SUPERTONIC_SAMPLE_RATE / 1000).toFixed(1)} kHz`
+    : engine === 'chatterbox'
+      ? `${(CHATTERBOX_SAMPLE_RATE / 1000).toFixed(0)} kHz`
       : engine === 'piper'
         ? `${(PIPER_PLUS_SAMPLE_RATE / 1000).toFixed(2)} kHz`
         : `${(KOKORO_SAMPLE_RATE / 1000).toFixed(0)} kHz`
@@ -1301,10 +1349,12 @@ function App() {
     : 'No queued jobs'
   const librarySummaryLabel = library.length > 0 ? `${library.length} saved clip${library.length === 1 ? '' : 's'}` : 'No saved clips'
   const cleanupSummary = Object.values(cleanup).some(Boolean) ? 'Cleanup on' : 'Cleanup off'
-  const engineStatusTone = engine === 'kitten' && !kittenRuntimeReady ? 'warn' : 'ok'
+  const engineStatusTone = (engine === 'kitten' && !kittenRuntimeReady) || (engine === 'chatterbox' && chatterboxNeedsSetup) ? 'warn' : 'ok'
   // Pitch shift only ever applies to the Kokoro export path — never promise it
   // for other engines.
-  const speedSummary = engine === 'kokoro' && pitchSemitones !== 0
+  const speedSummary = engine === 'chatterbox'
+    ? `${chatterboxExaggeration.toFixed(2)} emotion`
+    : engine === 'kokoro' && pitchSemitones !== 0
     ? `${speed.toFixed(2)}x / ${pitchSemitones > 0 ? `+${pitchSemitones}` : pitchSemitones} st`
     : `${speed.toFixed(2)}x`
 
@@ -1415,6 +1465,11 @@ function App() {
     persistSetting(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
     if (!experimentalPiperEnabled && engine === 'piper') setEngine('kokoro')
   }, [experimentalPiperEnabled, engine])
+
+  useEffect(() => {
+    persistSetting(EXPERIMENTAL_CHATTERBOX_STORAGE_KEY, chatterboxConsent ? '1' : '0')
+    if (!chatterboxConsent && engine === 'chatterbox') setEngine('kokoro')
+  }, [chatterboxConsent, engine])
 
   useEffect(() => {
     if (forceNative) {
@@ -1541,6 +1596,8 @@ function App() {
       kokoroLocalBase: new URL(`${normalizedBase}${KOKORO_LOCAL_MODEL_PREFIX}`, baseUrl).toString(),
       supertonicModel: SUPERTONIC_MODEL_ID,
       kittenPackage: 'kitten-tts-webgpu',
+      chatterboxEnglishModel: chatterboxModelId('english'),
+      chatterboxMultilingualModel: chatterboxModelId('multilingual'),
       piperPlusPackage: `piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`,
       piperPlusModel: PIPER_PLUS_MODEL_ID,
     }
@@ -1548,6 +1605,11 @@ function App() {
     if (engine === 'supertonic') modelRoutes.supertonicVoice = supertonicVoiceUrl(selectedSupertonicVoice.id)
     if (engine === 'kokoro') modelRoutes.kokoroVoice = selectedVoice.id
     if (engine === 'kitten') modelRoutes.kittenModel = selectedKittenModel.id
+    if (engine === 'chatterbox') {
+      modelRoutes.chatterboxVariant = chatterboxModel
+      modelRoutes.chatterboxLanguage = chatterboxLanguageId
+      modelRoutes.chatterboxReference = chatterboxReference ? 'loaded in memory' : 'not selected'
+    }
     if (engine === 'piper') modelRoutes.piperPlusLanguage = piperLanguage
 
     const nativeRuntime = nativeAvailable ? getNativeRuntimeInfo() : null
@@ -1576,10 +1638,12 @@ function App() {
           ? selectedSupertonicVoice.id
           : engine === 'kitten'
             ? selectedKittenVoice.id
+            : engine === 'chatterbox'
+              ? chatterboxReference ? 'reference-clip-loaded' : 'reference-required'
             : engine === 'piper'
               ? PIPER_PLUS_MODEL_LABEL
               : browserVoiceUri || 'browser-default',
-      language: engine === 'kokoro' ? locale : engine === 'piper' ? piperLanguage : undefined,
+      language: engine === 'kokoro' ? locale : engine === 'chatterbox' ? chatterboxLanguageId : engine === 'piper' ? piperLanguage : undefined,
       format: audioFormat,
       bitrate: mp3Bitrate,
       speed,
@@ -1588,8 +1652,10 @@ function App() {
         : engine === 'supertonic'
           ? SUPERTONIC_MODEL_ID
           : engine === 'kitten'
-            ? `kitten-tts-webgpu ${selectedKittenModel.id}`
-            : engine === 'piper'
+          ? `kitten-tts-webgpu ${selectedKittenModel.id}`
+          : engine === 'chatterbox'
+            ? `${chatterboxModelId(chatterboxModel)} (${chatterboxLanguageId})`
+          : engine === 'piper'
               ? `${PIPER_PLUS_MODEL_ID} via piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`
               : 'Web Speech API',
       modelRoutes,
@@ -2133,6 +2199,29 @@ function App() {
           }),
       }
     }
+    if (engine === 'chatterbox') {
+      if (!chatterboxConsent) throw new Error('Enable the Chatterbox voice lab in System & diagnostics before generating.')
+      if (!chatterboxReference) throw new Error('Choose a reference clip before generating with Chatterbox.')
+      const hasGpu = !forceWasm && (await probeWebGpu())
+      let device: 'webgpu' | 'wasm' = hasGpu ? 'webgpu' : 'wasm'
+      try {
+        await loadChatterboxWorker(chatterboxModel, device, onProgress)
+      } catch (error) {
+        if (!hasGpu) throw error
+        device = 'wasm'
+        await loadChatterboxWorker(chatterboxModel, device, onProgress)
+      }
+      setRuntimeLabel(`${chatterboxModelLabel(chatterboxModel)} · ${device === 'webgpu' ? 'WebGPU' : 'CPU WASM (slow)'}`)
+      const reference = chatterboxReference
+      return {
+        synthesize: (text, _voice, _spd, _bin, signal) => synthesizeChatterbox(text, {
+          model: chatterboxModel,
+          language: chatterboxLanguageId,
+          exaggeration: chatterboxExaggeration,
+          reference,
+        }, signal),
+      }
+    }
     if (engine === 'piper') {
       if (forceNative && nativeAvailable && piperLanguage === 'en') {
         const runtime = await loadNativePiper(onProgress)
@@ -2209,6 +2298,8 @@ function App() {
       ? 'Loading Supertonic model'
       : engine === 'kitten'
         ? 'Loading KittenTTS model'
+        : engine === 'chatterbox'
+          ? 'Loading Chatterbox voice lab'
         : engine === 'piper'
           ? 'Loading Piper-plus model'
           : 'Loading Kokoro model'
@@ -2257,6 +2348,8 @@ function App() {
       ? SUPERTONIC_SAMPLE_RATE
       : engine === 'kitten'
         ? KITTEN_SAMPLE_RATE
+        : engine === 'chatterbox'
+          ? CHATTERBOX_SAMPLE_RATE
         : engine === 'piper'
           ? PIPER_PLUS_SAMPLE_RATE
           : KOKORO_SAMPLE_RATE
@@ -2569,6 +2662,20 @@ function App() {
     })
   }
 
+  async function generateChatterbox(chunks: string[]) {
+    const referenceName = chatterboxReference?.name ?? 'reference clip'
+    const jobs: SynthJob[] = chunks.map((chunk, index) => ({
+      text: chunk,
+      voice: referenceName,
+      label: `Chatterbox ${chatterboxLanguageLabel(chatterboxLanguageId)}: ${chunk.slice(0, 48)}`,
+      filenamePrefix: chunks.length === 1 ? slugify(chunk) : `${String(index + 1).padStart(3, '0')}-${slugify(chunk)}`,
+    }))
+    await runSynthesis(jobs, {
+      zipPrefix: 'bettertts-chatterbox',
+      successMessage: 'Chatterbox audio generated locally. PerTh watermark retained.',
+    })
+  }
+
   async function generateBrowser(chunks: string[]) {
     // Drop the previous run's results and ZIP link — a stale "Download all
     // ZIP" must never render under the new browser-playback row.
@@ -2620,6 +2727,15 @@ function App() {
 
   async function handleGenerate() {
     if (generatingRef.current) return
+    if (engine === 'chatterbox' && chatterboxNeedsSetup) {
+      showToast({
+        tone: 'warn',
+        message: !chatterboxConsent
+          ? 'Enable the Chatterbox voice lab in System & diagnostics first.'
+          : 'Choose a reference clip before generating with Chatterbox.',
+      })
+      return
+    }
     const effectiveDialog = dialogMode && engine === 'kokoro'
     const sourceText = cleanupText(usableText, cleanup)
     const chunks = effectiveDialog ? [] : splitInput(sourceText, separateLines)
@@ -2661,6 +2777,8 @@ function App() {
         await generateKitten(chunks)
       } else if (engine === 'piper') {
         await generatePiperPlus(chunks)
+      } else if (engine === 'chatterbox') {
+        await generateChatterbox(chunks)
       } else {
         await generateBrowser(chunks)
       }
@@ -3582,6 +3700,22 @@ function App() {
     showToast({ tone: 'ok', message: `Background music selected: ${shortUiLabel(file.name, 48)}` })
   }
 
+  async function handleChatterboxReferenceChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    if (!file) return
+    setStatus('Decoding reference clip locally')
+    try {
+      const reference = await decodeChatterboxReference(file)
+      setChatterboxReference(reference)
+      setStatus('Ready')
+      showToast({ tone: 'ok', message: `Reference clip ready: ${formatChatterboxReference(reference)}. It stays in memory for this session.` })
+    } catch (error) {
+      setStatus('Ready')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not decode the reference clip.' })
+    }
+  }
+
   return (
       <div className="app-shell">
         <a className="skip-link" href="#script-editor">Skip to script editor</a>
@@ -3760,8 +3894,12 @@ function App() {
                   type="button"
                   className={isGenerating ? 'mobile-generate cancel' : 'mobile-generate'}
                   onClick={isGenerating ? cancelGeneration : handleGenerate}
-                  disabled={!isGenerating && (isImportingFile || importingUrl)}
-                  title={!isGenerating && (isImportingFile || importingUrl) ? 'Finish or cancel the import before generating audio' : undefined}
+                  disabled={!isGenerating && (isImportingFile || importingUrl || (engine === 'chatterbox' && chatterboxNeedsSetup))}
+                  title={!isGenerating && (isImportingFile || importingUrl)
+                    ? 'Finish or cancel the import before generating audio'
+                    : !isGenerating && engine === 'chatterbox' && chatterboxNeedsSetup
+                      ? 'Enable Chatterbox and choose a reference clip before generating'
+                      : undefined}
                 >
                   {isGenerating ? <X size={17} aria-hidden="true" /> : <Waves size={17} aria-hidden="true" />}
                   {isGenerating ? 'Cancel generation' : 'Generate audio'}
@@ -4115,6 +4253,18 @@ function App() {
                   <strong>KittenTTS</strong>
                   <small>{selectedKittenModel.label} {selectedKittenModel.params}. English WebGPU engine, {selectedKittenModel.weightSize} on first use.</small>
                 </button>
+                {chatterboxConsent ? (
+                  <button
+                    type="button"
+                    className={engine === 'chatterbox' ? 'engine-card selected' : 'engine-card'}
+                    onClick={() => setEngine('chatterbox')}
+                    aria-pressed={engine === 'chatterbox'}
+                  >
+                    <span>{engine === 'chatterbox' ? <Check size={17} aria-hidden="true" /> : null}</span>
+                    <strong>Chatterbox</strong>
+                    <small>{chatterboxModelLabel(chatterboxModel)}. Reference-voice cloning, GPU preferred, PerTh watermark.</small>
+                  </button>
+                ) : null}
                 {experimentalPiperEnabled ? (
                   <button
                     type="button"
@@ -4169,6 +4319,18 @@ function App() {
                     <small>{piperPlusSupport.supported ? 'Loads the Piper runtime and Tsukuyomi-chan model only when selected.' : 'Requires WebAssembly and IndexedDB support.'}</small>
                   </span>
                 </label> : null}
+                <label className="toggle-row experimental-engine-toggle" htmlFor="chatterbox-consent" aria-label="Enable Chatterbox voice lab">
+                  <input
+                    id="chatterbox-consent"
+                    type="checkbox"
+                    checked={chatterboxConsent}
+                    onChange={(event) => setChatterboxConsent(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Enable Chatterbox voice lab</strong>
+                    <small>Opt in to local reference-voice cloning. Use only audio you own or have permission to use; clips are decoded in memory and never uploaded.</small>
+                  </span>
+                </label>
                 <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>
@@ -4504,6 +4666,71 @@ function App() {
                   ))}
                 </div>
               </>
+            ) : engine === 'chatterbox' ? (
+              <>
+                <label className="control-label" htmlFor="chatterbox-model">
+                  Model
+                </label>
+                <select
+                  id="chatterbox-model"
+                  value={chatterboxModel}
+                  onChange={(event) => setChatterboxModel(event.target.value as ChatterboxModelVariant)}
+                >
+                  <option value="multilingual">{chatterboxModelLabel('multilingual')}</option>
+                  <option value="english">{chatterboxModelLabel('english')}</option>
+                </select>
+
+                <label className="control-label" htmlFor="chatterbox-language">
+                  Synthesis language
+                </label>
+                <select
+                  id="chatterbox-language"
+                  value={chatterboxLanguageId}
+                  disabled={chatterboxModel === 'english'}
+                  onChange={(event) => setChatterboxLanguageId(event.target.value as ChatterboxLanguageId)}
+                >
+                  {CHATTERBOX_LANGUAGES.map((language) => (
+                    <option value={language.id} key={language.id}>{language.label}</option>
+                  ))}
+                </select>
+
+                <span className="control-label">Reference clip</span>
+                <div className="bgm-controls">
+                  <button type="button" onClick={() => chatterboxReferenceInputRef.current?.click()} disabled={isGenerating}>
+                    <Upload size={14} aria-hidden="true" />
+                    {chatterboxReference ? 'Replace reference' : 'Choose audio'}
+                  </button>
+                  {chatterboxReference ? (
+                    <button type="button" onClick={() => setChatterboxReference(null)} disabled={isGenerating}>
+                      <X size={14} aria-hidden="true" />
+                      <span className="sr-only">Remove reference clip</span>
+                    </button>
+                  ) : null}
+                  <input
+                    ref={chatterboxReferenceInputRef}
+                    type="file"
+                    accept="audio/*,.wav,.mp3,.ogg,.flac"
+                    onChange={handleChatterboxReferenceChange}
+                    hidden
+                  />
+                </div>
+                <small className="engine-note">{formatChatterboxReference(chatterboxReference)}. Clips are limited to 30 seconds and kept in memory only.</small>
+
+                <div className="range-row">
+                  <label htmlFor="chatterbox-exaggeration">Emotion</label>
+                  <span>{chatterboxExaggeration.toFixed(2)}</span>
+                  <input
+                    id="chatterbox-exaggeration"
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.05"
+                    value={chatterboxExaggeration}
+                    onChange={(event) => setChatterboxExaggeration(Number(event.target.value))}
+                  />
+                </div>
+                <small className="engine-note">Higher values exaggerate delivery and emotion. Generated audio retains Chatterbox&apos;s built-in PerTh watermark.</small>
+              </>
             ) : engine === 'piper' ? (
               <>
                 <label className="control-label" htmlFor="piper-language">
@@ -4550,7 +4777,7 @@ function App() {
             </div>
             <div className="range-row">
               <label htmlFor="speed">Speed</label>
-              <span>{speed.toFixed(2)}x</span>
+              <span>{engine === 'chatterbox' ? 'n/a' : `${speed.toFixed(2)}x`}</span>
               <input
                 id="speed"
                 type="range"
@@ -4558,9 +4785,11 @@ function App() {
                 max={speedMax}
                 step="0.05"
                 value={speed}
+                disabled={engine === 'chatterbox'}
                 onChange={(event) => setSpeed(Number(event.target.value))}
               />
             </div>
+            {engine === 'chatterbox' ? <small className="engine-note">Chatterbox controls rhythm through its model sampler and emotion dial rather than playback speed.</small> : null}
 
             <div className="chain-step">
               <span aria-hidden="true">4</span>
@@ -5047,8 +5276,12 @@ function App() {
                   type="button"
                   className="generate-button"
                   onClick={handleGenerate}
-                  disabled={isImportingFile || importingUrl}
-                  title={isImportingFile || importingUrl ? 'Finish or cancel the import before generating audio' : undefined}
+                  disabled={isImportingFile || importingUrl || (engine === 'chatterbox' && chatterboxNeedsSetup)}
+                  title={isImportingFile || importingUrl
+                    ? 'Finish or cancel the import before generating audio'
+                    : engine === 'chatterbox' && chatterboxNeedsSetup
+                      ? 'Enable Chatterbox and choose a reference clip before generating'
+                      : undefined}
                 >
                   <Waves size={18} aria-hidden="true" />
                   Generate audio

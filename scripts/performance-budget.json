@@ -36,8 +36,8 @@
     },
     "transformers-runtime": {
       "patterns": ["transformers.web"],
-      "maxRawBytes": 1150000,
-      "maxGzipBytes": 330000
+      "maxRawBytes": 1650000,
+      "maxGzipBytes": 470000
     },
     "piper-runtime": {
       "patterns": ["piper_plus_wasm"],

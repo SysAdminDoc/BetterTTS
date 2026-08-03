@@ -14,6 +14,7 @@ describe('engine registry', () => {
     ])
 
     expect(visibleEngineDescriptors({ piperPlus: true }).map((engine) => engine.id)).toContain('piper')
+    expect(visibleEngineDescriptors({ piperPlus: true, chatterbox: true }).map((engine) => engine.id)).toContain('chatterbox')
   })
 
   it('makes Piper-plus queueable when its platform flag exposes it', () => {
@@ -21,6 +22,7 @@ describe('engine registry', () => {
     expect(engineQueueable('supertonic')).toBe(true)
     expect(engineQueueable('kitten')).toBe(true)
     expect(engineQueueable('piper')).toBe(true)
+    expect(engineQueueable('chatterbox')).toBe(false)
     expect(engineQueueable('browser')).toBe(false)
   })
 })

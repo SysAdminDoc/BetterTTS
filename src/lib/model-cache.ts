@@ -5,7 +5,7 @@ import {
   kokoroRemoteAssetUrl,
 } from './kokoro-assets.ts'
 
-export type ModelCacheEngineId = 'kokoro' | 'supertonic' | 'kitten' | 'shell'
+export type ModelCacheEngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'shell'
 
 export type ModelCacheEntry = {
   cacheName: string
@@ -35,10 +35,11 @@ const ENGINE_LABELS: Record<ModelCacheEngineId, string> = {
   kokoro: 'Kokoro q8',
   supertonic: 'Supertonic',
   kitten: 'KittenTTS',
+  chatterbox: 'Chatterbox',
   shell: 'App shell',
 }
 
-const ENGINE_ORDER: ModelCacheEngineId[] = ['kokoro', 'supertonic', 'kitten', 'shell']
+const ENGINE_ORDER: ModelCacheEngineId[] = ['kokoro', 'supertonic', 'kitten', 'chatterbox', 'shell']
 
 export function classifyModelCacheEntry(cacheName: string, url: string): ModelCacheEngineId | 'other' {
   const normalizedCache = cacheName.toLowerCase()
@@ -48,6 +49,7 @@ export function classifyModelCacheEntry(cacheName: string, url: string): ModelCa
   if (normalizedCache === KOKORO_VOICE_CACHE || normalizedUrl.includes('kokoro-82m') || normalizedUrl.includes('/models/onnx-community/kokoro')) return 'kokoro'
   if (normalizedUrl.includes('supertonic-tts')) return 'supertonic'
   if (normalizedUrl.includes('kittentts') || normalizedUrl.includes('kitten-tts') || normalizedUrl.includes('kittenml')) return 'kitten'
+  if (normalizedUrl.includes('chatterbox')) return 'chatterbox'
   return 'other'
 }
 
