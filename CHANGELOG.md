@@ -10,6 +10,7 @@
 ### Changed
 - Expanded the opt-in Windows workflow integrations with per-user “Open with BetterTTS” document registrations, bounded folder import, live tray render status, and completion/error notifications. Explorer, hotkey, OCR, tray, and notification hooks remain independently disableable; smoke mode never touches the registry, tray, or notification APIs.
 - Added redacted native desktop diagnostics with app/OS/runtime context, model-pack verification, FFmpeg availability, bounded sidecar and host stderr summaries, recent native logs, and sanitized user/model path labels in copied support bundles.
+- Extended the Electron smoke contract with theme round-trips, pointer-free focus-visible checks for the skip-link/editor/generate path, smoke-safe picker cancellation, updater no-op verification, and display-scale-aware screenshot metadata.
 - Reimagined the studio around a calmer editorial script canvas, a prominent render monitor, and a numbered Engine → Voice → Delivery → Output chain. The primary format control is now visible without opening Advanced options, while dark, light, desktop, and mobile layouts share the same flatter signal-focused visual system.
 - The render monitor transport now selects generated clips, renders a bounded decoded peak envelope with progress, plays/pauses/seeks, navigates sentence cues, reports elapsed/total time, and explains unavailable actions instead of presenting decorative controls. Result, library, and queue audio share one playback controller and Media Session state.
 - Playback resume writes are now throttled to one-second progress intervals while pause/seek state remains immediate. In-memory voice previews and decoded voice bins use bounded least-recently-used caches with object-URL disposal.
@@ -62,6 +63,7 @@
 
 ### Tests
 - Added native diagnostics contract coverage for log redaction and bounds, verified model manifests, FFmpeg status, sidecar/RVC stderr summaries, and exclusion of script text and imported article URLs (512 tests across 88 files).
+- Packaged desktop smoke now reports native-window bounds and capture dimensions while verifying accessibility and disabled development/smoke updater behavior in an isolated Electron launch.
 - Added regression coverage for malformed backups and queue records, oversized document imports, worker transfer failures, stalled Web Speech playback, invalid background audio, desktop protocol routing, and native inference IPC validation.
 - Browser smoke now verifies recoverable script clearing and cancellable article import, and real-engine smoke exercises the monitor transport. Persisted editor-setting parsers have malformed, type, and size-boundary coverage.
 - Added bounded-cache eviction/disposal, playback-write throttling, and malformed IndexedDB clip/queue migration regressions.

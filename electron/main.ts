@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray, utilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, protocol, screen, session, shell, Tray, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { execFile as execFileCallback } from 'node:child_process'
@@ -1120,6 +1120,7 @@ ipcMain.handle(PROJECT_CHANNEL, async (event, request: unknown) => {
       activeProjectIdentity = opened.identity
       return { canceled: false, name: basename(activeProjectPath), bytes: opened.bytes }
     }
+    if (IS_SMOKE) return { canceled: true }
     const choice = await dialog.showOpenDialog(owner, {
       title: 'Open BetterTTS project',
       properties: ['openFile'],
@@ -1601,14 +1602,83 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         : null,
     }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean; desktopIntegrations: boolean; desktopDiagnostics: boolean } | null }
 
+    let screenshotSize: { width: number; height: number } | null = null
     try {
       const image = await win.webContents.capturePage()
+      screenshotSize = image.getSize()
       const screenshotPath = join(smokeOutputDirectory, 'smoke.png')
       await writeFile(screenshotPath, image.toPNG())
       result.screenshot = screenshotPath
     } catch {
       /* capture is best-effort on a hidden window */
     }
+
+    const display = screen.getDisplayMatching(win.getBounds())
+    result.nativeWindow = {
+      bounds: win.getBounds(),
+      display: {
+        id: display.id,
+        scaleFactor: display.scaleFactor,
+        bounds: display.bounds,
+        workArea: display.workArea,
+      },
+      screenshot: screenshotSize,
+      highDpiCapture: Boolean(
+        screenshotSize
+        && screenshotSize.width > 0
+        && screenshotSize.height > 0
+        && Number.isFinite(display.scaleFactor)
+        && display.scaleFactor >= 1,
+      ),
+    }
+
+    result.accessibility = await win.webContents.executeJavaScript(`(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+      const root = document.documentElement
+      const themeButton = document.querySelector('.theme-button')
+      const initialTheme = root.dataset.theme ?? null
+      themeButton?.click()
+      await wait(50)
+      const switchedTheme = root.dataset.theme ?? null
+      themeButton?.click()
+      await wait(50)
+      const restoredTheme = root.dataset.theme ?? null
+
+      const focusCheck = (element, surface = element) => {
+        if (!element) return { reachable: false, visible: false }
+        try { element.focus({ focusVisible: true }) } catch { element.focus() }
+        const style = getComputedStyle(surface)
+        const outlineVisible = style.outlineStyle !== 'none' && style.outlineWidth !== '0px'
+        const ringVisible = style.boxShadow !== 'none'
+        return {
+          reachable: document.activeElement === element,
+          visible: element.matches(':focus-visible') && (outlineVisible || ringVisible),
+        }
+      }
+
+      const skip = document.querySelector('.skip-link')
+      const editor = document.querySelector('#script-editor')
+      const editorSurface = editor?.closest('.editor-frame')
+      const generate = document.querySelector('.generate-button')
+      const skipFocus = focusCheck(skip)
+      const editorFocus = focusCheck(editor, editorSurface ?? editor)
+      const generateFocus = focusCheck(generate)
+      return {
+        theme: {
+          initial: initialTheme,
+          switched: switchedTheme,
+          restored: restoredTheme,
+          changed: switchedTheme !== null && switchedTheme !== initialTheme && restoredTheme === initialTheme,
+        },
+        keyboardPath: {
+          skipLink: skipFocus,
+          editor: editorFocus,
+          generate: generateFocus,
+          skipTarget: skip?.getAttribute('href') === '#script-editor',
+          generateEnabled: generate instanceof HTMLButtonElement && !generate.disabled,
+        },
+      }
+    })()`)
 
     result.updaterUi = await win.webContents.executeJavaScript(`(async () => {
       const toggle = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('System & diagnostics'))
@@ -1618,11 +1688,31 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       const projectPanel = document.querySelector('[aria-label="Desktop project"]')
       projectPanel?.scrollIntoView({ block: 'center' })
       await new Promise((resolve) => setTimeout(resolve, 50))
+      const updater = window.betterttsPlatform?.updater
+      let statusEvents = 0
+      const unsubscribe = updater?.onStatus(() => { statusEvents += 1 })
+      updater?.check()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      unsubscribe?.()
       return {
         panel: !!panel,
         checkAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Check now')),
+        smokeActionDisabled: statusEvents === 0,
         projectPanel: !!projectPanel,
         projectActions: Array.from(projectPanel?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
+      }
+    })()`)
+    result.filePicker = await win.webContents.executeJavaScript(`(async () => {
+      const platform = window.betterttsPlatform
+      const [byo, rvcModel, rvcIndex, folder] = await Promise.all([
+        platform?.byoWeights?.choose('f5-tts') ?? Promise.resolve({ canceled: false }),
+        platform?.rvcWeights?.chooseModel() ?? Promise.resolve({ canceled: false }),
+        platform?.rvcWeights?.chooseIndex() ?? Promise.resolve({ canceled: false }),
+        platform?.desktopIntegrations?.chooseFolder() ?? Promise.resolve({ canceled: false }),
+      ])
+      return {
+        available: Boolean(platform?.byoWeights && platform?.rvcWeights && platform?.desktopIntegrations),
+        canceled: [byo, rvcModel, rvcIndex, folder].every((entry) => entry?.canceled === true),
       }
     })()`)
     result.desktopIntegrationsUi = await win.webContents.executeJavaScript(`(async () => {
@@ -1834,6 +1924,20 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       result.rvcStatusError = err instanceof Error ? err.message : String(err)
     }
 
+    const nativeWindow = result.nativeWindow as { highDpiCapture?: boolean } | undefined
+    const accessibility = result.accessibility as {
+      theme?: { changed?: boolean }
+      keyboardPath?: {
+        skipLink?: { reachable?: boolean; visible?: boolean }
+        editor?: { reachable?: boolean; visible?: boolean }
+        generate?: { reachable?: boolean; visible?: boolean }
+        skipTarget?: boolean
+        generateEnabled?: boolean
+      }
+    } | undefined
+    const keyboardPath = accessibility?.keyboardPath
+    const updaterUi = result.updaterUi as { panel?: boolean; checkAction?: boolean; smokeActionDisabled?: boolean; projectPanel?: boolean; projectActions?: string[] } | undefined
+    const filePicker = result.filePicker as { available?: boolean; canceled?: boolean } | undefined
     result.ok =
       probe.brand === 'BetterTTS' &&
       probe.railItems >= 5 &&
@@ -1850,10 +1954,23 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.platform?.openAiServer === true &&
       probe.platform?.desktopIntegrations === true &&
       probe.platform?.desktopDiagnostics === true &&
-      Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
-      Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
-      Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
-      ((result.updaterUi as { projectActions?: string[] } | undefined)?.projectActions?.some((label) => label?.includes('Create project')) ?? false) &&
+      Boolean(updaterUi?.panel) &&
+      Boolean(updaterUi?.checkAction) &&
+      Boolean(updaterUi?.smokeActionDisabled) &&
+      Boolean(nativeWindow?.highDpiCapture) &&
+      Boolean(accessibility?.theme?.changed) &&
+      Boolean(keyboardPath?.skipLink?.reachable) &&
+      Boolean(keyboardPath?.skipLink?.visible) &&
+      Boolean(keyboardPath?.editor?.reachable) &&
+      Boolean(keyboardPath?.editor?.visible) &&
+      Boolean(keyboardPath?.generate?.reachable) &&
+      Boolean(keyboardPath?.generate?.visible) &&
+      Boolean(keyboardPath?.skipTarget) &&
+      Boolean(keyboardPath?.generateEnabled) &&
+      Boolean(filePicker?.available) &&
+      Boolean(filePicker?.canceled) &&
+      Boolean(updaterUi?.projectPanel) &&
+      (updaterUi?.projectActions?.some((label) => label?.includes('Create project')) ?? false) &&
       Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
       Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
       Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
