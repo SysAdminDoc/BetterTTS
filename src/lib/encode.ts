@@ -2,6 +2,38 @@ import { encodeWav } from './wav.ts'
 
 export type AudioFormat = 'wav' | 'mp3' | 'opus' | 'flac' | 'm4b'
 
+export type LoudnessPresetId = 'off' | 'audiobook-mono' | 'podcast-stereo'
+
+export type LoudnessPreset = {
+  id: LoudnessPresetId
+  label: string
+  targetLufs: number | null
+  description: string
+}
+
+export const LOUDNESS_PRESETS: readonly LoudnessPreset[] = [
+  { id: 'off', label: 'Off', targetLufs: null, description: 'Keep the generated level unchanged.' },
+  { id: 'audiobook-mono', label: 'Audiobook / mono · -19 LUFS', targetLufs: -19, description: 'A speech-forward mono listening target.' },
+  { id: 'podcast-stereo', label: 'Podcast / stereo · -16 LUFS', targetLufs: -16, description: 'A general stereo podcast listening target.' },
+]
+
+export const TRUE_PEAK_CEILING_DBTP = -1.5
+
+export type LoudnessMeasurement = {
+  integratedLufs: number | null
+  truePeakDbtp: number | null
+  targetLufs: number | null
+  gainDb: number
+  limited: boolean
+}
+
+export type BgmDuckOptions = {
+  enabled?: boolean
+  depth?: number
+  attackMs?: number
+  releaseMs?: number
+}
+
 // Kokoro output is 24 kHz → MPEG-2 LSF, whose bitrate table tops out at 160 kbps.
 // lamejs silently clamps higher requests, so the UI must not offer them.
 export const MAX_MP3_KBPS_24K = 160
@@ -355,12 +387,170 @@ export function formatFromFilename(filename: string): AudioFormat {
   return 'wav'
 }
 
+export function loudnessTargetForPreset(preset: LoudnessPresetId): number | undefined {
+  return LOUDNESS_PRESETS.find((entry) => entry.id === preset)?.targetLufs ?? undefined
+}
+
+/**
+ * Fast client-side integrated-loudness estimate. It uses the BS.1770 window
+ * and gating shape with a fixed calibration, without shipping a large filter
+ * implementation. The native FFmpeg path remains the exact EBU R128 meter.
+ */
+export function measureIntegratedLufs(samples: Float32Array, sampleRate: number, channels = 1): number | null {
+  const channelCount = normalizeChannelCount(channels)
+  const frameCount = Math.floor(samples.length / channelCount)
+  if (frameCount === 0) return null
+
+  const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 24000
+  const windowFrames = Math.max(1, Math.round(safeRate * 0.4))
+  const hopFrames = Math.max(1, Math.round(safeRate * 0.1))
+  const energies: number[] = []
+
+  if (frameCount <= windowFrames) {
+    energies.push(frameEnergy(samples, 0, frameCount, channelCount))
+  } else {
+    for (let start = 0; start + windowFrames <= frameCount; start += hopFrames) {
+      energies.push(frameEnergy(samples, start, start + windowFrames, channelCount))
+    }
+  }
+
+  const absoluteGateEnergy = Math.pow(10, (-70 + 0.691) / 10)
+  const absoluteGated = energies.filter((energy) => energy > absoluteGateEnergy)
+  if (absoluteGated.length === 0) return null
+
+  const absoluteMean = mean(absoluteGated)
+  const relativeGateLufs = -0.691 + 10 * Math.log10(absoluteMean) - 10
+  const relativeGateEnergy = Math.pow(10, (relativeGateLufs + 0.691) / 10)
+  const gated = absoluteGated.filter((energy) => energy > relativeGateEnergy)
+  if (gated.length === 0) return null
+
+  const integratedEnergy = mean(gated)
+  return -0.691 + 10 * Math.log10(integratedEnergy)
+}
+
+/**
+ * Estimate dBTP with cubic interpolation at 4x oversampling. This is a
+ * conservative browser-side guard for inter-sample peaks; FFmpeg applies its
+ * true-peak limiter on the native path.
+ */
+export function measureTruePeakDbtp(samples: Float32Array, channels = 1): number | null {
+  const channelCount = normalizeChannelCount(channels)
+  const frameCount = Math.floor(samples.length / channelCount)
+  if (frameCount === 0) return null
+
+  let peak = 0
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      peak = Math.max(peak, Math.abs(readSample(samples, frame, channel, channelCount)))
+      if (frame >= frameCount - 1) continue
+
+      const y0 = readSample(samples, Math.max(0, frame - 1), channel, channelCount)
+      const y1 = readSample(samples, frame, channel, channelCount)
+      const y2 = readSample(samples, frame + 1, channel, channelCount)
+      const y3 = readSample(samples, Math.min(frameCount - 1, frame + 2), channel, channelCount)
+      for (const fraction of [0.25, 0.5, 0.75]) {
+        peak = Math.max(peak, Math.abs(cubicInterpolate(y0, y1, y2, y3, fraction)))
+      }
+    }
+  }
+  return peak > 1e-12 ? 20 * Math.log10(peak) : null
+}
+
+export function normalizeLoudness(
+  samples: Float32Array,
+  sampleRate: number,
+  targetLufs: number,
+  options: { channels?: number; truePeakDbtp?: number } = {},
+): { samples: Float32Array; measurement: LoudnessMeasurement } {
+  const channels = normalizeChannelCount(options.channels ?? 1)
+  const ceiling = Number.isFinite(options.truePeakDbtp) ? Number(options.truePeakDbtp) : TRUE_PEAK_CEILING_DBTP
+  const currentLufs = measureIntegratedLufs(samples, sampleRate, channels)
+  if (currentLufs === null || !Number.isFinite(targetLufs)) {
+    const copy = sanitizeSamples(samples)
+    return {
+      samples: copy,
+      measurement: {
+        integratedLufs: measureIntegratedLufs(copy, sampleRate, channels),
+        truePeakDbtp: measureTruePeakDbtp(copy, channels),
+        targetLufs: Number.isFinite(targetLufs) ? targetLufs : null,
+        gainDb: 0,
+        limited: false,
+      },
+    }
+  }
+
+  const gainDb = Math.max(-60, Math.min(60, targetLufs - currentLufs))
+  const gain = Math.pow(10, gainDb / 20)
+  const scaled = sanitizeSamples(samples, gain)
+  const requestedPeak = Math.pow(10, ceiling / 20)
+  const measuredPeak = measureTruePeakDbtp(scaled, channels)
+  const limiterScale = measuredPeak !== null && measuredPeak > ceiling ? requestedPeak / Math.pow(10, measuredPeak / 20) : 1
+  const limited = limiterScale < 1
+  const output = sanitizeSamples(scaled, limiterScale)
+
+  return {
+    samples: output,
+    measurement: {
+      integratedLufs: measureIntegratedLufs(output, sampleRate, channels),
+      truePeakDbtp: measureTruePeakDbtp(output, channels),
+      targetLufs,
+      gainDb,
+      limited,
+    },
+  }
+}
+
+export function mixBgmSamples(
+  speech: Float32Array,
+  bgm: Float32Array,
+  bgmGain: number,
+  sampleRate: number,
+  options: BgmDuckOptions = {},
+): Float32Array {
+  const mixed = new Float32Array(speech.length)
+  if (speech.length === 0 || bgm.length === 0) {
+    mixed.set(speech)
+    return mixed
+  }
+
+  const gain = Number.isFinite(bgmGain) ? Math.max(0, bgmGain) : 0
+  const duckEnabled = options.enabled === true
+  const depth = Math.max(0, Math.min(1, Number.isFinite(options.depth) ? Number(options.depth) : 0.65))
+  const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 24000
+  const attackMs = Math.max(1, Number.isFinite(options.attackMs) ? Number(options.attackMs) : 20)
+  const releaseMs = Math.max(1, Number.isFinite(options.releaseMs) ? Number(options.releaseMs) : 180)
+  const attackCoefficient = Math.exp(-1 / (safeRate * attackMs / 1000))
+  const releaseCoefficient = Math.exp(-1 / (safeRate * releaseMs / 1000))
+  let envelope = 0
+
+  for (let i = 0; i < speech.length; i += 1) {
+    const speechSample = finiteSample(speech[i])
+    if (duckEnabled) {
+      const level = Math.abs(speechSample)
+      const coefficient = level > envelope ? attackCoefficient : releaseCoefficient
+      envelope = coefficient * envelope + (1 - coefficient) * level
+    }
+    const presence = duckEnabled ? Math.max(0, Math.min(1, (envelope - 0.01) / 0.14)) : 0
+    const duckDb = depth * 18 * presence
+    const duckGain = Math.pow(10, -duckDb / 20)
+    const bgmSample = finiteSample(bgm[i % bgm.length])
+    mixed[i] = Math.max(-1, Math.min(1, speechSample + bgmSample * gain * duckGain))
+  }
+  return mixed
+}
+
 export type BgmMixResult = {
   mixed: Float32Array
   bgmEmpty: boolean
 }
 
-export async function mixBgm(speech: Float32Array, bgmFile: File, bgmGain: number, sampleRate: number): Promise<BgmMixResult> {
+export async function mixBgm(
+  speech: Float32Array,
+  bgmFile: File,
+  bgmGain: number,
+  sampleRate: number,
+  options: BgmDuckOptions = {},
+): Promise<BgmMixResult> {
   const arrayBuf = await bgmFile.arrayBuffer()
   const audioCtx = new OfflineAudioContext(1, speech.length, sampleRate)
   const bgmBuffer = await audioCtx.decodeAudioData(arrayBuf)
@@ -373,13 +563,59 @@ export async function mixBgm(speech: Float32Array, bgmFile: File, bgmGain: numbe
   const ch0 = bgmBuffer.getChannelData(0)
   const ch1 = bgmBuffer.numberOfChannels > 1 ? bgmBuffer.getChannelData(1) : null
 
-  const mixed = new Float32Array(speech.length)
-  for (let i = 0; i < speech.length; i++) {
-    const j = i % bgmLen
-    const bgmSample = ch1 ? (ch0[j] + ch1[j]) / 2 : ch0[j]
-    mixed[i] = Math.max(-1, Math.min(1, speech[i] + bgmSample * bgmGain))
-  }
+  const bgm = new Float32Array(bgmLen)
+  for (let i = 0; i < bgmLen; i += 1) bgm[i] = ch1 ? (ch0[i] + ch1[i]) / 2 : ch0[i]
+  const mixed = mixBgmSamples(speech, bgm, bgmGain, sampleRate, options)
   return { mixed, bgmEmpty: false }
+}
+
+function normalizeChannelCount(channels: number): number {
+  return Number.isSafeInteger(channels) && channels > 0 ? channels : 1
+}
+
+function frameEnergy(samples: Float32Array, start: number, end: number, channels: number): number {
+  let total = 0
+  let frames = 0
+  for (let frame = start; frame < end; frame += 1) {
+    let channelTotal = 0
+    for (let channel = 0; channel < channels; channel += 1) {
+      const value = readSample(samples, frame, channel, channels)
+      channelTotal += value * value
+    }
+    total += channelTotal / channels
+    frames += 1
+  }
+  return frames > 0 ? total / frames : 0
+}
+
+function mean(values: number[]): number {
+  if (values.length === 0) return 0
+  let total = 0
+  for (const value of values) total += value
+  return total / values.length
+}
+
+function readSample(samples: Float32Array, frame: number, channel: number, channels: number): number {
+  return finiteSample(samples[frame * channels + channel])
+}
+
+function finiteSample(value: number): number {
+  return Number.isFinite(value) ? value : 0
+}
+
+function sanitizeSamples(samples: Float32Array, scale = 1): Float32Array {
+  const output = new Float32Array(samples.length)
+  for (let i = 0; i < samples.length; i += 1) {
+    output[i] = Math.max(-1, Math.min(1, finiteSample(samples[i]) * scale))
+  }
+  return output
+}
+
+function cubicInterpolate(y0: number, y1: number, y2: number, y3: number, fraction: number): number {
+  const a0 = y3 - y2 - y0 + y1
+  const a1 = y0 - y1 - a0
+  const a2 = y2 - y0
+  return a0 * fraction * fraction * fraction + a1 * fraction * fraction + a2 * fraction + y1
 }
 
 export async function shiftPitch(samples: Float32Array, semitones: number, sampleRate = DEFAULT_PITCH_SAMPLE_RATE): Promise<Float32Array> {

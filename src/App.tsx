@@ -77,7 +77,24 @@ import {
   type RvcModelRecord,
   type RvcSettings,
 } from './lib/rvc.ts'
-import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
+import {
+  LOUDNESS_PRESETS,
+  TRUE_PEAK_CEILING_DBTP,
+  type AudioFormat,
+  type LoudnessMeasurement,
+  type LoudnessPresetId,
+  encodeAudio,
+  formatExtension,
+  formatFromFilename,
+  formatMime,
+  loudnessTargetForPreset,
+  measureIntegratedLufs,
+  measureTruePeakDbtp,
+  mixBgm,
+  normalizeLoudness,
+  opusSupported,
+  shiftPitch,
+} from './lib/encode.ts'
 import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import type { EpubMappingChapter } from './lib/epub-mapping.ts'
@@ -275,6 +292,7 @@ type AudioResult = {
   originalUrl?: string
   sourceDocumentId?: string
   sourceText?: string
+  loudness?: LoudnessMeasurement
 }
 
 type ImportedCaption = {
@@ -518,6 +536,53 @@ async function prepareWhisperAudio(file: File): Promise<Uint8Array> {
   } finally {
     await context.close().catch(() => undefined)
   }
+}
+
+const MAX_LOUDNESS_DECODE_BYTES = 96 * 1024 * 1024
+
+async function measureEncodedLoudness(
+  blob: Blob,
+  fallbackSamples: Float32Array,
+  fallbackSampleRate: number,
+  targetLufs: number,
+  fallback: LoudnessMeasurement,
+): Promise<LoudnessMeasurement> {
+  if (blob.size > MAX_LOUDNESS_DECODE_BYTES || typeof AudioContext === 'undefined') return fallback
+
+  const context = new AudioContext()
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer())
+    const channels = Math.max(1, decoded.numberOfChannels)
+    const samples = new Float32Array(decoded.length * channels)
+    for (let frame = 0; frame < decoded.length; frame += 1) {
+      for (let channel = 0; channel < channels; channel += 1) {
+        samples[frame * channels + channel] = decoded.getChannelData(channel)[frame]
+      }
+    }
+    return {
+      ...fallback,
+      integratedLufs: measureIntegratedLufs(samples, decoded.sampleRate, channels),
+      truePeakDbtp: measureTruePeakDbtp(samples, channels),
+      targetLufs,
+    }
+  } catch {
+    // Some browser codecs cannot be decoded in the same context that encoded
+    // them. The normalized PCM measurement remains a useful bounded fallback.
+    return {
+      ...fallback,
+      integratedLufs: fallback.integratedLufs ?? measureIntegratedLufs(fallbackSamples, fallbackSampleRate),
+      truePeakDbtp: fallback.truePeakDbtp ?? measureTruePeakDbtp(fallbackSamples),
+      targetLufs,
+    }
+  } finally {
+    await context.close().catch(() => undefined)
+  }
+}
+
+function formatLoudnessMeasurement(measurement: LoudnessMeasurement): string {
+  const lufs = measurement.integratedLufs === null ? 'LUFS unavailable' : `${measurement.integratedLufs.toFixed(1)} LUFS`
+  const peak = measurement.truePeakDbtp === null ? '' : ` · ${measurement.truePeakDbtp.toFixed(1)} dBTP`
+  return `Measured ${lufs}${peak}`
 }
 
 function queueJobStatus(job: QueueJob): 'ready' | 'running' | 'failed' | 'pending' {
@@ -998,6 +1063,7 @@ function ResultRow({ result, selected, isSpeaking, onSelect, onReplay, onShare, 
           <strong>{result.filename}</strong>
           <span>{result.duration}</span>
           <span>{result.size}</span>
+          {result.loudness ? <span title="Measured from the exported audio">{formatLoudnessMeasurement(result.loudness)}</span> : null}
         </div>
       </button>
       {result.url ? <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} /> : null}
@@ -1367,6 +1433,8 @@ function App() {
   const [pitchSemitones, setPitchSemitones] = useState(0)
   const [bgmFile, setBgmFile] = useState<File | null>(null)
   const [bgmVolume, setBgmVolume] = useState(0.15)
+  const [bgmDuckEnabled, setBgmDuckEnabled] = useState(false)
+  const [bgmDuckDepth, setBgmDuckDepth] = useState(0.65)
   const [dialogMode, setDialogMode] = useState(false)
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
   const [pronunciations, setPronunciations] = useState<Record<string, string>>(() => {
@@ -1427,7 +1495,7 @@ function App() {
   const [openAiTtsAction, setOpenAiTtsAction] = useState<'start' | 'stop' | 'refresh' | null>(null)
   const [desktopIntegrationStatus, setDesktopIntegrationStatus] = useState<DesktopIntegrationStatus | null>(null)
   const [desktopIntegrationAction, setDesktopIntegrationAction] = useState<DesktopIntegrationKind | null>(null)
-  const [loudnessNormalization, setLoudnessNormalization] = useState(false)
+  const [loudnessPreset, setLoudnessPreset] = useState<LoudnessPresetId>('off')
   const [m4bCoverFile, setM4bCoverFile] = useState<File | null>(null)
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
@@ -2456,26 +2524,59 @@ function App() {
     format: AudioFormat,
     bitrate: number,
     title: string,
-  ): Promise<{ blob: Blob; extension: string }> {
-    if (desktopFfmpeg && ffmpegStatus?.available) {
-      const encoded = await desktopFfmpeg.transcode({
-        samples,
+  ): Promise<{ blob: Blob; extension: string; loudness: LoudnessMeasurement | null }> {
+    const nativeFfmpeg = desktopFfmpeg && ffmpegStatus?.available ? desktopFfmpeg : null
+    const nativeExportAvailable = nativeFfmpeg !== null
+    const targetLufs = loudnessTargetForPreset(loudnessPreset)
+    if (!nativeExportAvailable && (format === 'flac' || format === 'm4b')) {
+      throw new Error(ffmpegStatus?.message ?? `${format.toUpperCase()} export requires FFmpeg in the Windows desktop app.`)
+    }
+
+    let exportSamples = samples
+    let fallbackLoudness: LoudnessMeasurement | null = null
+    if (targetLufs !== undefined) {
+      if (nativeExportAvailable) {
+        fallbackLoudness = {
+          integratedLufs: measureIntegratedLufs(samples, sampleRate),
+          truePeakDbtp: measureTruePeakDbtp(samples),
+          targetLufs,
+          gainDb: 0,
+          limited: false,
+        }
+      } else {
+        const normalized = normalizeLoudness(samples, sampleRate, targetLufs, { truePeakDbtp: TRUE_PEAK_CEILING_DBTP })
+        exportSamples = normalized.samples
+        fallbackLoudness = normalized.measurement
+      }
+    }
+
+    if (nativeFfmpeg) {
+      const encoded = await nativeFfmpeg.transcode({
+        samples: exportSamples,
         sampleRate,
         format,
         bitrate,
         title,
-        loudnessTarget: loudnessNormalization ? -16 : undefined,
+        loudnessTarget: targetLufs,
         cleanupMode: effectiveAudioCleanupMode,
       })
+      const blob = new Blob([encoded.bytes as Uint8Array<ArrayBuffer>], { type: encoded.mime })
       return {
-        blob: new Blob([encoded.bytes as Uint8Array<ArrayBuffer>], { type: encoded.mime }),
+        blob,
         extension: encoded.extension,
+        loudness: targetLufs === undefined || !fallbackLoudness
+          ? null
+          : await measureEncodedLoudness(blob, exportSamples, sampleRate, targetLufs, fallbackLoudness),
       }
     }
-    if (format === 'flac' || format === 'm4b') {
-      throw new Error(ffmpegStatus?.message ?? `${format.toUpperCase()} export requires FFmpeg in the Windows desktop app.`)
+    const blob = await encodeAudio(exportSamples, sampleRate, format, bitrate)
+    return {
+      blob,
+      extension: formatExtension(format),
+      loudness: targetLufs === undefined || !fallbackLoudness
+        ? null
+        : await measureEncodedLoudness(blob, exportSamples, sampleRate, targetLufs, fallbackLoudness),
     }
-    return { blob: await encodeAudio(samples, sampleRate, format, bitrate), extension: formatExtension(format) }
   }
 
   async function applyDesktopProject(opened: DesktopProjectResult): Promise<BackupPreview> {
@@ -3558,7 +3659,10 @@ function App() {
       }
       if (engine === 'kokoro' && pitchSemitones !== 0) processed = await shiftPitch(processed, pitchSemitones, outputSampleRate)
       if (engine === 'kokoro' && bgmFile) {
-        const { mixed, bgmEmpty } = await mixBgm(processed, bgmFile, bgmVolume, outputSampleRate)
+        const { mixed, bgmEmpty } = await mixBgm(processed, bgmFile, bgmVolume, outputSampleRate, {
+          enabled: bgmDuckEnabled,
+          depth: bgmDuckDepth,
+        })
         processed = mixed
         if (bgmEmpty && !warnedBgmEmpty) {
           warnedBgmEmpty = true
@@ -3573,6 +3677,7 @@ function App() {
       if (abortRef.current) break
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
       const result = await buildResult(blob, job.label, filename)
+      if (encoded.loudness) result.loudness = encoded.loudness
       if (readerDocument) result.sourceDocumentId = readerDocument.id
       result.sourceText = job.text
       if (originalBlob) result.originalUrl = rememberUrl(URL.createObjectURL(originalBlob))
@@ -4861,7 +4966,7 @@ function App() {
           chunks,
           title: job.title,
           bitrate: Math.max(64, Math.min(192, job.bitrate)),
-          loudnessTarget: loudnessNormalization ? -16 : undefined,
+          loudnessTarget: loudnessTargetForPreset(loudnessPreset),
           cover: m4bCoverFile ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()) } : undefined,
         })
         const url = URL.createObjectURL(new Blob([result.bytes as Uint8Array<ArrayBuffer>], { type: result.mime }))
@@ -7077,20 +7182,24 @@ function App() {
                         <option value={160}>{engine === 'kokoro' || engine === 'kitten' ? '160 kbps (max at 24 kHz)' : '160 kbps'}</option>
                       </select>
                     ) : null}
+                    <label className="loudness-control" htmlFor="loudness-preset">
+                      <span>Loudness target</span>
+                      <select
+                        id="loudness-preset"
+                        value={loudnessPreset}
+                        disabled={isGenerating}
+                        onChange={(event) => setLoudnessPreset(event.target.value as LoudnessPresetId)}
+                      >
+                        {LOUDNESS_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                      </select>
+                      <small>
+                        {ffmpegStatus?.available
+                          ? 'Desktop exports use two-pass EBU R128; browser exports use a gated estimate. Both protect -1.5 dBTP.'
+                          : LOUDNESS_PRESETS.find((preset) => preset.id === loudnessPreset)?.description ?? 'Choose a listening target.'}
+                      </small>
+                    </label>
                     {desktopFfmpeg ? (
                       <>
-                        <label className="toggle-row">
-                          <input
-                            type="checkbox"
-                            checked={loudnessNormalization}
-                            disabled={!ffmpegStatus?.available}
-                            onChange={(event) => setLoudnessNormalization(event.target.checked)}
-                          />
-                          <span>
-                            Two-pass loudness
-                            <small>{ffmpegStatus?.available ? 'Normalize to -16 LUFS / -1.5 dBTP with measured EBU R128 values.' : ffmpegStatus?.message ?? 'Checking FFmpeg…'}</small>
-                          </span>
-                        </label>
                         <label className="toggle-row">
                           <input
                             id="audio-cleanup"
@@ -7144,11 +7253,27 @@ function App() {
                       <input ref={bgmInputRef} type="file" accept="audio/*" onChange={handleBgmFileChange} hidden />
                     </div>
                     {bgmFile ? (
-                      <div className="range-row bgm-volume-row">
-                        <label htmlFor="bgm-vol">BGM volume</label>
-                        <span>{Math.round(bgmVolume * 100)}%</span>
-                        <input id="bgm-vol" type="range" min="0" max="0.5" step="0.01" value={bgmVolume} onChange={(e) => setBgmVolume(Number(e.target.value))} />
-                      </div>
+                      <>
+                        <div className="range-row bgm-volume-row">
+                          <label htmlFor="bgm-vol">BGM volume</label>
+                          <span>{Math.round(bgmVolume * 100)}%</span>
+                          <input id="bgm-vol" type="range" min="0" max="0.5" step="0.01" value={bgmVolume} onChange={(e) => setBgmVolume(Number(e.target.value))} />
+                        </div>
+                        <label className="toggle-row" htmlFor="bgm-duck">
+                          <input id="bgm-duck" type="checkbox" checked={bgmDuckEnabled} onChange={(event) => setBgmDuckEnabled(event.target.checked)} />
+                          <span>
+                            Auto-duck under speech
+                            <small>Music follows the speech envelope and dips by up to 18 dB.</small>
+                          </span>
+                        </label>
+                        {bgmDuckEnabled ? (
+                          <div className="range-row bgm-volume-row">
+                            <label htmlFor="bgm-duck-depth">Duck depth</label>
+                            <span>{Math.round(bgmDuckDepth * 100)}%</span>
+                            <input id="bgm-duck-depth" type="range" min="0" max="1" step="0.01" value={bgmDuckDepth} onChange={(event) => setBgmDuckDepth(Number(event.target.value))} />
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                 ) : null}

@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_MP3_KBPS_24K, buildWebmOpus, encodeAudio, formatExtension, formatFromFilename, formatMime, shiftPitch } from './encode.ts'
-
-// mixBgm is not covered here: it requires OfflineAudioContext, which has no
-// Node implementation. Its zero-length and stereo guards are exercised in-app.
+import {
+  MAX_MP3_KBPS_24K,
+  TRUE_PEAK_CEILING_DBTP,
+  buildWebmOpus,
+  encodeAudio,
+  formatExtension,
+  formatFromFilename,
+  formatMime,
+  loudnessTargetForPreset,
+  measureIntegratedLufs,
+  measureTruePeakDbtp,
+  mixBgmSamples,
+  normalizeLoudness,
+  shiftPitch,
+} from './encode.ts'
 
 const SAMPLE_RATE = 24000
 
@@ -207,5 +218,61 @@ describe('shiftPitch', () => {
     let peak = 0
     for (const s of tail) peak = Math.max(peak, Math.abs(s))
     expect(peak).toBeGreaterThan(0.05)
+  })
+})
+
+describe('BGM sidechain ducking', () => {
+  it('reduces the music envelope while speech is present and releases afterward', () => {
+    const speech = new Float32Array(24000)
+    speech.fill(0.5, 2400, 12000)
+    const bgm = new Float32Array(24000).fill(0.2)
+    const withoutDuck = mixBgmSamples(speech, bgm, 0.5, SAMPLE_RATE)
+    const withDuck = mixBgmSamples(speech, bgm, 0.5, SAMPLE_RATE, { enabled: true, depth: 0.8 })
+
+    expect(withDuck[9000]).toBeLessThan(withoutDuck[9000] - 0.04)
+    expect(withDuck[22000]).toBeGreaterThan((withDuck[9000] - speech[9000]) + 0.03)
+    expect(withDuck.length).toBe(speech.length)
+  })
+
+  it('keeps a missing BGM buffer equal to speech without mutating it', () => {
+    const speech = new Float32Array([0.1, -0.2, 0.3])
+    const mixed = mixBgmSamples(speech, new Float32Array(), 0.5, SAMPLE_RATE, { enabled: true })
+    expect(mixed).toEqual(speech)
+    expect(mixed).not.toBe(speech)
+  })
+})
+
+describe('client loudness helpers', () => {
+  it('maps the listening presets to their target levels', () => {
+    expect(loudnessTargetForPreset('off')).toBeUndefined()
+    expect(loudnessTargetForPreset('audiobook-mono')).toBe(-19)
+    expect(loudnessTargetForPreset('podcast-stereo')).toBe(-16)
+  })
+
+  it('measures speech energy as a finite integrated LUFS estimate', () => {
+    const level = measureIntegratedLufs(sine(1), SAMPLE_RATE)
+    expect(level).not.toBeNull()
+    expect(level!).toBeGreaterThan(-11)
+    expect(level!).toBeLessThan(-8)
+    expect(measureIntegratedLufs(new Float32Array(24000), SAMPLE_RATE)).toBeNull()
+  })
+
+  it('normalizes to a target and keeps the estimated true peak below the ceiling', () => {
+    const source = sine(1)
+    const normalized = normalizeLoudness(source, SAMPLE_RATE, -19)
+    expect(normalized.measurement.integratedLufs).not.toBeNull()
+    expect(normalized.measurement.integratedLufs!).toBeCloseTo(-19, 1)
+    expect(normalized.measurement.targetLufs).toBe(-19)
+    expect(normalized.measurement.truePeakDbtp!).toBeLessThanOrEqual(TRUE_PEAK_CEILING_DBTP + 0.05)
+    expect(measureTruePeakDbtp(normalized.samples)).toBe(normalized.measurement.truePeakDbtp)
+    expect(source[100]).not.toBe(normalized.samples[100])
+  })
+
+  it('limits a hot signal when the target would otherwise exceed true peak', () => {
+    const hot = new Float32Array(24000)
+    for (let i = 0; i < hot.length; i += 1) hot[i] = Math.sin((2 * Math.PI * 440 * i) / SAMPLE_RATE) * 0.98
+    const normalized = normalizeLoudness(hot, SAMPLE_RATE, -1)
+    expect(normalized.measurement.limited).toBe(true)
+    expect(normalized.measurement.truePeakDbtp!).toBeLessThanOrEqual(TRUE_PEAK_CEILING_DBTP + 0.05)
   })
 })

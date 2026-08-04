@@ -79,6 +79,29 @@ function makePdfUpload() {
   return { name: 'smoke.pdf', mimeType: 'application/pdf', buffer: Buffer.from(parts.join('')) }
 }
 
+function makeBgmUpload() {
+  const sampleRate = 8000
+  const samples = sampleRate / 4
+  const buffer = Buffer.alloc(44 + samples * 2)
+  buffer.write('RIFF', 0, 'ascii')
+  buffer.writeUInt32LE(36 + samples * 2, 4)
+  buffer.write('WAVE', 8, 'ascii')
+  buffer.write('fmt ', 12, 'ascii')
+  buffer.writeUInt32LE(16, 16)
+  buffer.writeUInt16LE(1, 20)
+  buffer.writeUInt16LE(1, 22)
+  buffer.writeUInt32LE(sampleRate, 24)
+  buffer.writeUInt32LE(sampleRate * 2, 28)
+  buffer.writeUInt16LE(2, 32)
+  buffer.writeUInt16LE(16, 34)
+  buffer.write('data', 36, 'ascii')
+  buffer.writeUInt32LE(samples * 2, 40)
+  for (let index = 0; index < samples; index += 1) {
+    buffer.writeInt16LE(Math.round(Math.sin((index / sampleRate) * Math.PI * 2 * 220) * 6000), 44 + index * 2)
+  }
+  return { name: 'smoke-bgm.wav', mimeType: 'audio/wav', buffer }
+}
+
 function makeEpubUpload() {
   const zipped = zipSync({
     'META-INF/container.xml': new TextEncoder().encode('<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>'),
@@ -643,7 +666,26 @@ async function runSmoke() {
     await desktop.page.evaluate(() => window.dispatchEvent(new Event('bettertts-update-ready')))
     await desktop.page.getByRole('button', { name: 'Refresh now' }).waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: /Switch to dark theme/ }).click()
-    await desktop.page.getByRole('button', { name: 'Advanced options' }).click()
+
+    console.log('Checking BGM ducking and loudness controls...')
+    const advancedOptionsToggle = desktop.page.getByRole('button', { name: 'Advanced options' })
+    if (await advancedOptionsToggle.getAttribute('aria-expanded') !== 'true') await advancedOptionsToggle.click()
+    const loudnessPreset = desktop.page.getByLabel('Loudness target')
+    await loudnessPreset.waitFor({ timeout: 20000 })
+    await loudnessPreset.selectOption('audiobook-mono')
+    if (await loudnessPreset.inputValue() !== 'audiobook-mono') throw new Error('Audiobook loudness preset did not select')
+    await loudnessPreset.selectOption('podcast-stereo')
+    if (await loudnessPreset.inputValue() !== 'podcast-stereo') throw new Error('Podcast loudness preset did not select')
+    const bgmInput = desktop.page.locator('.bgm-row input[type="file"]')
+    await bgmInput.setInputFiles(makeBgmUpload())
+    const duckToggle = desktop.page.getByRole('checkbox', { name: 'Auto-duck under speech' })
+    await duckToggle.waitFor({ timeout: 20000 })
+    await duckToggle.check()
+    if (!(await duckToggle.isChecked())) throw new Error('BGM auto-duck toggle did not enable')
+    const duckDepth = desktop.page.getByLabel('Duck depth')
+    await duckDepth.waitFor({ timeout: 20000 })
+    await duckDepth.fill('0.8')
+    if (await duckDepth.inputValue() !== '0.8') throw new Error('BGM duck depth did not update')
 
     console.log('Checking experimental Piper-plus controls...')
     await desktop.page.getByRole('checkbox', { name: 'Enable experimental Piper-plus' }).check()
@@ -652,7 +694,7 @@ async function runSmoke() {
     await piperLanguage.selectOption('en')
     if (await piperLanguage.inputValue() !== 'en') throw new Error('Piper engine controls did not become active')
 
-    await desktop.page.getByRole('button', { name: 'Advanced options' }).click()
+    if (await advancedOptionsToggle.getAttribute('aria-expanded') !== 'true') await advancedOptionsToggle.click()
     for (const label of ['Skip citations', 'Drop page headers', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
       await desktop.page.getByLabel(label).waitFor({ timeout: 20000 })
     }

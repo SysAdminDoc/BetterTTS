@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-424%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-442%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -78,7 +78,8 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ### Audio Processing
 - **Pitch control** - +/-4 semitones via Signalsmith Stretch AudioWorklet/WASM rendering, without tempo change
 - **Studio cleanup** — opt-in Windows FFmpeg denoise plus conservative room-tail reduction for imported BGM and generated output; the before-cleanup audio remains playable in the current session for comparison
-- **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume
+- **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume, and optionally auto-duck the music beneath the speech envelope with adjustable depth
+- **Loudness targets** — choose Off, audiobook mono (-19 LUFS), or podcast stereo (-16 LUFS); browser exports use a gated client-side estimate with a -1.5 dBTP true-peak ceiling, native FFmpeg exports use two-pass EBU R128, and completed outputs show measured LUFS/dBTP
 - **Silence insertion** — `[pause 2s]` tags splice real silence into the output
 - **Speed control** — engine-aware ranges: Kokoro 0.5x-1.5x, Supertonic 0.8x-1.2x, KittenTTS 0.5x-2.0x; Chatterbox uses its emotion sampler instead
 
@@ -177,7 +178,7 @@ The Windows app can create and open portable `.bettertts` projects from System t
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
 
-When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Optional two-pass EBU R128 normalization targets -16 LUFS / -1.5 dBTP; queue M4B exports include chapter metadata and optional JPEG/PNG cover art. Before processing, BetterTTS checks decoded duration/bytes, worst-case temporary space, and actual free disk; defaults are 24 hours and 4 GB and can be lowered with `BETTERTTS_MAX_EXPORT_DURATION_SECONDS` and `BETTERTTS_MAX_EXPORT_TEMP_BYTES`. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
+When FFmpeg is available on `PATH` (or through `BETTERTTS_FFMPEG_PATH`), the Windows app routes WAV, MP3, Ogg Opus, FLAC, and M4B exports through its native process boundary. Loudness presets use measured two-pass EBU R128 normalization at -19 LUFS mono or -16 LUFS stereo with a -1.5 dBTP ceiling; browser exports use the bounded client-side loudness estimate and limiter. Completed clips report the measured output LUFS and true peak when a preset is selected. Queue M4B exports include chapter metadata and optional JPEG/PNG cover art. Before processing, BetterTTS checks decoded duration/bytes, worst-case temporary space, and actual free disk; defaults are 24 hours and 4 GB and can be lowered with `BETTERTTS_MAX_EXPORT_DURATION_SECONDS` and `BETTERTTS_MAX_EXPORT_TEMP_BYTES`. If FFmpeg is absent, System diagnostics shows the exact `winget install Gyan.FFmpeg` recovery command while browser encoders remain available.
 
 Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuyomi-chan pack download only when selected, and Piper jobs use the same resumable queue, clip library, project, and native export paths as other local engines. On Windows, selecting the native backend routes English Piper through the pinned public-domain Cori Sherpa pack; other Piper languages continue to use the multilingual web runtime. The web/PWA build keeps Piper behind its explicit experimental toggle because the WASM/G2P payload is large.
 
@@ -203,7 +204,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (436 tests across 75 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (442 tests across 75 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

@@ -2119,6 +2119,22 @@ select:focus-visible {
   margin-bottom: 16px;
 }
 
+.loudness-control {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.loudness-control select {
+  margin-bottom: 0;
+}
+
+.loudness-control small {
+  color: var(--text-muted);
+}
+
 .format-row .control-label {
   grid-column: 1 / -1;
 }

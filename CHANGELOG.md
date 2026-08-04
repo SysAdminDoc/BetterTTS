@@ -20,6 +20,7 @@
 - Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 - Added an opt-in loopback-only OpenAI-compatible desktop TTS server. `POST /v1/audio/speech` supports native Kokoro/Piper model and voice selection, WAV/MP3/Opus/FLAC output, bounded SSE base64 chunks, `/health` and `/v1/models`, an explicit port control, and a stop path that closes the listener.
 - Added an opt-in Windows-only RVC post-stage. Users can register consented local `.pth`/`.index` models with license and provenance, re-timbre a generated clip after TTS, optionally blend a second model through a bounded second inference pass, and retain the conversion metadata on the saved clip; the optional Python runtime is never bundled.
+- Added speech-sidechain BGM ducking with adjustable depth, plus Off, -19 LUFS audiobook/mono, and -16 LUFS podcast/stereo export presets. Browser exports use a gated client-side loudness estimate and cubic-interpolated -1.5 dBTP protection; native FFmpeg exports retain measured two-pass EBU R128 normalization, and selected outputs show measured LUFS/true peak.
 - Added narrator mode for long-form scripts. Quote-aware and explicit-speaker parsing separates narration from dialogue, per-role voices persist on queue chunks, ZIP manifests retain the assignments, and chaptered M4B export uses the rendered role-specific audio.
 - Added a headless `bettertts synth` CLI that reuses the verified native Sherpa host for TXT/EPUB conversion, bounded chunking, WAV/MP3/Opus/FLAC/M4B export, SRT/VTT captions, JSON progress, dry runs, and scriptable exit codes without launching Electron.
 - Added opt-in Windows desktop workflow integrations: a clipboard-based global read-selection hotkey, per-user Explorer context-menu entries that queue TXT/EPUB/PDF/DOCX files, and optional Tesseract screen OCR. Each integration is independently disableable and the web/PWA bridge remains absent.
@@ -66,6 +67,7 @@
 - Added cross-browser WebGPU adapter probing, optional adapter denylisting/report recovery, Safari/WebKit AAC preflight, diagnostics generation timing, and first-audio UI smoke coverage.
 - Added FFmpeg cleanup filter contract coverage, native denoise/Studio/loudness probes, cleanup UI smoke assertions, and the packaged output before/after audit path.
 - Added MeloTTS model-pack validation, IPC/queue migration coverage, a real native Chinese + English host probe, packaged UI assertions for Melo and the new Kokoro languages, and headless real-engine synthesis checks for Japanese and Mandarin.
+- Added pure DSP coverage for speech-envelope ducking, loudness gating, preset target mapping, normalization, true-peak limiting, and post-export measurement metadata; browser smoke now exercises the loudness picker and BGM duck-depth control (442 tests across 75 files).
 
 ## v0.21.0 - 2026-07-29
 
