@@ -60,6 +60,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Headless native CLI** — `bettertts synth` converts TXT or EPUB input to WAV, MP3, Opus, FLAC, or chaptered M4B with SRT/VTT captions and machine-readable progress, without launching the GUI
 - **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
 - **SRT/VTT re-voicing** — import existing timed subtitles, synthesize each cue with the selected local engine, preserve absolute silence gaps and overlaps, and export one timeline-aligned audio file with visible fit warnings
+- **Prosody panel** — opt-in per-punctuation pauses are persisted and reversible, while selected editor spans can carry explicit rate and pitch deltas through local synthesis and queue resume
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
@@ -82,6 +83,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Background music mixing** — upload any audio file, loop to speech length, mix at adjustable volume, and optionally auto-duck the music beneath the speech envelope with adjustable depth
 - **Loudness targets** — choose Off, audiobook mono (-19 LUFS), or podcast stereo (-16 LUFS); browser exports use a gated client-side estimate with a -1.5 dBTP true-peak ceiling, native FFmpeg exports use two-pass EBU R128, and completed outputs show measured LUFS/dBTP
 - **Silence insertion** — `[pause 2s]` tags splice real silence into the output
+- **Prosody markup** — `[prosody rate=1.15 pitch=2]emphasized text[/prosody]` splits synthesis at span boundaries; defaults remain 1x and 0 semitones
 - **Speed control** — engine-aware ranges: Kokoro 0.5x-1.5x, Supertonic 0.8x-1.2x, KittenTTS 0.5x-2.0x; Chatterbox uses its emotion sampler instead
 
 ### Studio Features
@@ -205,7 +207,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (464 tests across 79 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (474 tests across 79 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -247,7 +249,7 @@ src/
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
 │   ├── wav.ts               # Raw PCM → WAV encoder
-│   ├── text.ts              # Sentence splitting, pause parsing, cleanup, narrator segmentation
+│   ├── text.ts              # Sentence/pause/prosody parsing, cleanup, narrator segmentation
 │   ├── voices.ts            # 41-voice Kokoro catalog with quality grades
 │   ├── webspeech.ts         # Browser Speech API wrapper
 │   ├── subtitles.ts         # SRT/VTT/ASS parser, serializers, fitting, and style presets

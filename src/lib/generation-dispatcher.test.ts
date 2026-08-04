@@ -61,4 +61,52 @@ describe('generation dispatcher', () => {
     expect(result.completedSentences).toBe(1)
     expect(result.jobs[0].audioParts).toHaveLength(1)
   })
+
+  it('applies span rate to synthesis and passes pitch to post-processing', async () => {
+    const speeds: number[] = []
+    const prosody: Array<{ rate: number; pitchSemitones: number }> = []
+    const result = await dispatchGeneration([{
+      text: 'Plain. [prosody rate=1.5 pitch=2]Emphasis.[/prosody]',
+      voice: 'voice',
+    }], {
+      sampleRate: 10,
+      speed: 1,
+      requestStart: performance.now(),
+      synthesize: async (_text, _voice, speed) => {
+        speeds.push(speed)
+        return audio()
+      },
+      processAudio: (current, settings) => {
+        prosody.push(settings)
+        return current
+      },
+    })
+
+    expect(result.totalSentences).toBe(2)
+    expect(speeds).toEqual([1, 1.5])
+    expect(prosody).toEqual([
+      { rate: 1, pitchSemitones: 0 },
+      { rate: 1.5, pitchSemitones: 2 },
+    ])
+    expect(result.jobs[0].cues.map((cue) => cue.text)).toEqual(['Plain.', 'Emphasis.'])
+  })
+
+  it('keeps pauses inside a prosody span from exposing its markup', async () => {
+    const spoken: string[] = []
+    const result = await dispatchGeneration([{
+      text: '[prosody rate=1.25 pitch=-2]Marked [pause 0.2s] phrase.[/prosody]',
+      voice: 'voice',
+    }], {
+      sampleRate: 10,
+      speed: 1,
+      requestStart: performance.now(),
+      synthesize: async (text) => {
+        spoken.push(text)
+        return audio()
+      },
+    })
+
+    expect(spoken).toEqual(['Marked', 'phrase.'])
+    expect(result.jobs[0].audioParts).toHaveLength(3)
+  })
 })

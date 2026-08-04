@@ -1,4 +1,4 @@
-import { parsePauseTags, splitIntoSentences, type NarratorRole } from './text.ts'
+import { parsePauseTags, parseProsodyTags, splitIntoSentences, type NarratorRole, type ProsodySettings } from './text.ts'
 
 export type GenerationJob = {
   text: string
@@ -41,6 +41,7 @@ export type GenerationDispatcherOptions = {
   isCancelled?: () => boolean
   applyPronunciations?: (text: string) => string
   synthesize: (text: string, voice: string, speed: number, voiceBin?: Float32Array, signal?: AbortSignal) => Promise<GeneratedSentence | null>
+  processAudio?: (audio: GeneratedSentence, prosody: ProsodySettings) => Promise<GeneratedSentence> | GeneratedSentence
   checkCompleteness?: (text: string, durationSeconds: number, speed: number) => { suspect: boolean; speakableChars: number; minExpectedSeconds: number }
   onProgress?: (completed: number, total: number) => void
   onAudio?: (audio: GeneratedSentence, startSec: number, endSec: number) => void
@@ -52,9 +53,12 @@ export async function dispatchGeneration(
   jobs: GenerationJob[],
   options: GenerationDispatcherOptions,
 ): Promise<GenerationDispatchResult> {
-  const plans = jobs.map((job) => parsePauseTags(job.text).map((segment) => (
-    segment.type === 'pause' ? segment : { ...segment, sentences: splitIntoSentences(segment.content) }
-  )))
+  const plans = jobs.map((job) => parseProsodyTags(job.text).flatMap((span) => parsePauseTags(span.content).map((segment) => (
+    segment.type === 'pause' ? segment : {
+      ...segment,
+      sentences: splitIntoSentences(segment.content).map((text) => ({ text, prosody: span })),
+    }
+  ))))
   const totalSentences = plans.reduce(
     (total, plan) => total + plan.reduce((count, segment) => segment.type === 'text' ? count + segment.sentences.length : count, 0),
     0,
@@ -90,8 +94,15 @@ export async function dispatchGeneration(
 
       for (const sentence of segment.sentences) {
         if (cancelled()) break
-        const preparedText = options.applyPronunciations?.(sentence) ?? sentence
-        const audio = await options.synthesize(preparedText, job.voice, options.speed, job.voiceBin, options.signal)
+        const effectiveSpeed = options.speed * sentence.prosody.rate
+        const preparedText = options.applyPronunciations?.(sentence.text) ?? sentence.text
+        const synthesized = await options.synthesize(preparedText, job.voice, effectiveSpeed, job.voiceBin, options.signal)
+        const audio = synthesized && options.processAudio
+          ? await options.processAudio(synthesized, {
+            rate: sentence.prosody.rate,
+            pitchSemitones: sentence.prosody.pitchSemitones,
+          })
+          : synthesized
 
         if (audio) {
           if (audio.sampleRate !== options.sampleRate) throw new Error('Generated chunks used mixed sample rates.')
@@ -99,11 +110,11 @@ export async function dispatchGeneration(
             timeToFirstAudioMs = performance.now() - options.requestStart
           }
           const durationSeconds = audio.samples.length / options.sampleRate
-          const completeness = options.checkCompleteness?.(sentence, durationSeconds, options.speed)
+          const completeness = options.checkCompleteness?.(sentence.text, durationSeconds, effectiveSpeed)
           if (completeness?.suspect) {
             flaggedSentences += 1
             jobFlagged += 1
-            options.onSuspectAudio?.(sentence, {
+            options.onSuspectAudio?.(sentence.text, {
               speakableChars: completeness.speakableChars,
               minExpectedSeconds: completeness.minExpectedSeconds,
               durationSeconds,
@@ -111,8 +122,8 @@ export async function dispatchGeneration(
           }
           audioParts.push(audio.samples)
           totalSamples += audio.samples.length
-          totalChars += sentence.length
-          jobChars += sentence.length
+          totalChars += sentence.text.length
+          jobChars += sentence.text.length
           const startSec = sampleOffset / options.sampleRate
           sampleOffset += audio.samples.length
           const endSec = sampleOffset / options.sampleRate
@@ -123,13 +134,13 @@ export async function dispatchGeneration(
               if (wordEnd > wordStart) cues.push({ startSec: wordStart, endSec: wordEnd, text: cue.text })
             }
           } else {
-            cues.push({ startSec, endSec, text: sentence })
+            cues.push({ startSec, endSec, text: sentence.text })
           }
           options.onAudio?.(audio, startSec, endSec)
         } else if (!cancelled()) {
           flaggedSentences += 1
           jobFlagged += 1
-          options.onMissingAudio?.(sentence)
+          options.onMissingAudio?.(sentence.text)
         }
         completedSentences += 1
         options.onProgress?.(completedSentences, totalSentences)

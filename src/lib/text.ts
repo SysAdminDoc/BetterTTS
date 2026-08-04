@@ -2,6 +2,118 @@ export type TextSegment = { type: 'text'; content: string } | { type: 'pause'; d
 
 export const PAUSE_TAG = /\[pause(?:\s+([\d.]+)\s*s?)?\]/gi
 
+export type ProsodySettings = {
+  rate: number
+  pitchSemitones: number
+}
+
+export type ProsodySegment = ProsodySettings & {
+  content: string
+}
+
+export const DEFAULT_PROSODY: ProsodySettings = {
+  rate: 1,
+  pitchSemitones: 0,
+}
+
+const PROSODY_TAG = /\[prosody\b([^\]]*)\]([\s\S]*?)\[\/prosody\]/gi
+const PROSODY_ATTRIBUTE = /(?:^|\s)(rate|pitch)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s]+))/gi
+const PROSODY_RATE_MIN = 0.5
+const PROSODY_RATE_MAX = 2
+const PROSODY_PITCH_MIN = -12
+const PROSODY_PITCH_MAX = 12
+
+function boundedNumber(value: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = value === undefined ? Number.NaN : Number(value)
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback
+}
+
+function parseProsodySettings(attributes: string): ProsodySettings {
+  let rate = DEFAULT_PROSODY.rate
+  let pitchSemitones = DEFAULT_PROSODY.pitchSemitones
+  for (const match of attributes.matchAll(PROSODY_ATTRIBUTE)) {
+    const value = match[2] ?? match[3] ?? match[4]
+    if (match[1].toLowerCase() === 'rate') rate = boundedNumber(value, rate, PROSODY_RATE_MIN, PROSODY_RATE_MAX)
+    if (match[1].toLowerCase() === 'pitch') pitchSemitones = boundedNumber(value, pitchSemitones, PROSODY_PITCH_MIN, PROSODY_PITCH_MAX)
+  }
+  return { rate, pitchSemitones }
+}
+
+/** Parses explicit [prosody ...] spans while leaving unmarked text at 1x/0 st. */
+export function parseProsodyTags(text: string): ProsodySegment[] {
+  const segments: ProsodySegment[] = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(PROSODY_TAG)) {
+    const start = match.index ?? 0
+    const before = text.slice(lastIndex, start)
+    if (before.trim()) segments.push({ content: before.trim(), ...DEFAULT_PROSODY })
+    const content = match[2].trim()
+    if (content) segments.push({ content, ...parseProsodySettings(match[1]) })
+    lastIndex = start + match[0].length
+  }
+
+  const tail = text.slice(lastIndex)
+  if (tail.trim()) segments.push({ content: tail.trim(), ...DEFAULT_PROSODY })
+  return segments
+}
+
+/** Removes explicit prosody markup for browser speech and other text-only paths. */
+export function stripProsodyTags(text: string): string {
+  return text.replace(PROSODY_TAG, '$2')
+}
+
+export const PUNCTUATION_PAUSE_KEYS = ['comma', 'semicolon', 'colon', 'period', 'question', 'exclamation', 'ellipsis', 'emDash'] as const
+export type PunctuationPauseKey = typeof PUNCTUATION_PAUSE_KEYS[number]
+export type PunctuationPauseSettings = Record<PunctuationPauseKey, number>
+
+// Zero is deliberate: enabling the panel must not alter existing scripts until
+// a user chooses a pause duration. Values are stored in seconds.
+export const DEFAULT_PUNCTUATION_PAUSES: PunctuationPauseSettings = {
+  comma: 0,
+  semicolon: 0,
+  colon: 0,
+  period: 0,
+  question: 0,
+  exclamation: 0,
+  ellipsis: 0,
+  emDash: 0,
+}
+
+const PUNCTUATION_TOKEN = /\.{3}|…|[,;:?!]|[—–]|\./g
+
+function punctuationPauseKey(token: string): PunctuationPauseKey | null {
+  if (token === ',') return 'comma'
+  if (token === ';') return 'semicolon'
+  if (token === ':') return 'colon'
+  if (token === '?') return 'question'
+  if (token === '!') return 'exclamation'
+  if (token === '…' || token === '...') return 'ellipsis'
+  if (token === '—' || token === '–') return 'emDash'
+  return 'period'
+}
+
+function formatPauseSeconds(seconds: number): string {
+  return Number(seconds.toFixed(3)).toString()
+}
+
+/** Adds user-selected silence after punctuation without touching existing tags. */
+export function applyPunctuationPauses(text: string, settings: PunctuationPauseSettings): string {
+  return text.replace(PUNCTUATION_TOKEN, (token, offset, source) => {
+    const key = punctuationPauseKey(token)
+    if (!key) return token
+    const duration = Number(settings[key])
+    if (!Number.isFinite(duration) || duration <= 0) return token
+
+    const following = source.slice(offset + token.length)
+    // Decimals, abbreviations, and punctuation already followed by an explicit
+    // pause should not receive an accidental second splice.
+    if (token === '.' && !/^(?:\s|$|\[\/prosody\])/u.test(following)) return token
+    if (/^\s*\[pause(?:\s|\])/iu.test(following)) return token
+    return `${token} [pause ${formatPauseSeconds(Math.min(30, duration))}s]`
+  })
+}
+
 export function parsePauseTags(text: string): TextSegment[] {
   const segments: TextSegment[] = []
   let lastIndex = 0
@@ -345,7 +457,12 @@ const CURRENCY_NAMES: Record<string, [string, string]> = {
 }
 
 export function normalizeAudiobookNumbers(input: string): string {
-  return input
+  const prosodyTags: string[] = []
+  const protectedInput = input.replace(/\[\/?prosody\b[^\]]*\]/gi, (tag) => {
+    const index = prosodyTags.push(tag) - 1
+    return `\uE000${index}\uE001`
+  })
+  const normalized = protectedInput
     .replace(/([$€£])\s*(\d{1,7})(?:\.(\d{1,2}))?\b/g, (_, symbol: string, whole: string, cents?: string) => {
       const [major, minor] = CURRENCY_NAMES[symbol] ?? ['units', 'cents']
       const normalizedCents = cents?.padEnd(2, '0').slice(0, 2)
@@ -365,6 +482,7 @@ export function normalizeAudiobookNumbers(input: string): string {
       return `${speakNumericToken(value)} ${label}`
     })
     .replace(/\b(\d+)\.(\d+)\b/g, (_, whole: string, fraction: string) => `${whole} point ${fraction.split('').join(' ')}`)
+  return normalized.replace(/\uE000(\d+)\uE001/g, (_, index: string) => prosodyTags[Number(index)] ?? '')
 }
 
 function stripMetadataLines(input: string): string {

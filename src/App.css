@@ -2118,6 +2118,80 @@ select:focus-visible {
   accent-color: var(--accent);
 }
 
+.prosody-panel {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.prosody-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.prosody-heading small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.prosody-rules {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.prosody-rule {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.prosody-rule > span {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-text);
+  font-size: 15px;
+}
+
+.prosody-rule input {
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--heading);
+  font: 13px var(--sans);
+}
+
+.prosody-range-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.prosody-range-grid .range-row {
+  margin-bottom: 0;
+}
+
+.prosody-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .bgm-row {
   margin-bottom: 16px;
 }
@@ -3045,6 +3119,11 @@ footer {
 
   .voice-buttons {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .prosody-rules,
+  .prosody-range-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .technical-note {

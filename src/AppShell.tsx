@@ -197,8 +197,8 @@ import {
   synthesizeKitten,
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
-import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
-import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting } from './lib/settings.ts'
+import { applyPunctuationPauses, type CleanupOptions, DEFAULT_CLEANUP, DEFAULT_PUNCTUATION_PAUSES, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, reflowPdfText, slugify, splitInput, splitNarratorText, stripProsodyTags, type NarratorRole, type NarratorSegment, type PunctuationPauseKey, type PunctuationPauseSettings } from './lib/text.ts'
+import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting, parsePunctuationPauseSetting } from './lib/settings.ts'
 import {
   TECH_PRONUNCIATION_PACK,
   applyPronunciationRules,
@@ -241,6 +241,16 @@ const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
+const PUNCTUATION_PAUSE_FIELDS: ReadonlyArray<{ key: PunctuationPauseKey; symbol: string; label: string }> = [
+  { key: 'comma', symbol: ',', label: 'Comma' },
+  { key: 'semicolon', symbol: ';', label: 'Semicolon' },
+  { key: 'colon', symbol: ':', label: 'Colon' },
+  { key: 'period', symbol: '.', label: 'Period' },
+  { key: 'question', symbol: '?', label: 'Question mark' },
+  { key: 'exclamation', symbol: '!', label: 'Exclamation mark' },
+  { key: 'ellipsis', symbol: '…', label: 'Ellipsis' },
+  { key: 'emDash', symbol: '—', label: 'Em dash' },
+]
 const waveformCache = new Map<string, number[]>()
 const ReaderView = lazy(async () => {
   const module = await import('./components/ReaderView.tsx')
@@ -1471,6 +1481,13 @@ function App() {
   const [mp3Bitrate, setMp3Bitrate] = useState(160)
   const [useWorker, setUseWorker] = useState(true)
   const [wordTimestamps, setWordTimestamps] = useState(false)
+  const [punctuationPauses, setPunctuationPauses] = useState<PunctuationPauseSettings>(() => {
+    try {
+      return parsePunctuationPauseSetting(window.localStorage.getItem('bettertts-punctuation-pauses'))
+    } catch { return DEFAULT_PUNCTUATION_PAUSES }
+  })
+  const [prosodyRate, setProsodyRate] = useState(1.15)
+  const [prosodyPitch, setProsodyPitch] = useState(0)
   const [assCaptionPreset, setAssCaptionPreset] = useState<AssCaptionPresetId>(() => {
     try {
       const stored = window.localStorage.getItem('bettertts-ass-preset')
@@ -1599,6 +1616,7 @@ function App() {
   const projectRevisionRef = useRef(0)
   const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
+  const scriptEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
   const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
@@ -2047,6 +2065,10 @@ function App() {
   useEffect(() => {
     persistSetting('bettertts-cleanup', JSON.stringify(cleanup))
   }, [cleanup])
+
+  useEffect(() => {
+    persistSetting('bettertts-punctuation-pauses', JSON.stringify(punctuationPauses))
+  }, [punctuationPauses])
 
   useEffect(() => {
     persistSetting(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
@@ -2905,6 +2927,27 @@ function App() {
     }, nextToast.action ? 8500 : 5500)
   }
 
+  function applyProsodyToSelection() {
+    const editor = scriptEditorRef.current
+    if (!editor || editor.selectionStart === editor.selectionEnd) {
+      showToast({ tone: 'warn', message: 'Select a phrase in the script editor before applying emphasis.' })
+      return
+    }
+    const start = editor.selectionStart
+    const end = editor.selectionEnd
+    const selected = text.slice(start, end)
+    const marker = `[prosody rate=${prosodyRate.toFixed(2)} pitch=${prosodyPitch}]${selected}[/prosody]`
+    const nextText = `${text.slice(0, start)}${marker}${text.slice(end)}`
+    setText(nextText)
+    window.requestAnimationFrame(() => {
+      const nextEditor = scriptEditorRef.current
+      if (!nextEditor) return
+      nextEditor.focus()
+      nextEditor.setSelectionRange(start, start + marker.length)
+    })
+    showToast({ tone: 'ok', message: `Applied ${prosodyRate.toFixed(2)}x / ${prosodyPitch > 0 ? '+' : ''}${prosodyPitch} st emphasis.` })
+  }
+
   async function handleDesktopIntegrationToggle(kind: DesktopIntegrationKind, enabled: boolean) {
     if (!desktopIntegrations || desktopIntegrationAction !== null) return
     setDesktopIntegrationAction(kind)
@@ -3564,7 +3607,11 @@ function App() {
     }
 
     try {
-    const dispatchResult = await dispatchGeneration(jobs, {
+    const dispatchJobs = jobs.map((job) => ({
+      ...job,
+      text: applyPunctuationPauses(job.text, punctuationPauses),
+    }))
+    const dispatchResult = await dispatchGeneration(dispatchJobs, {
       sampleRate: outputSampleRate,
       speed,
       requestStart,
@@ -3572,6 +3619,9 @@ function App() {
       isCancelled: () => abortRef.current,
       applyPronunciations,
       synthesize,
+      processAudio: async (audio, prosody) => prosody.pitchSemitones === 0
+        ? audio
+        : { ...audio, samples: await shiftPitch(audio.samples, prosody.pitchSemitones, audio.sampleRate) },
       checkCompleteness: (sentence, durationSeconds, currentSpeed) => checkSynthesisCompleteness(sentence, durationSeconds, currentSpeed),
       onProgress: (done, totalSentences) => {
         if (totalSentences > 0) {
@@ -3870,7 +3920,7 @@ function App() {
     clearOutputs()
     setStatus('Starting browser speech')
     setProgress(5)
-    const cleanText = chunks.join('\n\n').replace(PAUSE_TAG, ' ')
+    const cleanText = stripProsodyTags(chunks.join('\n\n')).replace(PAUSE_TAG, ' ')
     const chosenVoice = browserVoices.find((v) => v.voiceURI === browserVoiceUri)
     await speakBrowser(cleanText, speed, chosenVoice, () => abortRef.current)
     if (abortRef.current) {
@@ -4081,7 +4131,7 @@ function App() {
     setIsSpeaking(true)
     try {
       const chosenVoice = browserVoices.find((v) => v.voiceURI === browserVoiceUri)
-      await speakBrowser(textToReplay.replace(PAUSE_TAG, ' '), speed, chosenVoice)
+      await speakBrowser(stripProsodyTags(textToReplay).replace(PAUSE_TAG, ' '), speed, chosenVoice)
     } catch (error) {
       showToast({
         tone: 'error',
@@ -4409,55 +4459,37 @@ function App() {
     voice = job.voice,
     voiceBin?: Float32Array,
   ): Promise<{ blob: Blob; duration: string; cues?: Cue[]; warning?: string } | null> {
-    const sentences = splitIntoSentences(applyPronunciations(text))
-    const parts: Float32Array[] = []
-    const cues: Cue[] = []
-    let sampleOffset = 0
-    let cueIndex = 1
-    let aborted = false
-    let flagged = 0
-    for (const sentence of sentences) {
-      if (abortRef.current) {
-        aborted = true
-        break
-      }
-      const audio = await synthesize(sentence, voice, job.speed, voiceBin, generationAbortRef.current?.signal)
-      if (abortRef.current) {
-        aborted = true
-        break
-      }
-      if (audio) {
-        if (checkSynthesisCompleteness(sentence, audio.samples.length / sampleRate, job.speed).suspect) flagged += 1
-        const startSec = sampleOffset / sampleRate
-        parts.push(audio.samples)
-        sampleOffset += audio.samples.length
-        const endSec = sampleOffset / sampleRate
-        if (audio.wordCues?.length) {
-          for (const cue of audio.wordCues) {
-            const wordStart = Math.max(startSec, Math.min(endSec, startSec + cue.startSec))
-            const wordEnd = Math.max(wordStart, Math.min(endSec, startSec + cue.endSec))
-            if (wordEnd > wordStart) cues.push({ index: cueIndex++, startSec: wordStart, endSec: wordEnd, text: cue.text })
-          }
-        } else {
-          cues.push({ index: cueIndex++, startSec, endSec, text: sentence })
-        }
-      } else {
-        flagged += 1
-      }
-    }
+    const dispatched = await dispatchGeneration([{
+      text: applyPunctuationPauses(text, punctuationPauses),
+      voice,
+      voiceBin,
+    }], {
+      sampleRate,
+      speed: job.speed,
+      requestStart: performance.now(),
+      signal: generationAbortRef.current?.signal,
+      isCancelled: () => abortRef.current,
+      applyPronunciations,
+      synthesize,
+      processAudio: async (audio, prosody) => prosody.pitchSemitones === 0
+        ? audio
+        : { ...audio, samples: await shiftPitch(audio.samples, prosody.pitchSemitones, audio.sampleRate) },
+      checkCompleteness: (sentence, durationSeconds, currentSpeed) => checkSynthesisCompleteness(sentence, durationSeconds, currentSpeed),
+    })
     // A pause/cancel mid-chunk must never be checkpointed: a partial blob saved
     // as 'done' would silently truncate the chapter in every later export.
-    if (aborted) return null
-    if (parts.length === 0) throw new Error('No audio produced')
-    const raw = concatFloat32Arrays(parts)
+    if (dispatched.cancelled) return null
+    const result = dispatched.jobs[0]
+    if (!result || result.audioParts.length === 0) throw new Error('No audio produced')
+    const raw = concatFloat32Arrays(result.audioParts)
     const { blob } = await encodeOutput(raw, sampleRate, job.format, job.bitrate, job.title)
     if (abortRef.current) return null
     return {
       blob,
       duration: `${(raw.length / sampleRate).toFixed(1)}s`,
-      cues: cues.length > 0 ? cues : undefined,
-      warning: flagged > 0
-        ? `${flagged} of ${sentences.length} sentence${sentences.length === 1 ? '' : 's'} flagged as possibly truncated or missing`
+      cues: result.cues.length > 0 ? result.cues.map((cue, index) => ({ ...cue, index: index + 1 })) : undefined,
+      warning: result.flaggedSentences > 0
+        ? `${result.flaggedSentences} of ${dispatched.totalSentences} sentence${dispatched.totalSentences === 1 ? '' : 's'} flagged as possibly truncated or missing`
         : undefined,
     }
   }
@@ -5837,6 +5869,7 @@ function App() {
               <div className="editor-frame">
                 <textarea
                   id="script-editor"
+                  ref={scriptEditorRef}
                   value={text}
                   onChange={(event) => setText(event.target.value)}
                   spellCheck={false}
@@ -7285,6 +7318,52 @@ function App() {
                     />
                   </div>
                 ) : null}
+
+                <div className="prosody-panel" aria-label="Prosody controls">
+                  <div className="prosody-heading">
+                    <strong>Prosody</strong>
+                    <small>Select a phrase in the editor to apply rate and pitch. Pause rules are opt-in and saved on this device.</small>
+                  </div>
+                  <div className="prosody-rules" role="group" aria-label="Punctuation pause rules">
+                    {PUNCTUATION_PAUSE_FIELDS.map((field) => (
+                      <label className="prosody-rule" key={field.key}>
+                        <span aria-hidden="true">{field.symbol}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="5"
+                          step="0.05"
+                          value={punctuationPauses[field.key]}
+                          aria-label={`${field.label} pause duration in seconds`}
+                          onChange={(event) => {
+                            const value = Number(event.target.value)
+                            setPunctuationPauses((current) => ({
+                              ...current,
+                              [field.key]: Math.min(5, Math.max(0, Number.isFinite(value) ? value : 0)),
+                            }))
+                          }}
+                        />
+                        <small>s</small>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="prosody-range-grid">
+                    <div className="range-row">
+                      <label htmlFor="prosody-rate">Selection rate</label>
+                      <span>{prosodyRate.toFixed(2)}x</span>
+                      <input id="prosody-rate" type="range" min="0.5" max="2" step="0.05" value={prosodyRate} onChange={(event) => setProsodyRate(Number(event.target.value))} />
+                    </div>
+                    <div className="range-row">
+                      <label htmlFor="prosody-pitch">Selection pitch</label>
+                      <span>{prosodyPitch > 0 ? `+${prosodyPitch}` : prosodyPitch} st</span>
+                      <input id="prosody-pitch" type="range" min="-12" max="12" step="1" value={prosodyPitch} onChange={(event) => setProsodyPitch(Number(event.target.value))} />
+                    </div>
+                  </div>
+                  <div className="prosody-actions">
+                    <button type="button" className="heading-action" onClick={applyProsodyToSelection}>Apply to selection</button>
+                    <button type="button" className="heading-action" onClick={() => setPunctuationPauses(DEFAULT_PUNCTUATION_PAUSES)}>Reset punctuation pauses</button>
+                  </div>
+                </div>
 
                 <div className="diagnostics-panel rvc-panel" aria-label="RVC voice conversion post-stage">
                   <div className="cache-manager-head">

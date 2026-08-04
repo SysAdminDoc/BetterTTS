@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CLEANUP, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
+import { applyPunctuationPauses, DEFAULT_CLEANUP, DEFAULT_PUNCTUATION_PAUSES, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, parseProsodyTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
 
 describe('checkSynthesisCompleteness', () => {
   // ~200 speakable chars of ordinary prose.
@@ -121,6 +121,38 @@ describe('parsePauseTags', () => {
       { type: 'pause', duration: 1 },
       { type: 'pause', duration: 2 },
     ])
+  })
+})
+
+describe('prosody tags', () => {
+  it('parses marked spans and keeps unmarked text at the defaults', () => {
+    expect(parseProsodyTags('A [prosody rate=1.5 pitch=-3]bold words[/prosody] C')).toEqual([
+      { content: 'A', rate: 1, pitchSemitones: 0 },
+      { content: 'bold words', rate: 1.5, pitchSemitones: -3 },
+      { content: 'C', rate: 1, pitchSemitones: 0 },
+    ])
+  })
+
+  it('bounds malformed or extreme span values', () => {
+    expect(parseProsodyTags('[prosody rate=9 pitch=-99]hello[/prosody]')[0]).toEqual({
+      content: 'hello',
+      rate: 2,
+      pitchSemitones: -12,
+    })
+  })
+})
+
+describe('punctuation pause rules', () => {
+  it('leaves text unchanged with the default all-zero map', () => {
+    const text = 'Keep this sentence… and this dash—unchanged.'
+    expect(applyPunctuationPauses(text, DEFAULT_PUNCTUATION_PAUSES)).toBe(text)
+  })
+
+  it('adds configured pauses without duplicating explicit pauses or decimals', () => {
+    const settings = { ...DEFAULT_PUNCTUATION_PAUSES, comma: 0.2, ellipsis: 0.7, emDash: 0.4, period: 0.5 }
+    expect(applyPunctuationPauses('Wait, really... go—now. [pause] 3.14', settings)).toBe(
+      'Wait, [pause 0.2s] really... [pause 0.7s] go— [pause 0.4s]now. [pause] 3.14',
+    )
   })
 })
 
@@ -327,6 +359,12 @@ describe('cleanupText', () => {
   it('is a no-op when every rule is off', () => {
     const text = 'Keep [12] https://x.dev SQL **bold**'
     expect(cleanupText(text, off)).toBe(text)
+  })
+
+  it('preserves prosody attributes while normalizing numbers in the span body', () => {
+    const result = cleanupText('[prosody rate=1.15 pitch=2]Version 3.14[/prosody]', DEFAULT_CLEANUP)
+    expect(result).toContain('[prosody rate=1.15 pitch=2]')
+    expect(result).toContain('Version 3 point 1 4')
   })
 
   it('normalizes currency, decimals, units, and percentages', () => {

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_PRONUNCIATIONS,
   parseCleanupSetting,
+  parsePunctuationPauseSetting,
   parsePronunciationSetting,
 } from './settings.ts'
-import { DEFAULT_CLEANUP } from './text.ts'
+import { DEFAULT_CLEANUP, DEFAULT_PUNCTUATION_PAUSES } from './text.ts'
 
 describe('persisted editor settings', () => {
   it('rejects malformed and non-object pronunciation dictionaries', () => {
@@ -43,5 +44,15 @@ describe('persisted editor settings', () => {
   it('persists the PDF re-flow toggle independently', () => {
     expect(parseCleanupSetting(JSON.stringify({ pdfReflow: false })).pdfReflow).toBe(false)
     expect(parseCleanupSetting(JSON.stringify({ citations: false })).pdfReflow).toBe(true)
+  })
+
+  it('bounds persisted punctuation pauses and fills missing keys', () => {
+    expect(parsePunctuationPauseSetting(JSON.stringify({ comma: 0.25, emDash: 99, period: -2 }))).toEqual({
+      ...DEFAULT_PUNCTUATION_PAUSES,
+      comma: 0.25,
+      emDash: 30,
+      period: 0,
+    })
+    expect(parsePunctuationPauseSetting('null')).toEqual(DEFAULT_PUNCTUATION_PAUSES)
   })
 })
