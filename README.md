@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-396%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-401%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -56,6 +56,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
 - **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
 - **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
+- **Headless native CLI** — `bettertts synth` converts TXT or EPUB input to WAV, MP3, Opus, FLAC, or chaptered M4B with SRT/VTT captions and machine-readable progress, without launching the GUI
 - **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
@@ -124,6 +125,12 @@ npm run smoke
 # Production build
 npm run build
 
+# Build the Windows native hosts and headless CLI
+npm run desktop:build
+
+# Convert a text file or EPUB without opening Electron
+node dist-electron/bettertts-cli.cjs synth --in book.epub --voice af_heart --m4b --out book.m4b
+
 # Re-check the existing production bundle against pinned shell/lazy-asset budgets
 npm run budget:build
 
@@ -142,6 +149,8 @@ BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root n
 Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, queue/library playback and Undo recovery, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Eight required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
+
+The headless CLI is built by `npm run desktop:build` and runs the same verified Sherpa native host as the Windows app, but never opens a window. `bettertts synth --in book.epub --voice af_heart --m4b --out book.m4b` writes the audiobook plus sibling `book.srt` and `book.vtt` files; TXT input, WAV/MP3/Opus/FLAC formats, `--dry-run`, `--json`, `--force`, and `--no-captions` are also supported. Native model packs live in the user cache (override with `BETTERTTS_MODEL_CACHE`), and M4B output requires FFmpeg on `PATH` or `BETTERTTS_FFMPEG_PATH`.
 
 Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing.
 
@@ -176,6 +185,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Narrator segmentation | Bounded local quote/speaker parser with per-queue-chunk role and voice metadata |
 | Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
 | Local API | Opt-in loopback-only Electron server for OpenAI-compatible speech requests, native Kokoro/Piper output, and SSE audio chunks |
+| Headless CLI | Plain Node `bettertts synth` entrypoint reusing the verified Sherpa host, bounded text/EPUB chunking, FFmpeg export, and SRT/VTT serializers |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
@@ -184,7 +194,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (396 tests across 67 files) + Playwright smoke |
+| Testing | Vitest (401 tests across 68 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -233,6 +243,8 @@ src/
 ```
 electron/
 ├── main.ts                   # Window, IPC, and isolated utility-process routing
+├── cli.mjs                   # Headless TXT/EPUB synthesis and export entrypoint
+├── cli-core.ts               # CLI parsing, bounded chunks, and caption timing
 ├── whisper-host.ts           # Isolated whisper.cpp subprocess and temp-file host
 ├── whisper-ipc.ts            # Bounded desktop caption IPC protocol
 ├── tts-host.ts               # Isolated Sherpa native inference host

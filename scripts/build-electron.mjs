@@ -21,6 +21,12 @@ const common = {
 await Promise.all([
   build({ ...common, entryPoints: ['electron/main.ts'], outfile: 'dist-electron/main.cjs' }),
   build({ ...common, entryPoints: ['electron/preload.ts'], outfile: 'dist-electron/preload.cjs' }),
+  build({
+    ...common,
+    entryPoints: ['electron/cli.mjs'],
+    outfile: 'dist-electron/bettertts-cli.cjs',
+    banner: { js: '#!/usr/bin/env node' },
+  }),
   // The native inference host stays ESM so its dynamic imports of the Sherpa
   // addon and model runtime resolve natively from node_modules (never bundled
   // — native addons and their companion DLLs must load from disk).
@@ -51,4 +57,4 @@ await Promise.all([
   }),
 ])
 
-console.log('Built Electron main + preload + tts-host → dist-electron/')
+console.log('Built Electron main + preload + headless CLI + runtime hosts → dist-electron/')
