@@ -5,6 +5,11 @@ import {
   chatterboxModelId,
   type ChatterboxModelVariant,
 } from '../lib/chatterbox-config.ts'
+import {
+  chatterboxVoiceLabModel,
+  createVoiceProvenance,
+  type VoiceProvenance,
+} from '../lib/voice-lab.ts'
 
 export type ChatterboxWorkerRequest =
   | { type: 'load'; model: ChatterboxModelVariant; device: 'webgpu' | 'wasm' }
@@ -14,7 +19,7 @@ export type ChatterboxWorkerRequest =
       text: string
       exaggeration: number
       maxNewTokens: number
-      referenceId: string
+      provenance: [referenceId: string, referenceName: string, referenceDurationSeconds: number, acknowledgedAt?: string]
       referenceAudio?: Float32Array
     }
   | { type: 'cancel'; id: number }
@@ -23,7 +28,7 @@ export type ChatterboxWorkerResponse =
   | { type: 'progress'; info: ProgressInfo }
   | { type: 'loaded'; key: string }
   | { type: 'loadError'; key: string; message: string }
-  | { type: 'generated'; id: number; samples: Float32Array }
+  | { type: 'generated'; id: number; samples: Float32Array; provenance: VoiceProvenance }
   | { type: 'generateError'; id: number; message: string }
   | { type: 'cancelled'; id: number }
 
@@ -39,6 +44,7 @@ type ChatterboxModelLike = {
 let processor: ChatterboxProcessorLike | null = null
 let model: ChatterboxModelLike | null = null
 let loadedKey = ''
+let loadedModel: ChatterboxModelVariant | null = null
 const cancelledIds = new Set<number>()
 const speakerCache = new Map<string, Record<string, unknown>>()
 
@@ -86,6 +92,7 @@ self.addEventListener('message', async (event: MessageEvent<ChatterboxWorkerRequ
         progress_callback: (info: unknown) => self.postMessage({ type: 'progress', info: info as ProgressInfo } satisfies ChatterboxWorkerResponse),
       })) as unknown as ChatterboxModelLike
       loadedKey = key
+      loadedModel = message.model
       speakerCache.clear()
       self.postMessage({ type: 'loaded', key } satisfies ChatterboxWorkerResponse)
     } catch (error) {
@@ -112,13 +119,15 @@ self.addEventListener('message', async (event: MessageEvent<ChatterboxWorkerRequ
   }
 
   try {
-    const cachedSpeaker = speakerCache.get(message.referenceId)
+    const [referenceId, referenceName, referenceDurationSeconds, at] = message.provenance
+    if (!loadedModel) throw new Error('Chatterbox model is not loaded.')
+    const cachedSpeaker = speakerCache.get(referenceId)
     const inputs = await processor(message.text, cachedSpeaker ? undefined : message.referenceAudio)
     let speakerData = cachedSpeaker
     if (!speakerData) {
       if (!message.referenceAudio) throw new Error('Reference audio is required for the first Chatterbox sentence.')
       speakerData = await model.encode_speech(inputs.input_values)
-      cacheSpeaker(message.referenceId, speakerData)
+      cacheSpeaker(referenceId, speakerData)
     }
     if (cancelledIds.delete(message.id)) {
       self.postMessage({ type: 'cancelled', id: message.id } satisfies ChatterboxWorkerResponse)
@@ -141,7 +150,14 @@ self.addEventListener('message', async (event: MessageEvent<ChatterboxWorkerRequ
     }
     const samples = outputSamples(output)
     if (!samples || samples.length === 0) throw new Error('Chatterbox produced no audio.')
-    self.postMessage({ type: 'generated', id: message.id, samples } satisfies ChatterboxWorkerResponse, {
+    const provenance = createVoiceProvenance({
+      referenceId,
+      referenceName,
+      referenceDurationSeconds,
+      acknowledgedAt: at,
+      model: chatterboxVoiceLabModel(loadedModel),
+    })
+    self.postMessage({ type: 'generated', id: message.id, samples, provenance } satisfies ChatterboxWorkerResponse, {
       transfer: [samples.buffer as ArrayBuffer],
     })
   } catch (error) {

@@ -49,6 +49,25 @@ describe('library', () => {
     expect(migrateClipRecord({ ...valid, rvc: { stage: 'rvc' } })).not.toHaveProperty('rvc')
   })
 
+  it('lists consented reference-voice provenance', async () => {
+    const valid = {
+      ...record('reference', 1),
+      provenance: {
+        kind: 'reference-voice' as const,
+        referenceId: 'reference-a',
+        referenceName: 'speaker.wav',
+        referenceDurationSeconds: 4.25,
+        acknowledgedAt: '2026-08-03T12:00:00.000Z',
+        modelId: 'onnx-community/chatterbox-ONNX',
+        modelLabel: 'Chatterbox English',
+        modelLicenseSpdx: 'MIT',
+        modelLicenseTier: 'permissive' as const,
+      },
+    }
+    await saveClip(valid, new Blob(['reference']))
+    expect((await listClips())[0]?.provenance).toEqual(valid.provenance)
+  })
+
   it('round-trips the audio blob', async () => {
     await saveClip(record('x', 1), new Blob(['payload'], { type: 'audio/wav' }))
     const blob = await getClipBlob('x')

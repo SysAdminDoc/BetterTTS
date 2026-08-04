@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-503%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-508%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -17,7 +17,7 @@
 
 ## Why BetterTTS?
 
-Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs its engines locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, or 10,000-character monthly cap. Chatterbox is an explicit opt-in voice-cloning lab and retains its built-in PerTh watermark.
+Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs its engines locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, or 10,000-character monthly cap. Chatterbox is an explicit ownership/permission-gated voice-cloning lab and retains its built-in PerTh watermark.
 
 | | BetterTTS | ElevenLabs Free | TTSMaker Free | voice-generator.com |
 |---|---|---|---|---|
@@ -43,7 +43,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Kokoro short-input cleanup** — one-to-four-word English renders use padded context and timestamped boundary cropping to remove leading/trailing artifacts across generation, queue chunks, and voice previews
 - **Supertonic speed engine** via Transformers.js — 10 English F/M voices, 44.1 kHz fp32 output, lazy-loaded only when selected
 - **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
-- **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — opt-in reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, and disclosed PerTh watermark
+- **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — explicit ownership/permission acknowledgement before local reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, permissive-license gate, local provenance on saved clips, and disclosed PerTh watermark
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
 - **MeloTTS native engine** — pinned MIT Chinese + English VITS archive through Sherpa-ONNX, single speaker, 44.1 kHz, Windows desktop only
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
@@ -218,7 +218,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (503 tests across 86 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (508 tests across 87 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -260,6 +260,7 @@ src/
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser
 │   ├── chatterbox.ts        # Consent-gated reference audio decode and worker client
 │   ├── chatterbox-config.ts # Chatterbox model IDs, languages, limits, and controls
+│   ├── voice-lab.ts         # Reference-voice consent, license gate, and clip provenance
 │   ├── whisper.ts            # whisper.cpp JSON word-cue parser and audio bounds
 │   ├── qwen.ts               # Optional desktop Qwen sidecar client and controls
 │   ├── byo-models.ts         # Consent-gated user-supplied weight metadata and provenance

@@ -128,6 +128,7 @@ import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesiz
 import { cancelRvcGeneration, chooseRvcIndex, chooseRvcModel, convertRvcAudio, getRvcRuntimeStatus, rvcAvailable, rvcWeightsAvailable, setupRvcRuntime, type RvcRuntimeStatus } from './platform/rvc.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
+import type { VoiceProvenance } from './lib/voice-lab.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
@@ -3342,6 +3343,7 @@ function App() {
     samples: Float32Array
     sampleRate: number
     wordCues?: Omit<Cue, 'index'>[]
+    provenance?: VoiceProvenance
   }
 
   type LoadedEngine = {
@@ -3623,6 +3625,7 @@ function App() {
   async function runSynthesis(jobs: SynthJob[], opts: { zipPrefix: string; successMessage?: string }) {
     const requestStart = performance.now()
     const rvcPlan = resolveRvcInferencePlan(rvcSettings, rvcModels, rvcConsent)
+    let voiceProvenance: VoiceProvenance | undefined
     if (rvcPlan) {
       if (!engineSupportsPostStage(engine, 'rvc')) throw new Error('RVC post-processing requires an exported audio engine, not Browser playback.')
       const status = rvcStatus ?? await getRvcRuntimeStatus()
@@ -3749,6 +3752,7 @@ function App() {
         }
       },
       onAudio: (audio) => {
+        voiceProvenance ??= audio.provenance
         if (!audioCtx) return
         const buf = audioCtx.createBuffer(1, audio.samples.length, outputSampleRate)
         buf.getChannelData(0).set(audio.samples)
@@ -3843,6 +3847,7 @@ function App() {
         duration: result.duration,
         cues: result.cues,
         ...(rvcPlan ? { rvc: createRvcClipProvenance(rvcPlan) } : {}),
+        provenance: voiceProvenance,
       }
       try {
         await saveClip(clipRecord, blob)
@@ -5735,13 +5740,13 @@ function App() {
   async function handleChatterboxReferenceChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0] ?? null
     event.currentTarget.value = ''
-    if (!file) return
-    setStatus('Decoding reference clip locally')
+    if (!file || !chatterboxConsent) return
+    setStatus('Loading')
     try {
       const reference = await decodeChatterboxReference(file)
-      setChatterboxReference(reference)
+      const consentedReference = { ...reference, at: new Date().toISOString() }
+      setChatterboxReference(consentedReference)
       setStatus('Ready')
-      showToast({ tone: 'ok', message: `Reference clip ready: ${formatChatterboxReference(reference)}. It stays in memory for this session.` })
     } catch (error) {
       setStatus('Ready')
       showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not decode the reference clip.' })
@@ -6597,16 +6602,20 @@ function App() {
                     <small>{piperPlusSupport.supported ? 'Loads the Piper runtime and Tsukuyomi-chan model only when selected.' : 'Requires WebAssembly and IndexedDB support.'}</small>
                   </span>
                 </label> : null}
-                <label className="toggle-row experimental-engine-toggle" htmlFor="chatterbox-consent" aria-label="Enable Chatterbox voice lab">
+                <label className="toggle-row experimental-engine-toggle" htmlFor="chatterbox-consent">
                   <input
                     id="chatterbox-consent"
                     type="checkbox"
                     checked={chatterboxConsent}
-                    onChange={(event) => setChatterboxConsent(event.target.checked)}
+                    disabled={status === 'Loading'}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                      setChatterboxConsent(next)
+                      if (!next) setChatterboxReference(null)
+                    }}
                   />
                   <span>
-                    <strong>Enable Chatterbox voice lab</strong>
-                    <small>Opt in to local reference-voice cloning. Use only audio you own or have permission to use; clips are decoded in memory and never uploaded.</small>
+                    I own or have permission
                   </span>
                 </label>
                 {desktopIntegrations ? (
@@ -7306,7 +7315,7 @@ function App() {
                     hidden
                   />
                 </div>
-                <small className="engine-note">{formatChatterboxReference(chatterboxReference)}. Clips are limited to 30 seconds and kept in memory only.</small>
+                <small className="engine-note">{formatChatterboxReference(chatterboxReference)}. Local; MIT.</small>
 
                 <div className="range-row">
                   <label htmlFor="chatterbox-exaggeration">Emotion</label>

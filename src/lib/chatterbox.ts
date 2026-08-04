@@ -12,6 +12,7 @@ import {
   type ChatterboxModelVariant,
 } from './chatterbox-config.ts'
 import type { ChatterboxWorkerRequest, ChatterboxWorkerResponse } from '../worker/chatterbox.worker.ts'
+import type { VoiceProvenance } from './voice-lab.ts'
 
 export {
   CHATTERBOX_DEFAULT_EXAGGERATION,
@@ -38,11 +39,13 @@ export type ChatterboxReference = {
   name: string
   samples: Float32Array
   durationSeconds: number
+  at?: string
 }
 
 export type ChatterboxSynthesizedAudio = {
   samples: Float32Array
   sampleRate: number
+  provenance?: VoiceProvenance
 }
 
 export type ChatterboxSynthesisOptions = {
@@ -174,7 +177,7 @@ function getWorker(): Worker {
       entry?.cleanup()
       if (entry) {
         knownReferences.add(entry.referenceId)
-        entry.resolve({ samples: message.samples, sampleRate: CHATTERBOX_SAMPLE_RATE })
+        entry.resolve({ samples: message.samples, sampleRate: CHATTERBOX_SAMPLE_RATE, provenance: message.provenance })
       }
     } else if (message.type === 'generateError') {
       const entry = pending.get(message.id)
@@ -234,7 +237,7 @@ export function synthesizeChatterbox(
     text: chatterboxPrompt(text, options.model, options.language),
     exaggeration: clampChatterboxExaggeration(options.exaggeration),
     maxNewTokens: CHATTERBOX_MAX_NEW_TOKENS,
-    referenceId,
+    provenance: [referenceId, options.reference.name, options.reference.durationSeconds, options.reference.at],
     referenceAudio,
   }
   return new Promise<ChatterboxSynthesizedAudio>((resolve, reject) => {

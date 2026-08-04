@@ -1,4 +1,5 @@
 import { parsePauseTags, parseProsodyTags, splitIntoSentences, type NarratorRole, type ProsodySettings } from './text.ts'
+import type { VoiceProvenance } from './voice-lab.ts'
 
 export type GenerationJob = {
   text: string
@@ -12,6 +13,7 @@ export type GeneratedSentence = {
   samples: Float32Array
   sampleRate: number
   wordCues?: Array<{ startSec: number; endSec: number; text: string }>
+  provenance?: VoiceProvenance
 }
 
 export type GenerationJobResult = {
