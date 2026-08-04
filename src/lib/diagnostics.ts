@@ -1,4 +1,5 @@
 import { opusSupported } from './encode.ts'
+import type { CapabilityManifest } from './capabilities.ts'
 import type { M4bCapability } from './m4b.ts'
 import { readModelCacheStatus, type ModelCacheSummary } from './model-cache.ts'
 import { getPersistenceOutcome, type PersistenceOutcome } from './persistence.ts'
@@ -90,6 +91,7 @@ export type DiagnosticsBundle = {
   selection: DiagnosticsSelection
   generation: GenerationDiagnostics | null
   capabilities: {
+    product: CapabilityManifest
     webGpu: WebGpuDiagnostics
     webCodecs: {
       audioEncoder: boolean
@@ -258,6 +260,7 @@ export async function collectDiagnostics(
   const desktop = input.desktop ?? (typeof window === 'undefined'
     ? undefined
     : await window.betterttsPlatform?.desktopDiagnostics?.collect({ selection: input.selection }))
+  const { CAPABILITIES } = await import('./capabilities.ts')
 
   return {
     schemaVersion: 3,
@@ -280,6 +283,7 @@ export async function collectDiagnostics(
     selection: input.selection,
     generation: input.generation ?? null,
     capabilities: {
+      product: CAPABILITIES,
       webGpu,
       webCodecs: {
         audioEncoder: typeof AudioEncoder !== 'undefined',

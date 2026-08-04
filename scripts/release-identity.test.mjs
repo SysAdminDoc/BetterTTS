@@ -23,8 +23,7 @@ function createFixture(version = '1.2.3') {
   }))
   writeFileSync(join(root, 'README.md'), `[![Version](https://img.shields.io/badge/version-${version}-blue.svg)](#)\n`)
   writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## v${version} - 2026-08-03\n`)
-  mkdirSync(join(root, 'src'))
-  writeFileSync(join(root, 'src', 'App.tsx'), `const APP_VERSION = '${version}'\n`)
+  writeFileSync(join(root, 'capabilities.json'), JSON.stringify({ schemaVersion: 1, app: { name: 'BetterTTS', version } }))
   return root
 }
 
@@ -47,10 +46,10 @@ describe('release identity', () => {
     expect(identity.sourceSha).toMatch(/^[a-f0-9]{40}$/)
   })
 
-  it('rejects a stale application version before any release work starts', () => {
+  it('rejects a stale capability-manifest version before any release work starts', () => {
     const root = createFixture()
-    writeFileSync(join(root, 'src', 'App.tsx'), "const APP_VERSION = '1.2.2'\n")
-    expect(() => assertVersionMetadata(root)).toThrow('src/App.tsx APP_VERSION')
+    writeFileSync(join(root, 'capabilities.json'), JSON.stringify({ schemaVersion: 1, app: { name: 'BetterTTS', version: '1.2.2' } }))
+    expect(() => assertVersionMetadata(root)).toThrow('capabilities.json app.version')
   })
 
   it('writes a Pages manifest containing the exact source identity', () => {

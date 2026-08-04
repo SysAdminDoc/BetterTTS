@@ -66,10 +66,10 @@ export function assertVersionMetadata(repoRoot) {
     throw new Error(`CHANGELOG.md latest version ${changelogVersion ?? 'missing'} does not match package ${version}.`)
   }
 
-  const app = readText(join(repoRoot, 'src', 'App.tsx'), 'src/App.tsx')
-  const appVersion = app.match(/const APP_VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1]
+  const capabilities = readJson(join(repoRoot, 'capabilities.json'), 'capabilities.json')
+  const appVersion = capabilities.app?.version
   if (appVersion !== version) {
-    throw new Error(`src/App.tsx APP_VERSION ${appVersion ?? 'missing'} does not match package ${version}.`)
+    throw new Error(`capabilities.json app.version ${appVersion ?? 'missing'} does not match package ${version}.`)
   }
 
   return version

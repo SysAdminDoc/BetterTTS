@@ -3,28 +3,21 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const EXPECTED_LICENSES = [
-  ['@breezystack/lamejs', 'LGPL-3.0'],
-  ['@huggingface/transformers', 'Apache-2.0'],
-  ['@mozilla/readability', 'Apache-2.0'],
-  ['@piper-plus/g2p', 'MIT'],
-  ['ephone', 'GPL-3.0-or-later'],
-  ['electron-updater', 'MIT'],
-  ['fflate', 'MIT'],
-  ['kitten-tts-webgpu', 'MIT'],
-  ['kokoro-js', 'Apache-2.0'],
-  ['linkedom', 'ISC'],
-  ['lucide-react', 'ISC'],
-  ['onnxruntime-node', 'MIT'],
-  ['onnxruntime-web', 'MIT'],
-  ['pdfjs-dist', 'Apache-2.0'],
-  ['piper-plus', 'MIT'],
-  ['phonemizer', 'Apache-2.0'],
-  ['react', 'MIT'],
-  ['react-dom', 'MIT'],
-  ['signalsmith-stretch', 'MIT'],
-  ['sherpa-onnx-node', 'Apache-2.0'],
-  ['sherpa-onnx-win-x64', 'Apache-2.0'],
+  ...readCapabilitiesRuntimeLicenses(),
 ]
+
+function readCapabilitiesRuntimeLicenses() {
+  const capabilitiesPath = join(fileURLToPath(new URL('../capabilities.json', import.meta.url)))
+  const capabilities = JSON.parse(readFileSync(capabilitiesPath, 'utf8'))
+  const packages = capabilities?.runtimeLicenses?.packages
+  if (!Array.isArray(packages)) throw new Error('capabilities.json runtime license package table is missing.')
+  return packages.map((entry) => {
+    if (!entry || typeof entry.name !== 'string' || typeof entry.spdx !== 'string') {
+      throw new Error('capabilities.json contains an invalid runtime license package row.')
+    }
+    return [entry.name, entry.spdx]
+  })
+}
 
 export function findMissingRuntimeLicenses(packageJson, licenseEntries = EXPECTED_LICENSES) {
   const tableNames = new Set(licenseEntries.map(([name]) => name))

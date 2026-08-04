@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import { Component, lazy, Suspense, type ChangeEvent, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { APP_VERSION } from './lib/capabilities-core.ts'
+import type { CapabilityLicenseRow, CapabilityManifest } from './lib/capabilities.ts'
 import {
   collectDiagnostics,
   installGlobalDiagnosticsCapture,
@@ -247,7 +249,6 @@ import { createReaderDocument, type ReaderDocument } from './lib/reader.ts'
 import type { ReaderAudioTrack } from './components/ReaderView.tsx'
 import type { EpubMappingVoiceOption } from './components/EpubMappingPanel.tsx'
 
-const APP_VERSION = '0.22.0'
 const PREVIEW_CACHE_MAX_ENTRIES = 20
 const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
 const MELO_MODEL_REVISION = 'af5d207a364ea4208c6f589c89f57f88414bdd16'
@@ -442,41 +443,6 @@ function handleWorkspaceTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>)
   tabs[nextIndex].focus()
   tabs[nextIndex].click()
 }
-
-const MODEL_ROWS = [
-  ['Kokoro 82M', 'Kokoro local', '82M', 'EN / ES / FR / HI / IT / PT / JA / ZH', 'Ready'],
-  ['Kokoro timestamped', 'Kokoro local', '82M', 'Word-level timings', 'Opt-in'],
-  ['Supertonic', 'Transformers.js', '66M', 'English speed engine', 'Ready'],
-  ['KittenTTS', 'WebGPU shaders', '15M / 40M / 80M', 'English lightweight engine', 'Ready'],
-  ['Chatterbox', 'Transformers.js v4', '0.5B', 'English + 23 languages', 'Opt-in'],
-  ['Piper-plus', 'WASM + ONNX Runtime', 'Tsukuyomi-chan', 'JA / EN / ZH / KO / ES / FR / PT / SV', 'Experimental'],
-  ['MeloTTS', 'Sherpa-ONNX VITS', '~163 MB', 'Chinese + English', 'Desktop'],
-  ['Qwen3-TTS', 'Python sidecar', '0.6B', '10 multilingual languages + style instruction', 'Desktop opt-in'],
-  ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT / JA / CMN', 'Ready'],
-  ['Browser voices', 'Web Speech', 'Native', 'Device voices', 'Fallback'],
-]
-
-const RUNTIME_LICENSE_ROWS = [
-  ['BetterTTS app code', 'MIT', 'App shell, UI, queue, exports'],
-  ['kokoro-js, Kokoro ONNX, Transformers.js, phonemizer', 'Apache-2.0', 'Kokoro, timestamps, English phonemization'],
-  ['ephone / eSpeak NG WASM', 'GPL-3.0-or-later', 'Loaded only for multilingual Kokoro voices: ES / FR / HI / IT / PT-BR / JA / CMN'],
-  ['electron-updater', 'MIT', 'Opt-in Windows update download and restart install'],
-  ['KittenTTS browser wrapper', 'MIT', 'Kitten model weights are Apache-2.0'],
-  ['Chatterbox ONNX models', 'MIT', 'Opt-in reference-voice synthesis; generated audio carries the PerTh watermark'],
-  ['piper-plus, @piper-plus/g2p, onnxruntime-web', 'MIT', 'Experimental Piper-plus engine; lazy package/WASM/model path'],
-  ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro, MeloTTS, and English Piper CPU utility process'],
-  ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
-  ['Sherpa Piper Cori pack', 'Public-domain source data', 'Pinned English native Piper archive; downloaded and verified on first use'],
-  ['Sherpa MeloTTS pack', 'MIT', 'Pinned Chinese + English VITS archive; downloaded and verified on first use'],
-  ['qwen-tts / Qwen3-TTS', 'Apache-2.0', 'Optional desktop Python sidecar; torch/runtime and model weights are user-managed and never bundled'],
-  ['rvc-python (optional user-managed)', 'MIT', 'Optional Windows RVC post-stage; installed into user data only after explicit setup'],
-  ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
-  ['lamejs MP3 encoder', 'LGPL-3.0', 'MP3 export path'],
-  ['pdfjs-dist', 'Apache-2.0', 'Local PDF text extraction'],
-  ['signalsmith-stretch, fflate', 'MIT', 'Pitch shift and ZIP/EPUB/DOCX parsing'],
-  ['linkedom', 'ISC', 'Worker-safe EPUB/DOCX document parsing'],
-  ['lucide-react', 'ISC', 'Interface icons'],
-]
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'dark'
@@ -1620,6 +1586,10 @@ function App() {
   const [isCaptioning, setIsCaptioning] = useState(false)
   const [captionProgress, setCaptionProgress] = useState<number | null>(null)
   const { library, setLibrary } = useLibrary()
+  const [capabilityDetails, setCapabilityDetails] = useState<{
+    modelRows: CapabilityManifest['modelRows']
+    licenseRows: readonly CapabilityLicenseRow[]
+  } | null>(null)
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
   const [persistenceOutcome, setPersistenceOutcome] = useState(getPersistenceOutcome)
   const {
@@ -1643,6 +1613,16 @@ function App() {
   const storagePressureWarnedRef = useRef(false)
   const persistenceWarnedRef = useRef(false)
   const projectSaveQueueRef = useRef(new SerialTaskQueue())
+
+  useEffect(() => {
+    let cancelled = false
+    import('./lib/capabilities.ts').then(({ CAPABILITIES, capabilityLicenseRows }) => {
+      if (!cancelled) setCapabilityDetails({ modelRows: CAPABILITIES.modelRows, licenseRows: capabilityLicenseRows() })
+    }).catch(() => {
+      if (!cancelled) setCapabilityDetails({ modelRows: [], licenseRows: [] })
+    })
+    return () => { cancelled = true }
+  }, [])
   const projectRevisionRef = useRef(0)
   const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
@@ -1889,6 +1869,16 @@ function App() {
   const cacheRows = modelCache?.engines ?? []
   const visibleByoIds = useMemo(() => new Set(visibleUserSuppliedEngines(byoConsent, byoModels.map((record) => record.modelId))), [byoConsent, byoModels])
   const visibleByoModels = useMemo(() => byoModels.filter((record) => visibleByoIds.has(record.modelId)), [byoModels, visibleByoIds])
+  const modelLibraryRows = useMemo(() => [
+    ...(capabilityDetails?.modelRows.map((row) => [row.name, row.engine, row.size, row.coverage, row.status]) ?? []),
+    ...visibleByoModels.map((record) => [
+      record.modelName,
+      'User-supplied weights',
+      'Local',
+      shortUiLabel(record.provenance, 72),
+      'Registered — adapter gated',
+    ]),
+  ], [capabilityDetails, visibleByoModels])
   const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
   const m4bExportReady = ffmpegStatus?.available === true || m4bCapability?.supported === true
   const crossOriginStorage = useMemo(() => detectCrossOriginStorage(), [])
@@ -8524,13 +8514,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {[...MODEL_ROWS, ...visibleByoModels.map((record) => [
-                  record.modelName,
-                  'User-supplied weights',
-                  'Local',
-                  shortUiLabel(record.provenance, 72),
-                  'Registered — adapter gated',
-                ])].map((row) => (
+                {modelLibraryRows.length > 0 ? modelLibraryRows.map((row) => (
                   <tr key={row[0]}>
                     {row.map((cell, index) => (
                       <td key={cell} className={index === 4 ? `status-cell ${modelStatusClass(cell)}` : undefined}>
@@ -8538,7 +8522,11 @@ function App() {
                       </td>
                     ))}
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={5}>Loading capability facts…</td>
+                  </tr>
+                )}
               </tbody>
             </table>
             <p>Kokoro voices are wired for English, Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Japanese and Mandarin use lazy browser-safe ephone G2P while native Windows Kokoro remains the fast English path; MeloTTS adds a pinned native Chinese + English route.</p>
@@ -8556,11 +8544,18 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {RUNTIME_LICENSE_ROWS.map((row) => (
-                    <tr key={row[0]}>
-                      {row.map((cell) => <td key={cell}>{cell}</td>)}
+                  {(capabilityDetails?.licenseRows ?? []).map((row) => (
+                    <tr key={row.name}>
+                      <td>{row.name}</td>
+                      <td>{row.spdx}</td>
+                      <td>{row.usedFor}</td>
                     </tr>
                   ))}
+                  {!capabilityDetails ? (
+                    <tr>
+                      <td colSpan={3}>Loading capability facts…</td>
+                    </tr>
+                  ) : null}
                   {visibleByoModels.map((record) => (
                     <tr key={`byo-license-${record.id}`}>
                       <td>{record.modelName} user weights</td>

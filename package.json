@@ -18,6 +18,8 @@
     "budget:build": "node scripts/check-build-budget.mjs",
     "test": "vitest run",
     "lint": "oxlint",
+    "capabilities:check": "node scripts/check-capabilities.mjs",
+    "capabilities:update": "node scripts/check-capabilities.mjs --write",
     "smoke": "node scripts/smoke.mjs",
     "extension:build": "node scripts/build-extension.mjs",
     "smoke:release": "cross-env BETTERTTS_SMOKE_REAL_ENGINE=1 node scripts/smoke.mjs",

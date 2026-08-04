@@ -1,0 +1,591 @@
+{
+  "schemaVersion": 1,
+  "app": {
+    "name": "BetterTTS",
+    "version": "0.22.0",
+    "supportedPlatforms": [
+      "web",
+      "windows"
+    ]
+  },
+  "testMetrics": {
+    "testFiles": 92,
+    "tests": 536
+  },
+  "queue": {
+    "resumable": true,
+    "engines": [
+      "kokoro",
+      "supertonic",
+      "kitten",
+      "piper",
+      "melo"
+    ]
+  },
+  "exports": {
+    "audioFormats": [
+      "wav",
+      "mp3",
+      "opus",
+      "flac",
+      "m4b"
+    ],
+    "captionFormats": [
+      "srt",
+      "vtt",
+      "ass"
+    ],
+    "bundleFormats": [
+      "zip",
+      "bettertts",
+      "bettertts-backup"
+    ]
+  },
+  "engines": [
+    {
+      "id": "kokoro",
+      "label": "Kokoro local",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser",
+        "native"
+      ],
+      "queueable": true,
+      "streaming": true,
+      "timestamps": true,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": false,
+      "firstLoad": "default",
+      "modelId": "onnx-community/Kokoro-82M-v1.0-ONNX",
+      "modelLicenseIds": [
+        "kokoro-82m",
+        "sherpa-kokoro"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "supertonic",
+      "label": "Supertonic",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser"
+      ],
+      "queueable": true,
+      "streaming": true,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": false,
+      "firstLoad": "lazy",
+      "modelId": "onnx-community/Supertonic-TTS-ONNX",
+      "modelLicenseIds": [
+        "supertonic"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "kitten",
+      "label": "KittenTTS",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser"
+      ],
+      "queueable": true,
+      "streaming": true,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": false,
+      "firstLoad": "lazy",
+      "modelId": "KittenML/kitten-tts-nano-0.1",
+      "modelLicenseIds": [
+        "kitten"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "chatterbox",
+      "label": "Chatterbox",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser"
+      ],
+      "queueable": false,
+      "streaming": false,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": true,
+      "firstLoad": "lazy",
+      "modelId": "onnx-community/chatterbox-ONNX",
+      "modelLicenseIds": [
+        "chatterbox"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "piper",
+      "label": "Piper-plus",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser",
+        "native"
+      ],
+      "queueable": true,
+      "streaming": true,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": false,
+      "firstLoad": "lazy",
+      "modelId": "ayousanz/piper-plus-tsukuyomi-chan",
+      "modelLicenseIds": [
+        "piper-plus",
+        "sherpa-piper"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "melo",
+      "label": "MeloTTS",
+      "platforms": [
+        "windows"
+      ],
+      "runtime": [
+        "native"
+      ],
+      "queueable": true,
+      "streaming": true,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": false,
+      "firstLoad": "lazy",
+      "modelId": "myshell-ai/MeloTTS-Chinese",
+      "modelLicenseIds": [
+        "melo",
+        "sherpa-melo"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "qwen",
+      "label": "Qwen3-TTS",
+      "platforms": [
+        "windows"
+      ],
+      "runtime": [
+        "sidecar"
+      ],
+      "queueable": false,
+      "streaming": false,
+      "timestamps": false,
+      "exportFormats": [
+        "wav",
+        "mp3",
+        "opus",
+        "flac",
+        "m4b"
+      ],
+      "experimental": true,
+      "firstLoad": "lazy",
+      "modelId": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+      "modelLicenseIds": [
+        "qwen"
+      ],
+      "postStages": [
+        "rvc"
+      ]
+    },
+    {
+      "id": "browser",
+      "label": "Browser",
+      "platforms": [
+        "web",
+        "windows"
+      ],
+      "runtime": [
+        "browser"
+      ],
+      "queueable": false,
+      "streaming": true,
+      "timestamps": false,
+      "exportFormats": [],
+      "experimental": false,
+      "firstLoad": "default",
+      "modelId": "Web Speech API",
+      "modelLicenseIds": [
+        "browser"
+      ],
+      "postStages": []
+    }
+  ],
+  "modelRows": [
+    {
+      "name": "Kokoro 82M",
+      "engine": "Kokoro local",
+      "size": "82M",
+      "coverage": "EN / ES / FR / HI / IT / PT / JA / ZH",
+      "status": "Ready"
+    },
+    {
+      "name": "Kokoro timestamped",
+      "engine": "Kokoro local",
+      "size": "82M",
+      "coverage": "Word-level timings",
+      "status": "Opt-in"
+    },
+    {
+      "name": "Supertonic",
+      "engine": "Transformers.js",
+      "size": "66M",
+      "coverage": "English speed engine",
+      "status": "Ready"
+    },
+    {
+      "name": "KittenTTS",
+      "engine": "WebGPU shaders",
+      "size": "15M / 40M / 80M",
+      "coverage": "English lightweight engine",
+      "status": "Ready"
+    },
+    {
+      "name": "Chatterbox",
+      "engine": "Transformers.js v4",
+      "size": "0.5B",
+      "coverage": "English + 23 languages",
+      "status": "Opt-in"
+    },
+    {
+      "name": "Piper-plus",
+      "engine": "WASM + ONNX Runtime",
+      "size": "Tsukuyomi-chan",
+      "coverage": "JA / EN / ZH / KO / ES / FR / PT / SV",
+      "status": "Experimental"
+    },
+    {
+      "name": "MeloTTS",
+      "engine": "Sherpa-ONNX VITS",
+      "size": "~163 MB",
+      "coverage": "Chinese + English",
+      "status": "Desktop"
+    },
+    {
+      "name": "Qwen3-TTS",
+      "engine": "Python sidecar",
+      "size": "0.6B",
+      "coverage": "10 multilingual languages + style instruction",
+      "status": "Desktop opt-in"
+    },
+    {
+      "name": "Kokoro multilingual",
+      "engine": "ephone + HF voice bins",
+      "size": "82M",
+      "coverage": "ES / FR / HI / IT / PT / JA / CMN",
+      "status": "Ready"
+    },
+    {
+      "name": "Browser voices",
+      "engine": "Web Speech",
+      "size": "Native",
+      "coverage": "Device voices",
+      "status": "Fallback"
+    }
+  ],
+  "models": [
+    {
+      "id": "kokoro-82m",
+      "label": "Kokoro 82M",
+      "modelId": "onnx-community/Kokoro-82M-v1.0-ONNX",
+      "license": {
+        "spdx": "Apache-2.0",
+        "tier": "permissive"
+      },
+      "usedFor": "Browser and native Kokoro synthesis"
+    },
+    {
+      "id": "sherpa-kokoro",
+      "label": "Sherpa Kokoro int8 pack",
+      "modelId": "csukuangfj/kokoro-int8-multi-lang-v1_0",
+      "license": {
+        "spdx": "Apache-2.0",
+        "tier": "permissive"
+      },
+      "usedFor": "Pinned native Windows Kokoro archive"
+    },
+    {
+      "id": "supertonic",
+      "label": "Supertonic ONNX model",
+      "modelId": "onnx-community/Supertonic-TTS-ONNX",
+      "license": {
+        "spdx": "OpenRAIL",
+        "tier": "restricted"
+      },
+      "usedFor": "HF-hosted English speed engine"
+    },
+    {
+      "id": "kitten",
+      "label": "KittenTTS model",
+      "modelId": "KittenML/kitten-tts-nano-0.1",
+      "license": {
+        "spdx": "Apache-2.0",
+        "tier": "permissive"
+      },
+      "usedFor": "WebGPU lightweight English synthesis"
+    },
+    {
+      "id": "chatterbox",
+      "label": "Chatterbox ONNX models",
+      "modelId": "onnx-community/chatterbox-ONNX",
+      "license": {
+        "spdx": "MIT",
+        "tier": "permissive"
+      },
+      "usedFor": "Opt-in reference-voice synthesis with disclosed PerTh watermark"
+    },
+    {
+      "id": "piper-plus",
+      "label": "Piper-plus Tsukuyomi-chan",
+      "modelId": "ayousanz/piper-plus-tsukuyomi-chan",
+      "license": {
+        "spdx": "MIT",
+        "tier": "permissive"
+      },
+      "usedFor": "Experimental multilingual browser engine"
+    },
+    {
+      "id": "sherpa-piper",
+      "label": "Sherpa Piper Cori pack",
+      "modelId": "csukuangfj/vits-piper-en_GB-cori-medium",
+      "license": {
+        "spdx": "Public-Domain",
+        "tier": "permissive"
+      },
+      "usedFor": "Pinned English native Piper archive"
+    },
+    {
+      "id": "melo",
+      "label": "MeloTTS model",
+      "modelId": "myshell-ai/MeloTTS-Chinese",
+      "license": {
+        "spdx": "MIT",
+        "tier": "permissive"
+      },
+      "usedFor": "Pinned native Chinese and English VITS archive"
+    },
+    {
+      "id": "sherpa-melo",
+      "label": "Sherpa MeloTTS pack",
+      "modelId": "myshell-ai/MeloTTS-Chinese",
+      "license": {
+        "spdx": "MIT",
+        "tier": "permissive"
+      },
+      "usedFor": "Pinned native Chinese and English VITS archive"
+    },
+    {
+      "id": "qwen",
+      "label": "Qwen3-TTS model",
+      "modelId": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+      "license": {
+        "spdx": "Apache-2.0",
+        "tier": "permissive"
+      },
+      "usedFor": "Optional user-managed Windows Python sidecar"
+    },
+    {
+      "id": "browser",
+      "label": "Browser voices",
+      "modelId": "Web Speech API",
+      "license": {
+        "spdx": "Device-managed",
+        "tier": "restricted"
+      },
+      "usedFor": "Browser-provided fallback voices"
+    }
+  ],
+  "runtimeLicenses": {
+    "application": {
+      "name": "BetterTTS app code",
+      "spdx": "MIT",
+      "usedFor": "App shell, UI, queue, and exports"
+    },
+    "packages": [
+      {
+        "name": "@breezystack/lamejs",
+        "spdx": "LGPL-3.0",
+        "usedFor": "MP3 export"
+      },
+      {
+        "name": "@huggingface/transformers",
+        "spdx": "Apache-2.0",
+        "usedFor": "Kokoro, Supertonic, and Chatterbox model runtime"
+      },
+      {
+        "name": "@mozilla/readability",
+        "spdx": "Apache-2.0",
+        "usedFor": "Article import"
+      },
+      {
+        "name": "@piper-plus/g2p",
+        "spdx": "MIT",
+        "usedFor": "Piper-plus phonemization"
+      },
+      {
+        "name": "ephone",
+        "spdx": "GPL-3.0-or-later",
+        "usedFor": "Multilingual Kokoro phonemization"
+      },
+      {
+        "name": "electron-updater",
+        "spdx": "MIT",
+        "usedFor": "Opt-in Windows update flow"
+      },
+      {
+        "name": "fflate",
+        "spdx": "MIT",
+        "usedFor": "ZIP, EPUB, and DOCX parsing"
+      },
+      {
+        "name": "kitten-tts-webgpu",
+        "spdx": "MIT",
+        "usedFor": "KittenTTS browser wrapper"
+      },
+      {
+        "name": "kokoro-js",
+        "spdx": "Apache-2.0",
+        "usedFor": "Kokoro browser model runtime"
+      },
+      {
+        "name": "linkedom",
+        "spdx": "ISC",
+        "usedFor": "Worker-safe EPUB and DOCX document parsing"
+      },
+      {
+        "name": "lucide-react",
+        "spdx": "ISC",
+        "usedFor": "Interface icons"
+      },
+      {
+        "name": "onnxruntime-node",
+        "spdx": "MIT",
+        "usedFor": "Native model probing and optional desktop runtime"
+      },
+      {
+        "name": "onnxruntime-web",
+        "spdx": "MIT",
+        "usedFor": "Piper-plus browser inference"
+      },
+      {
+        "name": "pdfjs-dist",
+        "spdx": "Apache-2.0",
+        "usedFor": "Local PDF text extraction"
+      },
+      {
+        "name": "piper-plus",
+        "spdx": "MIT",
+        "usedFor": "Experimental multilingual Piper-plus engine"
+      },
+      {
+        "name": "phonemizer",
+        "spdx": "Apache-2.0",
+        "usedFor": "English phonemization"
+      },
+      {
+        "name": "react",
+        "spdx": "MIT",
+        "usedFor": "Renderer UI"
+      },
+      {
+        "name": "react-dom",
+        "spdx": "MIT",
+        "usedFor": "Renderer DOM binding"
+      },
+      {
+        "name": "signalsmith-stretch",
+        "spdx": "MIT",
+        "usedFor": "Pitch shifting"
+      },
+      {
+        "name": "sherpa-onnx-node",
+        "spdx": "Apache-2.0",
+        "usedFor": "Windows native Kokoro, MeloTTS, and Piper CPU host"
+      },
+      {
+        "name": "sherpa-onnx-win-x64",
+        "spdx": "Apache-2.0",
+        "usedFor": "Windows native addon payload"
+      }
+    ],
+    "additional": [
+      {
+        "name": "rvc-python (optional user-managed)",
+        "spdx": "MIT",
+        "usedFor": "Optional Windows RVC post-stage"
+      },
+      {
+        "name": "torch and qwen-tts (optional user-managed)",
+        "spdx": "See upstream terms",
+        "usedFor": "Optional Windows Qwen3-TTS sidecar"
+      }
+    ]
+  }
+}

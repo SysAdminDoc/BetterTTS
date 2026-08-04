@@ -1,4 +1,6 @@
 import type { ByoModelOptionId } from './byo-models.ts'
+import { CORE_ENGINES } from './capabilities-core.ts'
+import type { CapabilityEngine, CapabilityEngineId } from './capabilities.ts'
 
 export type {
   EngineAccelerator,
@@ -24,7 +26,7 @@ export type {
   EngineSynthesisRequest,
 } from './engine-adapter.ts'
 
-export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'melo' | 'qwen' | 'browser'
+export type EngineId = CapabilityEngineId
 
 export type PostStageId = 'rvc'
 
@@ -39,13 +41,7 @@ export const POST_STAGE_REGISTRY: PostStageDescriptor[] = [
   { id: 'rvc', label: 'RVC voice conversion', desktopOnly: true, consentRequired: true },
 ]
 
-export type EngineDescriptor = {
-  id: EngineId
-  label: string
-  queueable: boolean
-  experimental: boolean
-  firstLoad: 'default' | 'lazy'
-}
+export type EngineDescriptor = CapabilityEngine
 
 export type EngineFlags = {
   piperPlus: boolean
@@ -57,16 +53,7 @@ export type EngineFlags = {
 export const EXPERIMENTAL_PIPER_STORAGE_KEY = 'bettertts-experimental-piper'
 export const EXPERIMENTAL_CHATTERBOX_STORAGE_KEY = 'bettertts-chatterbox-consent'
 
-export const ENGINE_REGISTRY: EngineDescriptor[] = [
-  { id: 'kokoro', label: 'Kokoro local', queueable: true, experimental: false, firstLoad: 'default' },
-  { id: 'supertonic', label: 'Supertonic', queueable: true, experimental: false, firstLoad: 'lazy' },
-  { id: 'kitten', label: 'KittenTTS', queueable: true, experimental: false, firstLoad: 'lazy' },
-  { id: 'chatterbox', label: 'Chatterbox', queueable: false, experimental: true, firstLoad: 'lazy' },
-  { id: 'piper', label: 'Piper-plus', queueable: true, experimental: false, firstLoad: 'lazy' },
-  { id: 'melo', label: 'MeloTTS', queueable: true, experimental: false, firstLoad: 'lazy' },
-  { id: 'qwen', label: 'Qwen3-TTS', queueable: false, experimental: true, firstLoad: 'lazy' },
-  { id: 'browser', label: 'Browser', queueable: false, experimental: false, firstLoad: 'default' },
-]
+export const ENGINE_REGISTRY: readonly EngineDescriptor[] = CORE_ENGINES
 
 export function visibleEngineDescriptors(flags: EngineFlags): EngineDescriptor[] {
   return ENGINE_REGISTRY.filter((engine) =>
