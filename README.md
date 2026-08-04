@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-414%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-419%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -64,10 +64,11 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 
 ### Export & Output
 - **WAV** (lossless), **MP3** (96/128/160 kbps), **Opus/WebM**, and **chaptered M4B audiobook** export with AAC capability preflight
+- **EPUB3 Media Overlays** — completed EPUB queue jobs export text, SMIL timing, synchronized audio, and active highlight classes; WAV queue audio is normalized to EPUB-compatible MP3
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
-- **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, and optional line focus
+- **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, optional line focus, and EPUB queue audio tracks
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
 - **Native save dialog** via `showSaveFilePicker` on Chromium, with `<a download>` fallback
@@ -92,7 +93,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Cancel button** — abort generation mid-run, keep partial results
 - **Completeness check** — every sentence is verified against a speech-rate floor; possibly truncated or missing audio is flagged in the output, queue, and diagnostics instead of failing silently
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
-- **EPUB import** — chapter-aware parsing with TOC title extraction, queued for batch generation
+- **EPUB import** — chapter-aware parsing with TOC title extraction, queued for batch generation, and EPUB3 Media Overlay export after synthesis
 - **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, edit/regenerate completed chunks safely, play completed chunks, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
 - **M4B preflight + fallback** — queue UI reports WebCodecs AAC support before export; Firefox/Linux AAC gaps get a chaptered ZIP/Opus fallback path
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
@@ -200,7 +201,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (414 tests across 70 files) + Playwright smoke |
+| Testing | Vitest (419 tests across 71 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -222,6 +223,7 @@ src/
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
 │   ├── document-import.ts   # PDF/DOCX text extraction
 │   ├── reader.ts             # Stable document coordinates, cue binding, and resume state
+│   ├── media-overlays.ts     # EPUB3 text/SMIL/audio package writer and WAV→MP3 normalization
 │   ├── playback.ts          # Read-along resume and sentence navigation
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser

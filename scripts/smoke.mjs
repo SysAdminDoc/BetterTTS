@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 import { chromium } from 'playwright'
-import { zipSync } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 
 const root = process.cwd()
 const port = Number(process.env.BETTERTTS_SMOKE_PORT ?? 4873)
@@ -149,6 +149,7 @@ async function seedCompletedQueueJob(page, id) {
       schemaVersion: 2,
       id: jobId,
       title: 'Smoke queue',
+      sourceKind: 'epub',
       createdAt: Date.now(),
       engine: 'kokoro',
       voice: 'af_heart',
@@ -719,6 +720,27 @@ async function runSmoke() {
     await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'queue-dark.png'), fullPage: false })
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })
+    const overlayDownloadPromise = desktop.page.waitForEvent('download')
+    await queue.getByRole('button', { name: 'EPUB overlays' }).click()
+    const overlayDownload = await overlayDownloadPromise
+    if (overlayDownload.suggestedFilename() !== 'smoke-queue-media-overlays.epub') {
+      throw new Error(`Unexpected EPUB overlay filename: ${overlayDownload.suggestedFilename()}`)
+    }
+    const overlayPath = join(smokeDir, 'media-overlays.epub')
+    await overlayDownload.saveAs(overlayPath)
+    const overlayEntries = unzipSync(new Uint8Array(await readFile(overlayPath)))
+    for (const entry of ['mimetype', 'META-INF/container.xml', 'OEBPS/package.opf', 'OEBPS/media/0001.smil', 'OEBPS/audio/0001.mp3']) {
+      if (!overlayEntries[entry]) throw new Error(`EPUB overlay export is missing ${entry}`)
+    }
+    const overlayDecoder = new TextDecoder()
+    const overlayPackage = overlayDecoder.decode(overlayEntries['OEBPS/package.opf'])
+    const overlaySmil = overlayDecoder.decode(overlayEntries['OEBPS/media/0001.smil'])
+    if (!overlayPackage.includes('version="3.0"') || !overlayPackage.includes('media-overlay="smil-0"')) {
+      throw new Error('EPUB overlay package is missing EPUB3 media-overlay metadata')
+    }
+    if (!overlaySmil.includes('clipBegin="0.000s"') || !overlaySmil.includes('#reader-c0-p0-s0')) {
+      throw new Error('EPUB overlay SMIL is missing synchronized text timing')
+    }
     const queueChunks = desktop.page.getByLabel('Smoke queue completed chunks')
     const companionMessages = []
     const companion = await desktopContext.newPage()

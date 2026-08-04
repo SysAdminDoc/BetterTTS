@@ -30,6 +30,7 @@ export type QueueJob = {
   id: string
   title: string
   sourceDocumentId?: string
+  sourceKind?: 'epub'
   createdAt: number
   engine: QueueEngine
   voice: VoiceId | string
@@ -297,6 +298,7 @@ export function migrateQueueJob(raw: unknown): QueueJob {
     ...(typeof job.sourceDocumentId === 'string' && job.sourceDocumentId.trim() && job.sourceDocumentId.length <= 200
       ? { sourceDocumentId: job.sourceDocumentId.trim() }
       : {}),
+    ...(job.sourceKind === 'epub' ? { sourceKind: 'epub' as const } : {}),
     createdAt: Number.isFinite(job.createdAt) && Number(job.createdAt) >= 0 ? Number(job.createdAt) : Date.now(),
     engine,
     voice,

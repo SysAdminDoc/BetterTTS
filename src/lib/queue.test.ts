@@ -188,6 +188,11 @@ describe('queue', () => {
     expect(migrateQueueJob({ ...makeJob('reader-invalid', 1), sourceDocumentId: { unsafe: true } }).sourceDocumentId).toBeUndefined()
   })
 
+  it('preserves the EPUB source kind across migration and drops unknown kinds', () => {
+    expect(migrateQueueJob({ ...makeJob('epub-job', 1), sourceKind: 'epub' }).sourceKind).toBe('epub')
+    expect(migrateQueueJob({ ...makeJob('unknown-source', 1), sourceKind: 'pdf' }).sourceKind).toBeUndefined()
+  })
+
   it('migrates queue chunk playback metadata', () => {
     const migrated = migrateQueueJob({
       ...makeJob('playback', 1),

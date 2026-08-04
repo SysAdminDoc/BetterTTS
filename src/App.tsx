@@ -1408,6 +1408,7 @@ function App() {
   const [regeneratingChunkKey, setRegeneratingChunkKey] = useState<string | null>(null)
   const [m4bExportingJobId, setM4bExportingJobId] = useState<string | null>(null)
   const [zipExportingJobId, setZipExportingJobId] = useState<string | null>(null)
+  const [epubExportingJobId, setEpubExportingJobId] = useState<string | null>(null)
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
@@ -3992,7 +3993,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function createQueueJob(title: string, chunks: QueueSourceChunk[], sourceDocumentId?: string): QueueJob | null {
+  function createQueueJob(title: string, chunks: QueueSourceChunk[], sourceDocumentId?: string, sourceKind?: 'epub'): QueueJob | null {
     if (!engineQueueable(engine)) return null
     const queueEngine = engine as QueueEngine
     return {
@@ -4000,6 +4001,7 @@ function App() {
       id: crypto.randomUUID(),
       title,
       ...(sourceDocumentId ? { sourceDocumentId } : {}),
+      ...(sourceKind ? { sourceKind } : {}),
       createdAt: Date.now(),
       engine: queueEngine,
       voice: voiceIdForNarratorRole('narration'),
@@ -4040,6 +4042,7 @@ function App() {
       titleOverride?.trim() || currentText.slice(0, 50).replace(/\s+/g, ' ').trim(),
       chunks,
       readerDocument?.id,
+      readerDocument?.kind === 'epub' ? 'epub' : undefined,
     )
     if (!job) {
       showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot be queued for file export.' })
@@ -4314,7 +4317,7 @@ function App() {
   async function downloadJobZip(jobId: string) {
     // Exports share the status/progress channel with generation — never let
     // the two interleave, and never build two ZIPs from a double-click.
-    if (generatingRef.current || zipExportingJobId || m4bExportingJobId) return
+    if (generatingRef.current || zipExportingJobId || m4bExportingJobId || epubExportingJobId) return
     const job = queueJobs.find((j) => j.id === jobId)
     if (!job) return
     const doneChunks = job.chunks.filter((c) => c.status === 'done')
@@ -4396,7 +4399,7 @@ function App() {
   }
 
   async function downloadJobM4b(jobId: string) {
-    if (generatingRef.current || zipExportingJobId) return
+    if (generatingRef.current || zipExportingJobId || epubExportingJobId) return
     const job = queueJobs.find((j) => j.id === jobId)
     if (!job || m4bExportingJobId) return
     if (job.chunks.some((chunk) => chunk.status !== 'done')) {
@@ -4499,6 +4502,63 @@ function App() {
     }
   }
 
+  async function downloadJobMediaOverlay(jobId: string) {
+    if (generatingRef.current || zipExportingJobId || m4bExportingJobId || epubExportingJobId) return
+    const job = queueJobs.find((j) => j.id === jobId)
+    if (!job || job.sourceKind !== 'epub') return
+    if (job.chunks.length === 0 || job.chunks.some((chunk) => chunk.status !== 'done')) {
+      showToast({ tone: 'warn', message: 'Finish every EPUB queue chunk before exporting media overlays.' })
+      return
+    }
+
+    setEpubExportingJobId(jobId)
+    setStatus('Building EPUB3 media overlays…')
+    try {
+      const chunks = []
+      for (const chunk of job.chunks) {
+        const blob = await getChunkBlob(jobId, chunk.index)
+        if (!blob) throw new Error(`Missing audio for chunk ${chunk.index + 1}. Resume the job, then export again.`)
+        chunks.push({
+          index: chunk.index,
+          text: chunk.text,
+          title: chunk.chapterTitle,
+          chapterIndex: chunk.chapterIndex,
+          format: job.format,
+          blob,
+          cues: chunk.cues,
+          duration: chunk.duration,
+        })
+      }
+      const exportError = queueExportSizeError(chunks.map((chunk) => chunk.blob))
+      if (exportError) {
+        showToast({ tone: 'warn', message: exportError })
+        return
+      }
+
+      const { buildEpubMediaOverlay } = await import('./lib/media-overlays.ts')
+      const result = await buildEpubMediaOverlay({
+        title: job.title,
+        jobId: job.id,
+        chunks,
+        language: job.language,
+        narrator: 'BetterTTS',
+        bitrate: job.bitrate,
+      })
+      const url = URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${slugify(job.title)}-media-overlays.epub`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      showToast({ tone: 'ok', message: `EPUB media overlays ready with ${result.chunkCount} audio segments.` })
+    } catch (err) {
+      showToast({ tone: 'error', message: err instanceof Error ? err.message : 'EPUB media-overlay export failed.' })
+    } finally {
+      setEpubExportingJobId(null)
+      setStatus('Ready')
+    }
+  }
+
   async function removeQueueJob(jobId: string, title: string) {
     try {
       const lease = await withJobLease(jobId, () => deleteJobWithSnapshot(jobId))
@@ -4596,6 +4656,7 @@ function App() {
         file.name.replace(/\.epub$/i, ''),
         queueChunks,
         importedReader.id,
+        'epub',
       )
       if (!job) {
         showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot queue EPUB text for file export.' })
@@ -5308,7 +5369,7 @@ function App() {
                             <button
                               type="button"
                               onClick={() => downloadJobZip(job.id)}
-                              disabled={isGenerating || zipExportingJobId !== null || m4bExportingJobId !== null}
+                              disabled={isGenerating || zipExportingJobId !== null || m4bExportingJobId !== null || epubExportingJobId !== null}
                               title={done === total && !m4bExportReady ? 'Download chaptered ZIP fallback with chapters.json.' : 'Download completed chunks as a chaptered ZIP.'}
                             >
                               {zipExportingJobId === job.id ? <Loader2 size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
@@ -5319,11 +5380,22 @@ function App() {
                             <button
                               type="button"
                               onClick={() => downloadJobM4b(job.id)}
-                              disabled={isGenerating || m4bExportingJobId !== null || zipExportingJobId !== null || !m4bExportReady}
+                              disabled={isGenerating || m4bExportingJobId !== null || zipExportingJobId !== null || epubExportingJobId !== null || !m4bExportReady}
                               title={m4bExportReady ? 'Export chaptered M4B' : m4bCapabilityText(m4bCapability)}
                             >
                               {m4bExportingJobId === job.id ? <Loader2 size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
                               M4B
+                            </button>
+                          ) : null}
+                          {job.sourceKind === 'epub' && done === total && total > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => downloadJobMediaOverlay(job.id)}
+                              disabled={isGenerating || epubExportingJobId !== null || zipExportingJobId !== null || m4bExportingJobId !== null || job.format === 'flac'}
+                              title={job.format === 'flac' ? 'Choose WAV, MP3, or Opus before exporting EPUB3 media overlays' : 'Export EPUB3 with synchronized media overlays'}
+                            >
+                              {epubExportingJobId === job.id ? <Loader2 size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
+                              EPUB overlays
                             </button>
                           ) : null}
                           {!isActive ? (
