@@ -753,9 +753,18 @@ async function runSmoke() {
     await subtitleInput.setInputFiles(makeSubtitleUpload())
     await desktop.page.getByText(/2 timed cues ready for Piper-plus/).waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Re-voice subtitles' }).waitFor({ timeout: 20000 })
+    const assStyle = desktop.page.getByLabel('ASS caption style')
+    await assStyle.selectOption('outline')
+    if (await assStyle.inputValue() !== 'outline' || await assStyle.locator('option').count() !== 3) {
+      throw new Error('ASS caption style presets did not load')
+    }
+    await assStyle.selectOption('karaoke-fill')
     if (!(await desktop.page.locator('.caption-import-note').innerText()).includes('original timestamp')) {
       throw new Error('Subtitle re-voice guidance did not render')
     }
+    await desktop.page.locator('.caption-import-card').scrollIntoViewIfNeeded()
+    await desktop.page.waitForTimeout(200)
+    await desktop.page.screenshot({ path: join(smokeDir, 'subtitle-revoice-dark.png'), fullPage: false })
 
     console.log('Checking DOCX and unsupported file import...')
     const fileInput = desktop.page.locator('input[type="file"]').first()
@@ -1047,6 +1056,7 @@ async function runSmoke() {
       'queue-dark.png',
       'library-dark.png',
       'diagnostics-light.png',
+      'subtitle-revoice-dark.png',
       'models-dark.png',
       'docs-dark.png',
     ]

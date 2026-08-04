@@ -211,7 +211,7 @@ import {
   type PronunciationMode,
 } from './lib/pronunciations.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
-import { assembleSubtitleTimeline, parseSubtitleText, subtitleTextForSpeech, type Cue, type ParsedSubtitle, toSRT, toVTT } from './lib/subtitles.ts'
+import { ASS_CAPTION_PRESETS, assembleSubtitleTimeline, parseSubtitleText, subtitleTextForSpeech, type AssCaptionPresetId, type Cue, type ParsedSubtitle, toASS, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { dispatchGeneration } from './lib/generation-dispatcher.ts'
 import { useObjectUrls } from './lib/object-urls.ts'
@@ -712,6 +712,7 @@ type ResultRowProps = {
   result: AudioResult
   selected: boolean
   isSpeaking: boolean
+  assCaptionPreset: AssCaptionPresetId
   onSelect: () => void
   onReplay: (text: string) => void
   onShare: (result: AudioResult) => void
@@ -1073,8 +1074,9 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang
   )
 }
 
-function ResultRow({ result, selected, isSpeaking, onSelect, onReplay, onShare, onSave }: ResultRowProps) {
+function ResultRow({ result, selected, isSpeaking, assCaptionPreset, onSelect, onReplay, onShare, onSave }: ResultRowProps) {
   const cues = result.cues ?? []
+  const assUrl = useMemo(() => assDataUrl(result.cues, result.label, assCaptionPreset), [assCaptionPreset, result.cues, result.label])
 
   return (
     <div className="result-row">
@@ -1129,6 +1131,12 @@ function ResultRow({ result, selected, isSpeaking, onSelect, onReplay, onShare, 
               <FileText size={16} aria-hidden="true" />
               VTT
             </a>
+            {assUrl ? (
+              <a href={assUrl} download={result.filename.replace(/\.\w+$/, '.ass')}>
+                <FileText size={16} aria-hidden="true" />
+                ASS
+              </a>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -1145,6 +1153,11 @@ type LibraryClipRowProps = {
 function cueDataUrl(cues?: Cue[]): string | undefined {
   if (!cues?.length) return undefined
   return `data:text/vtt;charset=utf-8,${encodeURIComponent(toVTT(cues))}`
+}
+
+function assDataUrl(cues: Cue[] | undefined, title: string, preset: AssCaptionPresetId): string | undefined {
+  if (!cues?.length) return undefined
+  return `data:text/plain;charset=utf-8,${encodeURIComponent(toASS(cues, { preset, title }))}`
 }
 
 function LibraryClipRow({ clip, onDeleted, onNotice }: LibraryClipRowProps) {
@@ -1458,6 +1471,14 @@ function App() {
   const [mp3Bitrate, setMp3Bitrate] = useState(160)
   const [useWorker, setUseWorker] = useState(true)
   const [wordTimestamps, setWordTimestamps] = useState(false)
+  const [assCaptionPreset, setAssCaptionPreset] = useState<AssCaptionPresetId>(() => {
+    try {
+      const stored = window.localStorage.getItem('bettertts-ass-preset')
+      return ASS_CAPTION_PRESETS.some((preset) => preset.id === stored) ? stored as AssCaptionPresetId : 'karaoke-fill'
+    } catch {
+      return 'karaoke-fill'
+    }
+  })
   const [pitchSemitones, setPitchSemitones] = useState(0)
   const [bgmFile, setBgmFile] = useState<File | null>(null)
   const [bgmVolume, setBgmVolume] = useState(0.15)
@@ -1901,7 +1922,8 @@ function App() {
             : audioFormat === 'm4b'
               ? 'M4B / AAC'
               : `WAV - ${activeSampleRate}`
-  const captionModeLabel = wordTimestamps && englishKokoro ? 'Word-level captions' : engine === 'browser' ? 'Live only' : 'SRT + VTT'
+  const captionModeLabel = wordTimestamps && englishKokoro ? 'Word-level SRT + VTT + ASS' : engine === 'browser' ? 'Live only' : 'SRT + VTT + ASS'
+  const captionAssUrl = captionResult ? assDataUrl(captionResult.cues, captionResult.filename, assCaptionPreset) : undefined
   const editorModeLabel = narratorMode ? 'Narrator mode' : dialogMode ? 'Dialog script' : separateLines ? 'Line export' : 'Single clip'
   const completedQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.filter((chunk) => chunk.status === 'done').length, 0)
   const totalQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.length, 0)
@@ -5900,6 +5922,7 @@ function App() {
                         result={result}
                         selected={result.id === activeOutput?.id}
                         isSpeaking={isSpeaking}
+                        assCaptionPreset={assCaptionPreset}
                         onSelect={() => setActiveOutputId(result.id)}
                         onReplay={replayBrowser}
                         onShare={shareResult}
@@ -5928,6 +5951,20 @@ function App() {
                     : 'Import an existing recording and create multilingual word-level SRT/VTT cues locally. Audio is converted to a temporary 16 kHz mono buffer and removed after alignment.'}
                 </p>
                 <div className="caption-import-controls">
+                  <label className="caption-style-control">
+                    <span>ASS style</span>
+                    <select
+                      value={assCaptionPreset}
+                      onChange={(event) => {
+                        const next = event.target.value as AssCaptionPresetId
+                        setAssCaptionPreset(next)
+                        persistSetting('bettertts-ass-preset', next)
+                      }}
+                      aria-label="ASS caption style"
+                    >
+                      {ASS_CAPTION_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                    </select>
+                  </label>
                   <input
                     ref={captionInputRef}
                     type="file"
@@ -6009,6 +6046,12 @@ function App() {
                         <FileText size={15} aria-hidden="true" />
                         Download VTT
                       </a>
+                      {captionAssUrl ? (
+                        <a href={captionAssUrl} download={captionResult.filename.replace(/\.[^.]+$/u, '.ass')}>
+                          <FileText size={15} aria-hidden="true" />
+                          Download ASS
+                        </a>
+                      ) : null}
                       <button type="button" onClick={clearCaptionResult}>
                         <X size={15} aria-hidden="true" />
                         Clear captions

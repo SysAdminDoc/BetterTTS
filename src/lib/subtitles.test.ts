@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   assembleSubtitleTimeline,
+  ASS_CAPTION_PRESETS,
   fitAudioToCue,
   parseSubtitleText,
   type Cue,
   subtitleTextForSpeech,
+  toASS,
   toSRT,
   toVTT,
 } from './subtitles.ts'
@@ -39,6 +41,33 @@ describe('toVTT', () => {
   it('uses dot-separated milliseconds', () => {
     const vtt = toVTT(CUES)
     expect(vtt).toContain('00:00:00.000 --> 00:00:02.500')
+  })
+})
+
+describe('toASS', () => {
+  it('writes a karaoke-fill ASS document with coalesced word timing', () => {
+    const ass = toASS([
+      { index: 1, startSec: 0, endSec: 0.5, text: 'Hello' },
+      { index: 2, startSec: 0.5, endSec: 1.25, text: 'world' },
+    ], { preset: 'karaoke-fill', title: 'Smoke\nTitle' })
+    expect(ass).toContain('[V4+ Styles]')
+    expect(ass).toContain('Style: KaraokeFill,Arial,66')
+    expect(ass).toContain('Dialogue: 0,0:00:00.00,0:00:01.25,KaraokeFill')
+    expect(ass).toContain('{\\k50}Hello {\\k75}world')
+    expect(ass).toContain('Title: Smoke Title')
+  })
+
+  it('emits pop-on and outline presets as valid cue-level events', () => {
+    const cues: Cue[] = [{ index: 1, startSec: 61.999, endSec: 63.5, text: 'A {literal} cue.' }]
+    const popOn = toASS(cues, { preset: 'pop-on' })
+    const outline = toASS(cues, { preset: 'outline' })
+    expect(popOn).toContain('Style: PopOn,Arial,64')
+    expect(popOn).toContain('Dialogue: 0,0:01:02.00,0:01:03.50,PopOn')
+    expect(popOn).not.toContain('\\k')
+    expect(outline).toContain('Style: Outline,Arial,68')
+    expect(outline).toContain('Dialogue: 0,0:01:02.00,0:01:03.50,Outline')
+    expect(outline).toContain('A literal cue.')
+    expect(ASS_CAPTION_PRESETS).toHaveLength(3)
   })
 })
 

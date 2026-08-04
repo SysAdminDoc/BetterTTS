@@ -27,7 +27,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 | WAV export | **Yes** | No (MP3 only) | Yes | No |
 | MP3 export | **Yes** | Yes | Yes | No |
 | Commercial use | **Yes (MIT)** | Paid only | With attribution | Yes |
-| Subtitle export | **SRT + VTT** | No | SRT (paid) | No |
+| Subtitle export | **SRT + VTT + ASS** | No | SRT (paid) | No |
 | Voice count | 54 | 30+ (free tier) | 300+ | 54 |
 | Pitch control | **Yes** | Paid only | No | No |
 | Offline capable | **Yes (PWA)** | No | No | No |
@@ -69,7 +69,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **EPUB chapter mapping** — review imported chapters before queueing: rename, split, merge, reorder, exclude, assign voices, or configure per-chapter weighted Kokoro blends; “Queue with defaults” preserves the quick path
 - **Sentence retakes** — select a sentence in a completed queue chunk, edit and regenerate up to four local A/B takes, then apply the chosen take with a cue-boundary crossfade; the original stays intact until commit
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
-- **SRT and VTT subtitle import/export** with sentence-level timing, cue-by-cue timeline re-voicing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
+- **SRT, VTT, and ASS subtitle import/export** with sentence-level timing, cue-by-cue timeline re-voicing, and karaoke/pop-on/outline styling presets, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
 - **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, optional line focus, and EPUB queue audio tracks
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
@@ -155,7 +155,7 @@ Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON*
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
-Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, queue/library playback and Undo recovery, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Eight required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
+Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
@@ -250,7 +250,7 @@ src/
 │   ├── text.ts              # Sentence splitting, pause parsing, cleanup, narrator segmentation
 │   ├── voices.ts            # 41-voice Kokoro catalog with quality grades
 │   ├── webspeech.ts         # Browser Speech API wrapper
-│   ├── subtitles.ts         # SRT/VTT parser/serializers and timed re-voice fitting
+│   ├── subtitles.ts         # SRT/VTT/ASS parser, serializers, fitting, and style presets
 │   ├── queue.ts             # IndexedDB persistent generation queue
 │   └── library.ts           # IndexedDB clip storage
 ├── hooks/

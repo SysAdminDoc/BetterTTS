@@ -1256,6 +1256,28 @@ ul.queue-chunk-list > li {
   min-width: 140px;
 }
 
+.caption-style-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font: 600 12px/1 var(--sans);
+}
+
+.caption-style-control select {
+  min-width: 126px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
 .caption-runtime {
   display: grid;
   gap: 3px;

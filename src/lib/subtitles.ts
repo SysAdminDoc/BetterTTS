@@ -307,3 +307,173 @@ export function toVTT(cues: Cue[]): string {
     .join('\n\n')
   return `WEBVTT\n\n${body}`
 }
+
+export type AssCaptionPresetId = 'karaoke-fill' | 'pop-on' | 'outline'
+
+export const ASS_CAPTION_PRESETS: readonly { id: AssCaptionPresetId; label: string; description: string }[] = [
+  { id: 'karaoke-fill', label: 'Karaoke fill', description: 'Word-level \\k timing with a bright active fill.' },
+  { id: 'pop-on', label: 'Pop-on', description: 'Each timed cue appears as a clean caption block.' },
+  { id: 'outline', label: 'Outline', description: 'Bold high-contrast captions with a heavy outline.' },
+]
+
+type AssStyle = {
+  name: string
+  fontSize: number
+  primaryColour: string
+  secondaryColour: string
+  outlineColour: string
+  backColour: string
+  bold: number
+  outline: number
+  shadow: number
+  alignment: number
+}
+
+function assStyleFor(preset: AssCaptionPresetId): AssStyle {
+  if (preset === 'pop-on') {
+    return {
+      name: 'PopOn',
+      fontSize: 64,
+      primaryColour: '&H00FFFFFF',
+      secondaryColour: '&H00FFFFFF',
+      outlineColour: '&H00101010',
+      backColour: '&H90101010',
+      bold: 0,
+      outline: 3,
+      shadow: 1,
+      alignment: 2,
+    }
+  }
+  if (preset === 'outline') {
+    return {
+      name: 'Outline',
+      fontSize: 68,
+      primaryColour: '&H00FFFFFF',
+      secondaryColour: '&H00FFFFFF',
+      outlineColour: '&H00000000',
+      backColour: '&H80000000',
+      bold: 1,
+      outline: 5,
+      shadow: 2,
+      alignment: 2,
+    }
+  }
+  return {
+    name: 'KaraokeFill',
+    fontSize: 66,
+    primaryColour: '&H0000FFFF',
+    secondaryColour: '&H00FFFFFF',
+    outlineColour: '&H00101010',
+    backColour: '&H90101010',
+    bold: 1,
+    outline: 3,
+    shadow: 1,
+    alignment: 2,
+  }
+}
+
+function assTime(sec: number): string {
+  const totalCentiseconds = Math.max(0, Math.round(sec * 100))
+  const centiseconds = totalCentiseconds % 100
+  const totalSeconds = (totalCentiseconds - centiseconds) / 100
+  const seconds = totalSeconds % 60
+  const minutes = Math.floor(totalSeconds / 60) % 60
+  const hours = Math.floor(totalSeconds / 3600)
+  return `${hours}:${pad2(minutes)}:${pad2(seconds)}.${String(centiseconds).padStart(2, '0')}`
+}
+
+function assText(text: string): string {
+  return text
+    .replace(/<\/?[^>]+>/g, '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\/g, '／')
+    .replace(/[{}]/g, '')
+    .replace(/\n/g, '\\N')
+    .trim()
+}
+
+function karaokeGroups(cues: Cue[]): Cue[][] {
+  const ordered = [...cues].sort((a, b) => a.startSec - b.startSec || a.index - b.index)
+  const groups: Cue[][] = []
+  for (const cue of ordered) {
+    const current = groups.at(-1)
+    const previous = current?.at(-1)
+    if (!current || !previous || cue.startSec - previous.endSec > 0.45 || cue.endSec - current[0].startSec > 6) {
+      groups.push([cue])
+    } else {
+      current.push(cue)
+    }
+  }
+  return groups
+}
+
+function karaokeText(cues: Cue[]): string {
+  return cues
+    .map((cue) => `{\\k${Math.max(1, Math.round(Math.max(0, cue.endSec - cue.startSec) * 100))}}${assText(cue.text)}`)
+    .join(' ')
+}
+
+export type AssCaptionOptions = {
+  preset?: AssCaptionPresetId
+  title?: string
+}
+
+export function toASS(cues: Cue[], options: AssCaptionOptions = {}): string {
+  const preset = options.preset ?? 'karaoke-fill'
+  const style = assStyleFor(preset)
+  const title = (options.title ?? 'BetterTTS captions').replace(/[\r\n]/g, ' ').trim() || 'BetterTTS captions'
+  const styleLine = `Style: ${[
+    style.name,
+    'Arial',
+    style.fontSize,
+    style.primaryColour,
+    style.secondaryColour,
+    style.outlineColour,
+    style.backColour,
+    style.bold,
+    0,
+    0,
+    0,
+    100,
+    100,
+    0,
+    0,
+    1,
+    style.outline,
+    style.shadow,
+    style.alignment,
+    70,
+    70,
+    55,
+    1,
+  ].join(',')}`
+  const eventLines = preset === 'karaoke-fill'
+    ? karaokeGroups(cues).map((group) => (
+      `Dialogue: 0,${assTime(group[0].startSec)},${assTime(group.at(-1)!.endSec)},${style.name},,0,0,0,,${karaokeText(group)}`
+    ))
+    : [...cues]
+      .sort((a, b) => a.startSec - b.startSec || a.index - b.index)
+      .map((cue) => `Dialogue: 0,${assTime(cue.startSec)},${assTime(cue.endSec)},${style.name},,0,0,0,,${assText(cue.text)}`)
+
+  return [
+    '[Script Info]',
+    `Title: ${title}`,
+    'ScriptType: v4.00+',
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    'PlayResX: 1920',
+    'PlayResY: 1080',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    styleLine,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...eventLines,
+    '',
+  ].join('\n')
+}
