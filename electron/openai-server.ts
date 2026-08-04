@@ -13,6 +13,7 @@ export const OPENAI_MODEL_OPTIONS = [
   { id: 'kokoro-82m', label: 'Kokoro 82M', engine: 'kokoro' },
   { id: 'piper', label: 'Piper-plus', engine: 'piper' },
   { id: 'piper-plus', label: 'Piper-plus', engine: 'piper' },
+  { id: 'melo', label: 'MeloTTS Chinese + English', engine: 'melo' },
 ] as const
 
 export type OpenAiModelId = typeof OPENAI_MODEL_OPTIONS[number]['id']

@@ -34,7 +34,7 @@ export type NativeRuntimeInfo = {
   }
   node: string
   modelCacheDir: string
-  engine?: 'kokoro' | 'piper'
+  engine?: 'kokoro' | 'piper' | 'melo'
   sampleRate?: number
   modelPack?: NativeModelPackStatus
   modelPackFailure?: {
@@ -133,9 +133,9 @@ function ensureSubscription(): ReturnType<typeof getNativeTtsBridge> {
   return bridge
 }
 
-function loadNativeEngine(engine: 'kokoro' | 'piper', onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
+function loadNativeEngine(engine: 'kokoro' | 'piper' | 'melo', onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
   progressCallback = onProgress
-  const key = engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
+  const key = engine === 'piper' ? 'sherpa:piper' : engine === 'melo' ? 'sherpa:melo' : 'cpu:q8'
   if (loadPromise && loadKey === key) return loadPromise
   let bridge: ReturnType<typeof getNativeTtsBridge>
   try {
@@ -146,7 +146,7 @@ function loadNativeEngine(engine: 'kokoro' | 'piper', onProgress: (info: Progres
   loadKey = key
   loadPromise = new Promise<NativeRuntimeInfo>((resolve, reject) => {
     loadWaiters.set(key, { resolve, reject })
-    bridge!.post({ type: 'load', dtype: 'q8', ...(engine === 'piper' ? { engine } : {}) })
+    bridge!.post({ type: 'load', dtype: 'q8', ...(engine !== 'kokoro' ? { engine } : {}) })
   })
   return loadPromise
 }
@@ -159,12 +159,16 @@ export function loadNativePiper(onProgress: (info: ProgressInfo) => void): Promi
   return loadNativeEngine('piper', onProgress)
 }
 
+export function loadNativeMelo(onProgress: (info: ProgressInfo) => void): Promise<NativeRuntimeInfo> {
+  return loadNativeEngine('melo', onProgress)
+}
+
 export function generateNative(
   text: string,
   voice: string,
   speed: number,
   signal?: AbortSignal,
-  engine: 'kokoro' | 'piper' = 'kokoro',
+  engine: 'kokoro' | 'piper' | 'melo' = 'kokoro',
 ): Promise<Float32Array> {
   if (signal?.aborted) return Promise.reject(cancellationError())
   let bridge: ReturnType<typeof getNativeTtsBridge>
@@ -186,7 +190,7 @@ export function generateNative(
     const cleanup = () => signal?.removeEventListener('abort', onAbort)
     signal?.addEventListener('abort', onAbort, { once: true })
     pending.set(id, { resolve, reject, cleanup })
-    bridge!.post({ type: 'generate', text, voice, speed, id, ...(engine === 'piper' ? { engine } : {}) })
+    bridge!.post({ type: 'generate', text, voice, speed, id, ...(engine !== 'kokoro' ? { engine } : {}) })
   })
 }
 

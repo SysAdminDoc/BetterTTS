@@ -6,7 +6,7 @@ import type { KokoroLocale, VoiceId } from './voices.ts'
 import type { PiperPlusLanguage } from './piper-plus.ts'
 
 export type ChunkStatus = 'pending' | 'generating' | 'done' | 'failed'
-export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten' | 'piper'
+export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten' | 'piper' | 'melo'
 
 export type QueueChunk = {
   index: number
@@ -271,7 +271,7 @@ export function migrateQueueJob(raw: unknown): QueueJob {
   const job = raw && typeof raw === 'object'
     ? raw as Partial<QueueJob> & { engine?: string; schemaVersion?: number }
     : {}
-  const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' || job.engine === 'piper' ? job.engine : 'kokoro'
+  const engine: QueueEngine = job.engine === 'supertonic' || job.engine === 'kitten' || job.engine === 'piper' || job.engine === 'melo' ? job.engine : 'kokoro'
   const speedBounds = engine === 'supertonic' ? [0.8, 1.2] : engine === 'kitten' ? [0.5, 2] : [0.5, 1.5]
   const requestedSpeed = Number(job.speed)
   const speed = Number.isFinite(requestedSpeed)

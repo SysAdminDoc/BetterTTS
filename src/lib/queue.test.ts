@@ -168,6 +168,20 @@ describe('queue', () => {
     expect(migrated.chunks[0].status).toBe('pending')
   })
 
+  it('migrates native Melo jobs as single-speaker queue records', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('melo', 1),
+      engine: 'melo',
+      voice: 'melo-default',
+      language: 'cmn',
+    })
+
+    expect(migrated.engine).toBe('melo')
+    expect(migrated.voice).toBe('melo-default')
+    expect(migrated.language).toBeUndefined()
+    expect(migrated.speed).toBe(1)
+  })
+
   it('migrates queue chunk playback metadata', () => {
     const migrated = migrateQueueJob({
       ...makeJob('playback', 1),

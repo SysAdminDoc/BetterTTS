@@ -17,7 +17,9 @@ if (!existsSync(hostPath)) {
 
 const text = process.argv[2] ?? 'Native inference is working on this machine.'
 const voice = process.argv[3] ?? 'af_heart'
-const engine = process.argv[4] === 'piper' ? 'piper' : 'kokoro'
+const engine = process.argv[4] === 'piper' || process.argv[4] === 'melo' ? process.argv[4] : 'kokoro'
+const hostEngine = engine === 'kokoro' ? {} : { engine }
+const hostVoice = engine === 'piper' ? 'en' : engine === 'melo' ? 'melo-default' : voice
 
 const env = { ...process.env, BETTERTTS_MODEL_CACHE: 'dist-electron/model-cache' }
 delete env.ELECTRON_RUN_AS_NODE
@@ -57,25 +59,25 @@ child.on('message', (msg) => {
     }
   } else if (msg.type === 'info') {
     console.log(`runtime: ${JSON.stringify(msg.runtime)}`)
-    child.send({ type: 'load', ...(engine === 'piper' ? { engine } : {}) })
+    child.send({ type: 'load', ...hostEngine })
   } else if (msg.type === 'loaded') {
     loadedAt = performance.now()
     console.log(`\nmodel loaded in ${Math.round(loadedAt - startedAt)} ms (${msg.key})`)
     console.log(`runtime: ${msg.runtime.runtime} ${msg.runtime.sherpaVersion ?? 'unknown'} · engine ${msg.runtime.engine ?? engine} · node ${msg.runtime.node} · cache ${msg.runtime.modelCacheDir}`)
-    child.send({ type: 'generate', text, voice: engine === 'piper' ? 'en' : voice, speed: 1, id: 1, ...(engine === 'piper' ? { engine } : {}) })
+    child.send({ type: 'generate', text, voice: hostVoice, speed: 1, id: 1, ...hostEngine })
   } else if (msg.type === 'loadError') {
     console.error(`\nload failed: ${msg.message}`)
     finish(1)
   } else if (msg.type === 'generated') {
     const ms = performance.now() - loadedAt
     const timeToFirstAudioMs = performance.now() - startedAt
-    const sampleRate = msg.sampleRate ?? 24000
+    const sampleRate = msg.sampleRate ?? (engine === 'melo' ? 44_100 : engine === 'piper' ? 22_050 : 24_000)
     const seconds = msg.samples.length / sampleRate
     const report = {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       ok: msg.samples.length > 0,
-      voice,
+      voice: hostVoice,
       engine,
       sampleRate,
       samples: msg.samples.length,

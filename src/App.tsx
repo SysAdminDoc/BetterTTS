@@ -89,7 +89,7 @@ import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } 
 import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
-import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
+import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativeMelo, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type AudioCleanupMode, type DesktopExternalFile, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
 import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
@@ -183,6 +183,9 @@ import {
 import { speakBrowser } from './lib/webspeech.ts'
 
 const APP_VERSION = '0.22.0'
+const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
+const MELO_MODEL_REVISION = 'af5d207a364ea4208c6f589c89f57f88414bdd16'
+const MELO_SAMPLE_RATE = 44_100
 const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000
@@ -279,28 +282,30 @@ function handleWorkspaceTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>)
 }
 
 const MODEL_ROWS = [
-  ['Kokoro 82M', 'Kokoro local', '82M', 'EN / ES / FR / HI / IT / PT', 'Ready'],
+  ['Kokoro 82M', 'Kokoro local', '82M', 'EN / ES / FR / HI / IT / PT / JA / ZH', 'Ready'],
   ['Kokoro timestamped', 'Kokoro local', '82M', 'Word-level timings', 'Opt-in'],
   ['Supertonic', 'Transformers.js', '66M', 'English speed engine', 'Ready'],
   ['KittenTTS', 'WebGPU shaders', '15M / 40M / 80M', 'English lightweight engine', 'Ready'],
   ['Chatterbox', 'Transformers.js v4', '0.5B', 'English + 23 languages', 'Opt-in'],
   ['Piper-plus', 'WASM + ONNX Runtime', 'Tsukuyomi-chan', 'JA / EN / ZH / KO / ES / FR / PT / SV', 'Experimental'],
+  ['MeloTTS', 'Sherpa-ONNX VITS', '~163 MB', 'Chinese + English', 'Desktop'],
   ['Qwen3-TTS', 'Python sidecar', '0.6B', '10 multilingual languages + style instruction', 'Desktop opt-in'],
-  ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT', 'Ready'],
+  ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT / JA / CMN', 'Ready'],
   ['Browser voices', 'Web Speech', 'Native', 'Device voices', 'Fallback'],
 ]
 
 const RUNTIME_LICENSE_ROWS = [
   ['BetterTTS app code', 'MIT', 'App shell, UI, queue, exports'],
   ['kokoro-js, Kokoro ONNX, Transformers.js, phonemizer', 'Apache-2.0', 'Kokoro, timestamps, English phonemization'],
-  ['ephone / eSpeak NG WASM', 'GPL-3.0-or-later', 'Loaded only for multilingual Kokoro voices: ES / FR / HI / IT / PT-BR'],
+  ['ephone / eSpeak NG WASM', 'GPL-3.0-or-later', 'Loaded only for multilingual Kokoro voices: ES / FR / HI / IT / PT-BR / JA / CMN'],
   ['electron-updater', 'MIT', 'Opt-in Windows update download and restart install'],
   ['KittenTTS browser wrapper', 'MIT', 'Kitten model weights are Apache-2.0'],
   ['Chatterbox ONNX models', 'MIT', 'Opt-in reference-voice synthesis; generated audio carries the PerTh watermark'],
   ['piper-plus, @piper-plus/g2p, onnxruntime-web', 'MIT', 'Experimental Piper-plus engine; lazy package/WASM/model path'],
-  ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro and English Piper CPU utility process'],
+  ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro, MeloTTS, and English Piper CPU utility process'],
   ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
   ['Sherpa Piper Cori pack', 'Public-domain source data', 'Pinned English native Piper archive; downloaded and verified on first use'],
+  ['Sherpa MeloTTS pack', 'MIT', 'Pinned Chinese + English VITS archive; downloaded and verified on first use'],
   ['qwen-tts / Qwen3-TTS', 'Apache-2.0', 'Optional desktop Python sidecar; torch/runtime and model weights are user-managed and never bundled'],
   ['rvc-python (optional user-managed)', 'MIT', 'Optional Windows RVC post-stage; installed into user data only after explicit setup'],
   ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
@@ -495,6 +500,8 @@ function queueEngineText(job: QueueJob): string {
       ? `KittenTTS - ${(job.kittenModel ?? KITTEN_DEFAULT_MODEL).toUpperCase()}`
       : job.engine === 'piper'
         ? `Piper-plus - ${job.language ?? 'en'}`
+        : job.engine === 'melo'
+          ? 'MeloTTS - Chinese + English'
         : `Kokoro - ${job.language ?? 'English US'}`
   return job.narratorMode ? `${engine} · Narrator mode` : engine
 }
@@ -1543,6 +1550,8 @@ function App() {
                 : `${chatterboxModelLabel(chatterboxModel)} - ${chatterboxLanguageLabel(chatterboxLanguageId)} - GPU preferred; CPU is slow`
             : engine === 'piper'
               ? `${PIPER_PLUS_MODEL_LABEL} - ${selectedPiperLanguage.label} - experimental lazy engine`
+              : engine === 'melo'
+                ? 'MeloTTS Chinese + English - 44.1 kHz native desktop engine'
               : engine === 'qwen'
                 ? qwenStatus?.available
                   ? `Qwen3-TTS 0.6B - ${qwenStatus.modelReady ? 'weights cached' : 'weights download on first use'}`
@@ -1559,6 +1568,8 @@ function App() {
             ? 'Chatterbox'
             : engine === 'piper'
               ? 'Piper-plus'
+              : engine === 'melo'
+                ? 'MeloTTS'
               : engine === 'qwen'
                 ? 'Qwen3-TTS'
               : 'Browser voices'
@@ -1573,6 +1584,8 @@ function App() {
             ? chatterboxReference?.name ?? 'Reference clip required'
           : engine === 'piper'
               ? selectedPiperLanguage.label
+              : engine === 'melo'
+                ? 'MeloTTS default'
               : engine === 'qwen'
                 ? qwenSpeaker
               : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
@@ -1583,6 +1596,7 @@ function App() {
       if (engine === 'supertonic') return selectedSupertonicVoice.id
       if (engine === 'kitten') return selectedKittenVoice.id
       if (engine === 'piper') return piperLanguage
+      if (engine === 'melo') return 'melo-default'
       if (engine === 'qwen') return qwenSpeaker
       if (engine === 'browser') return browserVoiceUri
       return selectedVoice.id
@@ -1654,6 +1668,8 @@ function App() {
       ? `${(CHATTERBOX_SAMPLE_RATE / 1000).toFixed(0)} kHz`
     : engine === 'piper'
         ? `${(PIPER_PLUS_SAMPLE_RATE / 1000).toFixed(2)} kHz`
+    : engine === 'melo'
+      ? `${(MELO_SAMPLE_RATE / 1000).toFixed(1)} kHz`
         : engine === 'qwen'
           ? '24.0 kHz'
         : `${(KOKORO_SAMPLE_RATE / 1000).toFixed(0)} kHz`
@@ -1798,6 +1814,10 @@ function App() {
     persistSetting(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
     if (!experimentalPiperEnabled && engine === 'piper') setEngine('kokoro')
   }, [experimentalPiperEnabled, engine])
+
+  useEffect(() => {
+    if (!nativeAvailable && engine === 'melo') setEngine('kokoro')
+  }, [engine, nativeAvailable])
 
   useEffect(() => {
     persistSetting(EXPERIMENTAL_CHATTERBOX_STORAGE_KEY, chatterboxConsent ? '1' : '0')
@@ -2066,6 +2086,7 @@ function App() {
       chatterboxMultilingualModel: chatterboxModelId('multilingual'),
       piperPlusPackage: `piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`,
       piperPlusModel: PIPER_PLUS_MODEL_ID,
+      meloModel: `${MELO_MODEL_ID}@${MELO_MODEL_REVISION}`,
     }
 
     if (engine === 'supertonic') modelRoutes.supertonicVoice = supertonicVoiceUrl(selectedSupertonicVoice.id)
@@ -2114,6 +2135,8 @@ function App() {
               ? chatterboxReference ? 'reference-clip-loaded' : 'reference-required'
             : engine === 'piper'
               ? PIPER_PLUS_MODEL_LABEL
+              : engine === 'melo'
+                ? 'melo-default'
               : engine === 'qwen'
                 ? QWEN_MODEL_ID
               : browserVoiceUri || 'browser-default',
@@ -2131,6 +2154,8 @@ function App() {
             ? `${chatterboxModelId(chatterboxModel)} (${chatterboxLanguageId})`
           : engine === 'piper'
               ? `${PIPER_PLUS_MODEL_ID} via piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`
+          : engine === 'melo'
+              ? `${MELO_MODEL_ID}@${MELO_MODEL_REVISION} via sherpa-onnx`
           : engine === 'qwen'
               ? QWEN_MODEL_ID
               : 'Web Speech API',
@@ -3035,6 +3060,17 @@ function App() {
         ),
       }
     }
+    if (engine === 'melo') {
+      if (!nativeAvailable) throw new Error('MeloTTS is available in the Windows desktop app.')
+      const runtime = await loadNativeMelo(onProgress)
+      setRuntimeLabel(`Sherpa-ONNX MeloTTS CPU · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}`)
+      return {
+        synthesize: async (text, _voice, spd, _bin, signal) => ({
+          samples: await generateNative(text, 'melo-default', spd, signal, 'melo'),
+          sampleRate: runtime.sampleRate ?? MELO_SAMPLE_RATE,
+        }),
+      }
+    }
     if (engine === 'piper') {
       if (forceNative && nativeAvailable && piperLanguage === 'en') {
         const runtime = await loadNativePiper(onProgress)
@@ -3075,6 +3111,19 @@ function App() {
           synthesizeKitten(text, voice as KittenVoiceId, spd, job.kittenModel ?? KITTEN_DEFAULT_MODEL, (stage) => {
             setStatus(stage)
           }),
+      }
+    }
+
+    if (job.engine === 'melo') {
+      if (!nativeAvailable) throw new Error('MeloTTS queue jobs require the Windows desktop app.')
+      const runtime = await loadNativeMelo(onProgress)
+      setRuntimeLabel(`Sherpa-ONNX MeloTTS CPU · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}`)
+      return {
+        sampleRate: runtime.sampleRate ?? MELO_SAMPLE_RATE,
+        synthesize: async (text, _voice, spd, _bin, signal) => ({
+          samples: await generateNative(text, 'melo-default', spd, signal, 'melo'),
+          sampleRate: runtime.sampleRate ?? MELO_SAMPLE_RATE,
+        }),
       }
     }
 
@@ -3124,6 +3173,8 @@ function App() {
           ? 'Loading Qwen3-TTS sidecar'
         : engine === 'piper'
           ? 'Loading Piper-plus model'
+          : engine === 'melo'
+            ? 'Loading MeloTTS model'
           : 'Loading Kokoro model'
     setStatus(loadingLabel)
     setProgress(3)
@@ -3176,6 +3227,8 @@ function App() {
           ? 24_000
         : engine === 'piper'
           ? PIPER_PLUS_SAMPLE_RATE
+          : engine === 'melo'
+            ? MELO_SAMPLE_RATE
           : KOKORO_SAMPLE_RATE
     let totalChars = 0
     const generated: AudioResult[] = []
@@ -3515,6 +3568,19 @@ function App() {
     })
   }
 
+  async function generateMelo(chunks: string[]) {
+    const jobs: SynthJob[] = chunks.map((chunk, index) => ({
+      text: chunk,
+      voice: 'melo-default',
+      label: `MeloTTS Chinese + English: ${chunk.slice(0, 48)}`,
+      filenamePrefix: chunks.length === 1 ? slugify(chunk) : `${String(index + 1).padStart(3, '0')}-${slugify(chunk)}`,
+    }))
+    await runSynthesis(jobs, {
+      zipPrefix: 'bettertts-melo',
+      successMessage: 'MeloTTS audio generated locally.',
+    })
+  }
+
   async function generateChatterbox(chunks: string[]) {
     const referenceName = chatterboxReference?.name ?? 'reference clip'
     const jobs: SynthJob[] = chunks.map((chunk, index) => ({
@@ -3665,6 +3731,8 @@ function App() {
         await generateKitten(chunks)
       } else if (engine === 'piper') {
         await generatePiperPlus(chunks)
+      } else if (engine === 'melo') {
+        await generateMelo(chunks)
       } else if (engine === 'chatterbox') {
         await generateChatterbox(chunks)
       } else {
@@ -5382,6 +5450,18 @@ function App() {
                     <small>{PIPER_PLUS_MODEL_LABEL}. {selectedPiperLanguage.label}. MIT runtime, lazy model.</small>
                   </button>
                 ) : null}
+                {nativeAvailable ? (
+                  <button
+                    type="button"
+                    className={engine === 'melo' ? 'engine-card selected' : 'engine-card'}
+                    onClick={() => setEngine('melo')}
+                    aria-pressed={engine === 'melo'}
+                  >
+                    <span>{engine === 'melo' ? <Check size={17} aria-hidden="true" /> : null}</span>
+                    <strong>MeloTTS</strong>
+                    <small>Chinese + English, 44.1 kHz, MIT VITS model. Downloads once on first use and stays in the desktop model cache.</small>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={engine === 'browser' ? 'engine-card selected' : 'engine-card'}
@@ -6177,6 +6257,10 @@ function App() {
                 </div>
                 <small className="engine-note">Higher values exaggerate delivery and emotion. Generated audio retains Chatterbox&apos;s built-in PerTh watermark.</small>
               </>
+            ) : engine === 'melo' ? (
+              <p className="engine-note">
+                MeloTTS is a single-speaker Chinese + English native CPU model at 44.1 kHz. Text selects the language automatically; the pinned MIT archive is downloaded only when you generate on Windows.
+              </p>
             ) : engine === 'piper' ? (
               <>
                 <label className="control-label" htmlFor="piper-language">
@@ -6629,7 +6713,7 @@ function App() {
                       {narratorRoleVoicePicker('dialogue')}
                     </div>
                     <small className="narrator-note">
-                      Quoted speech and [speaker:Name] lines use the dialogue voice. Plain text falls back to narration; {engine === 'piper' || engine === 'chatterbox' || engine === 'qwen' ? 'this engine exposes one active voice, so both roles use it.' : 'queue chunks retain the role assignment for resume and M4B export.'}
+                      Quoted speech and [speaker:Name] lines use the dialogue voice. Plain text falls back to narration; {engine === 'piper' || engine === 'melo' || engine === 'chatterbox' || engine === 'qwen' ? 'this engine exposes one active voice, so both roles use it.' : 'queue chunks retain the role assignment for resume and M4B export.'}
                     </small>
                   </div>
                 ) : null}
@@ -6926,7 +7010,7 @@ function App() {
                 ))}
               </tbody>
             </table>
-            <p>Kokoro voices are wired for English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Kokoro Japanese and Chinese remain unavailable until a browser-safe G2P path is available; Piper-plus covers additional languages on device.</p>
+            <p>Kokoro voices are wired for English, Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese. Japanese and Mandarin use lazy browser-safe ephone G2P while native Windows Kokoro remains the fast English path; MeloTTS adds a pinned native Chinese + English route.</p>
             <div className="runtime-license-panel" role="region" aria-labelledby="licenses-heading">
               <div className="section-heading">
                 <h3 id="licenses-heading">Runtime licenses</h3>

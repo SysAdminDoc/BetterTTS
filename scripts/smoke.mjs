@@ -469,6 +469,24 @@ async function runRealEngineChecks(browser) {
     const srt = (await objectUrlBuffer(resultRow.getByRole('link', { name: 'SRT' }), 'href')).toString('utf8')
     const vtt = (await objectUrlBuffer(resultRow.getByRole('link', { name: 'VTT' }), 'href')).toString('utf8')
     if (!srt.includes('-->') || !vtt.startsWith('WEBVTT') || !vtt.includes('-->')) throw new Error('Real engine caption cues are missing')
+
+    const expandedLanguages = {}
+    for (const [locale, sampleText] of [
+      ['ja', 'こんにちは。これは日本語の音声テストです。'],
+      ['cmn', '你好，这是普通话语音测试。'],
+    ]) {
+      await page.locator('#locale').selectOption(locale)
+      await page.getByLabel('Text to synthesize').fill(sampleText)
+      await page.locator('.generate-button').click()
+      const languageRow = page.locator('#generated-output .result-row').first()
+      await languageRow.locator('audio').waitFor({ timeout: 300000 })
+      const languageAudio = await inspectGeneratedAudio(page, languageRow)
+      if (!languageAudio.header.startsWith('RIFF') || !languageAudio.header.endsWith('WAVE') || languageAudio.bytes <= 44 || languageAudio.duration <= 0) {
+        throw new Error(`Expanded Kokoro ${locale} output is invalid: ${JSON.stringify(languageAudio)}`)
+      }
+      expandedLanguages[locale] = languageAudio
+    }
+
     if (timeToFirstAudioMs > performanceBudget.realEngine.maxTimeToFirstAudioMs) {
       throw new Error(`Browser time to first audio ${timeToFirstAudioMs.toFixed(0)} ms exceeds ${performanceBudget.realEngine.maxTimeToFirstAudioMs} ms`)
     }
@@ -538,6 +556,7 @@ async function runRealEngineChecks(browser) {
       timeToFirstAudioMs: Math.round(timeToFirstAudioMs),
       realTimeFactor: Number(((timeToFirstAudioMs / 1000) / audio.duration).toFixed(2)),
       audio,
+      expandedLanguages,
       captions: { srtBytes: srt.length, vttBytes: vtt.length },
       cancellation: 'passed',
       queueResume: resumed,

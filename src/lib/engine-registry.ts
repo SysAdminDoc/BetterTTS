@@ -1,6 +1,6 @@
 import type { ByoModelOptionId } from './byo-models.ts'
 
-export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'qwen' | 'browser'
+export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'melo' | 'qwen' | 'browser'
 
 export type PostStageId = 'rvc'
 
@@ -25,6 +25,7 @@ export type EngineDescriptor = {
 
 export type EngineFlags = {
   piperPlus: boolean
+  melo?: boolean
   chatterbox?: boolean
   qwen?: boolean
 }
@@ -38,6 +39,7 @@ export const ENGINE_REGISTRY: EngineDescriptor[] = [
   { id: 'kitten', label: 'KittenTTS', queueable: true, experimental: false, firstLoad: 'lazy' },
   { id: 'chatterbox', label: 'Chatterbox', queueable: false, experimental: true, firstLoad: 'lazy' },
   { id: 'piper', label: 'Piper-plus', queueable: true, experimental: false, firstLoad: 'lazy' },
+  { id: 'melo', label: 'MeloTTS', queueable: true, experimental: false, firstLoad: 'lazy' },
   { id: 'qwen', label: 'Qwen3-TTS', queueable: false, experimental: true, firstLoad: 'lazy' },
   { id: 'browser', label: 'Browser', queueable: false, experimental: false, firstLoad: 'default' },
 ]
@@ -45,6 +47,7 @@ export const ENGINE_REGISTRY: EngineDescriptor[] = [
 export function visibleEngineDescriptors(flags: EngineFlags): EngineDescriptor[] {
   return ENGINE_REGISTRY.filter((engine) =>
     (engine.id !== 'piper' || flags.piperPlus)
+    && (engine.id !== 'melo' || flags.melo === true)
     && (engine.id !== 'chatterbox' || flags.chatterbox === true)
     && (engine.id !== 'qwen' || flags.qwen === true),
   )

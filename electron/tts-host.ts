@@ -12,6 +12,7 @@ import {
   readSherpaPackStatus,
   sherpaKokoroSpeakerId,
   SHERPA_KOKORO_PACK,
+  SHERPA_MELO_PACK,
   SHERPA_PIPER_PACK,
   type SherpaEngineId,
   type SherpaModelPack,
@@ -57,6 +58,7 @@ async function loadSherpaModule(): Promise<SherpaModule> {
 
 const KOKORO_SAMPLE_RATE = 24_000
 const PIPER_SAMPLE_RATE = 22_050
+const MELO_SAMPLE_RATE = 44_100
 
 export type NativeRuntimeInfo = {
   runtime: 'sherpa-onnx-node'
@@ -184,11 +186,11 @@ function runtimeInfo(
 }
 
 function packForEngine(engine: SherpaEngineId): SherpaModelPack {
-  return engine === 'piper' ? SHERPA_PIPER_PACK : SHERPA_KOKORO_PACK
+  return engine === 'piper' ? SHERPA_PIPER_PACK : engine === 'melo' ? SHERPA_MELO_PACK : SHERPA_KOKORO_PACK
 }
 
 function keyForEngine(engine: SherpaEngineId): string {
-  return engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
+  return engine === 'piper' ? 'sherpa:piper' : engine === 'melo' ? 'sherpa:melo' : 'cpu:q8'
 }
 
 function createSherpaConfig(engine: SherpaEngineId, root: string): unknown {
@@ -197,7 +199,7 @@ function createSherpaConfig(engine: SherpaEngineId, root: string): unknown {
     model: join(root, pack.layout.model),
     ...(pack.layout.voices ? { voices: join(root, pack.layout.voices) } : {}),
     tokens: join(root, pack.layout.tokens),
-    dataDir: join(root, pack.layout.dataDir),
+    ...(pack.layout.dataDir ? { dataDir: join(root, pack.layout.dataDir) } : {}),
     ...(pack.layout.lexicon ? { lexicon: pack.layout.lexicon.split(',').map((path) => join(root, path)).join(',') } : {}),
   }
   const model = engine === 'piper'
@@ -208,6 +210,14 @@ function createSherpaConfig(engine: SherpaEngineId, root: string): unknown {
         dataDir: paths.dataDir,
       },
     }
+    : engine === 'melo'
+      ? {
+        vits: {
+          model: paths.model,
+          tokens: paths.tokens,
+          ...(paths.lexicon ? { lexicon: paths.lexicon } : {}),
+        },
+      }
     : {
       kokoro: {
         model: paths.model,
@@ -272,7 +282,7 @@ port.onMessage(async (msg) => {
       tts = instance
       loadedEngine = engine
       loadedKey = key
-      loadedSampleRate = engine === 'piper' ? PIPER_SAMPLE_RATE : KOKORO_SAMPLE_RATE
+      loadedSampleRate = engine === 'piper' ? PIPER_SAMPLE_RATE : engine === 'melo' ? MELO_SAMPLE_RATE : KOKORO_SAMPLE_RATE
       lastPackStatus = ensured.status
       lastPackFailure = undefined
       port.post({ type: 'loaded', key, runtime: runtimeInfo(engine, instance.sampleRate || loadedSampleRate, lastPackStatus) })
@@ -307,7 +317,7 @@ port.onMessage(async (msg) => {
       }
       const module = await loadSherpaModule()
       const generationConfig = new module.GenerationConfig({
-        sid: engine === 'piper' ? 0 : sherpaKokoroSpeakerId(msg.voice),
+        sid: engine === 'piper' || engine === 'melo' ? 0 : sherpaKokoroSpeakerId(msg.voice),
         speed: msg.speed,
         silenceScale: 0.2,
       })

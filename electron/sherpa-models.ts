@@ -36,14 +36,14 @@ const SHERPA_RELEASE_BASE = 'https://github.com/k2-fsa/sherpa-onnx/releases/down
 const MAX_ARCHIVE_LIST_BYTES = 8 * 1024 * 1024
 const MAX_ARCHIVE_ENTRIES = 20_000
 
-export type SherpaEngineId = 'kokoro' | 'piper'
+export type SherpaEngineId = 'kokoro' | 'piper' | 'melo'
 
 export type SherpaModelLayout = {
   rootDir: string
   model: string
   voices?: string
   tokens: string
-  dataDir: string
+  dataDir?: string
   lexicon?: string
 }
 
@@ -119,12 +119,41 @@ export const SHERPA_PIPER_PACK: SherpaModelPack = {
   },
 }
 
+export const SHERPA_MELO_PACK: SherpaModelPack = {
+  id: 'sherpa-melo-tts-zh-en',
+  modelId: 'myshell-ai/MeloTTS-Chinese',
+  revision: 'af5d207a364ea4208c6f589c89f57f88414bdd16',
+  version: 'MeloTTS Chinese + English via sherpa-onnx',
+  engine: 'melo',
+  license: {
+    spdx: 'MIT',
+    tier: 'permissive',
+    url: 'https://huggingface.co/myshell-ai/MeloTTS-Chinese',
+  },
+  archive: {
+    fileName: 'vits-melo-tts-zh_en.tar.bz2',
+    url: `${SHERPA_RELEASE_BASE}/vits-melo-tts-zh_en.tar.bz2`,
+    size: 167_006_755,
+    sha256: 'e58351ed7149f290a54534538badd4077cdbe6fddc964b24d0bee870415d1514',
+  },
+  // The official Sherpa example uses the fp32 graph for this VITS export. The
+  // archive also carries an int8 graph, but the native addon currently exits
+  // during session creation with that graph, so keep the known-good entry
+  // explicit in the immutable layout.
+  layout: {
+    rootDir: 'vits-melo-tts-zh_en',
+    model: 'model.onnx',
+    tokens: 'tokens.txt',
+    lexicon: 'lexicon.txt',
+  },
+}
+
 export type SherpaModelPaths = {
   root: string
   model: string
   voices?: string
   tokens: string
-  dataDir: string
+  dataDir?: string
   lexicon?: string
 }
 
@@ -175,7 +204,7 @@ export function validateSherpaModelPack(pack: SherpaModelPack): void {
   validateRelativePath(pack.layout.rootDir, 'Sherpa archive root')
   validateRelativePath(pack.layout.model, 'Sherpa model path')
   validateRelativePath(pack.layout.tokens, 'Sherpa token path')
-  validateRelativePath(pack.layout.dataDir, 'Sherpa data directory')
+  if (pack.layout.dataDir) validateRelativePath(pack.layout.dataDir, 'Sherpa data directory')
   if (pack.layout.voices) validateRelativePath(pack.layout.voices, 'Sherpa voices path')
   if (pack.layout.lexicon) {
     for (const path of pack.layout.lexicon.split(',')) validateRelativePath(path, 'Sherpa lexicon path')
@@ -210,7 +239,7 @@ export function sherpaModelPaths(rootDir: string, pack: SherpaModelPack): Sherpa
     model: join(root, pack.layout.model),
     ...(pack.layout.voices ? { voices: join(root, pack.layout.voices) } : {}),
     tokens: join(root, pack.layout.tokens),
-    dataDir: join(root, pack.layout.dataDir),
+    ...(pack.layout.dataDir ? { dataDir: join(root, pack.layout.dataDir) } : {}),
     ...(pack.layout.lexicon ? { lexicon: pack.layout.lexicon.split(',').map((path) => join(root, path)).join(',') } : {}),
   }
 }
@@ -249,7 +278,7 @@ function requiredModelPaths(pack: SherpaModelPack): string[] {
   return [
     pack.layout.model,
     pack.layout.tokens,
-    pack.layout.dataDir,
+    ...(pack.layout.dataDir ? [pack.layout.dataDir] : []),
     ...(pack.layout.voices ? [pack.layout.voices] : []),
     ...(pack.layout.lexicon ? pack.layout.lexicon.split(',') : []),
   ]
@@ -281,12 +310,12 @@ async function readExtractionFiles(rootDir: string, pack: SherpaModelPack): Prom
 type ExtractionVerificationDepth = 'structural' | 'required' | 'all'
 
 function isRuntimeModelFile(pack: SherpaModelPack, key: string): boolean {
-  const dataPrefix = `${pack.layout.dataDir}/`
+  const dataPrefix = pack.layout.dataDir ? `${pack.layout.dataDir}/` : null
   return key === pack.layout.model
     || key === pack.layout.tokens
     || key === pack.layout.voices
     || key === pack.layout.dataDir
-    || key.startsWith(dataPrefix)
+    || (dataPrefix !== null && key.startsWith(dataPrefix))
     || Boolean(pack.layout.lexicon?.split(',').includes(key))
 }
 
@@ -527,9 +556,22 @@ export const SHERPA_KOKORO_SPEAKER_IDS: Readonly<Record<string, number>> = {
   hm_psi: 34,
   if_sara: 35,
   im_nicola: 36,
+  jf_alpha: 37,
+  jf_gongitsune: 38,
+  jf_nezumi: 39,
+  jf_tebukuro: 40,
+  jm_kumo: 41,
   pf_dora: 42,
   pm_alex: 43,
   pm_santa: 44,
+  zf_xiaobei: 45,
+  zf_xiaoni: 46,
+  zf_xiaoxiao: 47,
+  zf_xiaoyi: 48,
+  zm_yunjian: 49,
+  zm_yunxi: 50,
+  zm_yunxia: 51,
+  zm_yunyang: 52,
 }
 
 export function sherpaKokoroSpeakerId(voice: string): number {

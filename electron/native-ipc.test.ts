@@ -5,10 +5,13 @@ describe('native TTS IPC validation', () => {
   it('accepts the bounded renderer protocol', () => {
     expect(validateNativeTtsRequest({ type: 'load', dtype: 'q8' })).toEqual({ type: 'load', dtype: 'q8' })
     expect(validateNativeTtsRequest({ type: 'load', dtype: 'q8', engine: 'piper' })).toEqual({ type: 'load', dtype: 'q8', engine: 'piper' })
+    expect(validateNativeTtsRequest({ type: 'load', dtype: 'q8', engine: 'melo' })).toEqual({ type: 'load', dtype: 'q8', engine: 'melo' })
     expect(validateNativeTtsRequest({ type: 'generate', text: 'Hello', voice: 'af_heart', speed: 1, id: 7 }))
       .toEqual({ type: 'generate', text: 'Hello', voice: 'af_heart', speed: 1, id: 7 })
     expect(validateNativeTtsRequest({ type: 'generate', text: 'Hello', voice: 'en', speed: 1, id: 8, engine: 'piper' }))
       .toEqual({ type: 'generate', text: 'Hello', voice: 'en', speed: 1, id: 8, engine: 'piper' })
+    expect(validateNativeTtsRequest({ type: 'generate', text: '你好', voice: 'melo-default', speed: 1, id: 9, engine: 'melo' }))
+      .toEqual({ type: 'generate', text: '你好', voice: 'melo-default', speed: 1, id: 9, engine: 'melo' })
     expect(validateNativeTtsRequest({ type: 'cancel', id: 7 })).toEqual({ type: 'cancel', id: 7 })
   })
 

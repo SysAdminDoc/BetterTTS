@@ -7,6 +7,7 @@ import {
   sherpaKokoroSpeakerId,
   sherpaModelPaths,
   SHERPA_KOKORO_PACK,
+  SHERPA_MELO_PACK,
   SHERPA_PIPER_PACK,
   validateArchiveEntry,
   validateSherpaModelPack,
@@ -25,6 +26,7 @@ afterEach(() => {
 describe('Sherpa model packs', () => {
   it('keeps both runtime packs immutable and exposes addon-ready paths', () => {
     expect(() => validateSherpaModelPack(SHERPA_KOKORO_PACK)).not.toThrow()
+    expect(() => validateSherpaModelPack(SHERPA_MELO_PACK)).not.toThrow()
     expect(() => validateSherpaModelPack(SHERPA_PIPER_PACK)).not.toThrow()
 
     const paths = sherpaModelPaths(root, SHERPA_KOKORO_PACK)
@@ -32,12 +34,19 @@ describe('Sherpa model packs', () => {
     expect(paths.voices).toMatch(/voices\.bin$/)
     expect(paths.lexicon).toContain('lexicon-us-en.txt')
     expect(SHERPA_KOKORO_PACK.archive.sha256).toHaveLength(64)
+    const meloPaths = sherpaModelPaths(root, SHERPA_MELO_PACK)
+    expect(meloPaths.model).toMatch(/model\.onnx$/)
+    expect(meloPaths.dataDir).toBeUndefined()
+    expect(meloPaths.lexicon).toMatch(/lexicon\.txt$/)
+    expect(SHERPA_MELO_PACK.archive.sha256).toHaveLength(64)
     expect(SHERPA_PIPER_PACK.archive.sha256).toHaveLength(64)
   })
 
   it('maps the existing Kokoro voice ids and falls back safely', () => {
     expect(sherpaKokoroSpeakerId('af_heart')).toBe(3)
     expect(sherpaKokoroSpeakerId('bm_lewis')).toBe(27)
+    expect(sherpaKokoroSpeakerId('jf_alpha')).toBe(37)
+    expect(sherpaKokoroSpeakerId('zm_yunyang')).toBe(52)
     expect(sherpaKokoroSpeakerId('unknown')).toBe(3)
   })
 

@@ -1083,7 +1083,7 @@ async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: Abor
   const operation = openAiGenerationTail.then(async () => {
     if (signal.aborted) throw new Error('The local API request was cancelled.')
     const host = ensureTtsHost()
-    const key = request.engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
+    const key = request.engine === 'piper' ? 'sherpa:piper' : request.engine === 'melo' ? 'sherpa:melo' : 'cpu:q8'
     const load = waitForTtsHostMessage<{ type: 'loaded'; key: string } | { type: 'loadError'; key: string; message: string }>(
       host,
       (message) => {
@@ -1094,7 +1094,7 @@ async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: Abor
       180_000,
       signal,
     )
-    host.postMessage({ type: 'load', dtype: 'q8', ...(request.engine === 'piper' ? { engine: 'piper' } : {}) })
+    host.postMessage({ type: 'load', dtype: 'q8', ...(request.engine && request.engine !== 'kokoro' ? { engine: request.engine } : {}) })
     const loaded = await load
     if (loaded.type === 'loadError') throw new Error(loaded.message)
 
@@ -1112,10 +1112,10 @@ async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: Abor
     host.postMessage({
       type: 'generate',
       text: request.input,
-      voice: request.engine === 'piper' ? 'en' : request.voice,
+      voice: request.engine === 'piper' ? 'en' : request.engine === 'melo' ? 'melo-default' : request.voice,
       speed: request.speed,
       id,
-      ...(request.engine === 'piper' ? { engine: 'piper' } : {}),
+      ...(request.engine && request.engine !== 'kokoro' ? { engine: request.engine } : {}),
     })
     try {
       const result = await generated
@@ -1432,6 +1432,16 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         disabledByDefault: toggle?.getAttribute('aria-checked') !== 'true' && toggle?.checked === false,
       }
     })()`)
+    result.engineUi = await win.webContents.executeJavaScript(`(() => {
+      const locale = document.querySelector('#locale')
+      const localeIds = Array.from(locale?.querySelectorAll('option') ?? []).map((option) => option.value)
+      const meloCard = Array.from(document.querySelectorAll('.engine-card')).some((card) => card.textContent?.includes('MeloTTS'))
+      return {
+        japanese: localeIds.includes('ja'),
+        mandarin: localeIds.includes('cmn'),
+        meloCard,
+      }
+    })()`)
     result.openAiServer = await probeOpenAiTtsServer()
 
     try {
@@ -1544,6 +1554,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       )) &&
       Boolean((result.audioCleanupUi as { control?: boolean; disabledByDefault?: boolean } | undefined)?.control) &&
       Boolean((result.audioCleanupUi as { disabledByDefault?: boolean } | undefined)?.disabledByDefault) &&
+      Boolean((result.engineUi as { japanese?: boolean; mandarin?: boolean; meloCard?: boolean } | undefined)?.japanese) &&
+      Boolean((result.engineUi as { mandarin?: boolean } | undefined)?.mandarin) &&
+      Boolean((result.engineUi as { meloCard?: boolean } | undefined)?.meloCard) &&
       Boolean(result.nativeHost) &&
       Boolean(result.whisperStatus) &&
       Boolean(result.sidecarStatus) &&

@@ -5,13 +5,13 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-406%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-407%20passing-53d889.svg)](#)
 
-**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
+**Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Optional RVC conversion uses user-selected `.pth`/`.index` files through a separate Python adapter; the app stores their paths and provenance, never copies them, and only installs `rvc-python` after explicit setup. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro, MeloTTS, and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Optional RVC conversion uses user-selected `.pth`/`.index` files through a separate Python adapter; the app stores their paths and provenance, never copies them, and only installs `rvc-python` after explicit setup. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -44,16 +44,17 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
 - **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — opt-in reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, and disclosed PerTh watermark
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
+- **MeloTTS native engine** — pinned MIT Chinese + English VITS archive through Sherpa-ONNX, single speaker, 44.1 kHz, Windows desktop only
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
 - **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
 - **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
-- **41 Kokoro voices** — 28 English voices plus Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
-- **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
+- **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
+- **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `ja`, `cmn`, `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
 - **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
-- **Native desktop inference** — the Electron build runs Kokoro and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
-- **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
+- **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
+- **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
 - **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
 - **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
 - **Headless native CLI** — `bettertts synth` converts TXT or EPUB input to WAV, MP3, Opus, FLAC, or chaptered M4B with SRT/VTT captions and machine-readable progress, without launching the GUI
@@ -182,7 +183,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 |---|---|
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
-| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via `qwen-tts` 0.1.1 + PyTorch sidecar |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/MeloTTS/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via `qwen-tts` 0.1.1 + PyTorch sidecar |
 | Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
 | Sidecar runtime | Optional Windows-only Python 3.12 environment; `torch` and `qwen-tts` install into user data and model weights are downloaded on demand |
 | RVC post-stage | Optional Windows-only Python 3.10 environment; `rvc-python` and user-selected `.pth`/`.index` files remain outside the installer |
@@ -214,7 +215,7 @@ src/
 │   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
 │   ├── engine-registry.ts   # Engine capability flags and queue boundaries
 │   ├── kokoro-assets.ts     # Pages-hosted q8 asset routing + HF fallback
-│   ├── kokoro-multilingual.ts # ephone + direct Kokoro model path for es/fr/it/pt-BR/hi
+│   ├── kokoro-multilingual.ts # ephone + direct Kokoro model path for ja/cmn/es/fr/it/pt-BR/hi
 │   ├── kokoro-timestamps.ts # Timestamped Kokoro loader and word cue alignment
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
@@ -297,7 +298,7 @@ To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`
 
 ## Voice Catalog
 
-41 Kokoro voices spanning American English, British English, Spanish, French, Hindi, Italian, and Brazilian Portuguese. English voices keep the detailed quality grades from Kokoro's VOICES metadata:
+54 Kokoro voices spanning American English, British English, Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese. English voices keep the detailed quality grades from Kokoro's VOICES metadata:
 
 | Grade | Voices |
 |---|---|
@@ -316,6 +317,8 @@ Multilingual voices:
 
 | Language | Voices |
 |---|---|
+| Japanese | Alpha, Gongitsune, Nezumi, Tebukuro, Kumo |
+| Mandarin Chinese | Xiaobei, Xiaoni, Xiaoxiao, Xiaoyi, Yunjian, Yunxi, Yunxia, Yunyang |
 | Spanish | Dora, Alex, Santa |
 | French | Siwis |
 | Hindi | Alpha, Beta, Omega, Psi |
@@ -332,7 +335,7 @@ Multilingual voices:
 | Sample rate | 24,000 Hz |
 | WebGPU dtype | fp32 (~326 MB, HF-hosted) |
 | WASM dtype | q8 (~92 MB, Pages-hosted) |
-| Languages | English (US + British), Spanish, French, Hindi, Italian, Brazilian Portuguese |
+| Languages | English (US + British), Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, Brazilian Portuguese |
 | License | Apache-2.0 |
 
 Supertonic is available as a separate English speed engine: 66M parameters, 10 voices, 44,100 Hz output, HF-hosted fp32 ONNX assets, OpenRAIL license, and Transformers.js 4.2.0 runtime.
@@ -340,6 +343,8 @@ Supertonic is available as a separate English speed engine: 66M parameters, 10 v
 KittenTTS is available as a separate English lightweight engine: Nano 15M / 24 MB by default, Micro 40M / 41 MB, Mini 80M / 78 MB, 8 voices, 24,000 Hz output, WebGPU-only shader inference, MIT package code, and Apache-2.0 model weights. The package is lazy-loaded and model weights stay HF-hosted until the engine is selected.
 
 Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. On Windows, the native backend's English path uses `sherpa-onnx-node` with the pinned en-GB Cori model; non-English native selections remain on Piper-plus web. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
+
+MeloTTS is available as a Windows desktop-only native engine: the pinned MIT `myshell-ai/MeloTTS-Chinese` Chinese + English VITS archive is verified by SHA-256 and loaded through Sherpa-ONNX at 44,100 Hz. It exposes one default speaker, chooses the language from the input text, participates in the resumable queue and local OpenAI-compatible API, and remains hidden in web/PWA builds. The exact archive and model revision are recorded in diagnostics after first use.
 
 Qwen3-TTS 0.6B CustomVoice is an optional Windows-only desktop engine using the Apache-2.0 `qwen-tts` package and Qwen3-TTS model. It supports the published multilingual language set, named speakers, and style instructions through the private sidecar. The installer contains only the sidecar source and requirements; Python packages and model weights remain user-managed downloads in the desktop user-data folder.
 
@@ -353,17 +358,18 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 |---|---|---|
 | BetterTTS app code | MIT | App shell, UI, queue, exports |
 | `kokoro-js`, Kokoro ONNX, Transformers.js, `phonemizer` | Apache-2.0 | Kokoro, timestamps, English phonemization |
-| `ephone` / eSpeak NG WASM | GPL-3.0-or-later | Loaded only for multilingual Kokoro voices: Spanish, French, Hindi, Italian, Brazilian Portuguese |
+| `ephone` / eSpeak NG WASM | GPL-3.0-or-later | Loaded only for multilingual Kokoro voices: Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, Brazilian Portuguese |
 | `electron-updater` | MIT | Opt-in Windows update download and restart install |
 | `kitten-tts-webgpu` | MIT | KittenTTS browser runtime; Kitten model weights are Apache-2.0 |
 | `piper-plus`, `@piper-plus/g2p`, `onnxruntime-web` | MIT | Experimental Piper-plus engine; Tsukuyomi-chan model assets load on demand |
-| `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro and Piper CPU utility-process runtime |
+| `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro, MeloTTS, and Piper CPU utility-process runtime |
 | whisper.cpp Windows CLI and GGML model path | MIT | Optional desktop imported-audio word alignment; runtime is bundled, model weights are user-managed |
 | `qwen-tts`, Qwen3-TTS 0.6B model | Apache-2.0 | Optional Windows desktop sidecar; Python packages and model weights are user-managed and never bundled |
 | `rvc-python` | MIT | Optional Windows desktop RVC post-stage; package and model weights are user-managed and installed only after explicit setup |
 | User-supplied restricted/non-commercial weights | User-recorded terms | Consent-gated metadata registry only; BetterTTS does not download, copy, or activate these files by default |
 | Sherpa Kokoro int8 archive | Apache-2.0 | Pinned multilingual Kokoro model pack, downloaded on first native Kokoro load |
 | Sherpa Piper Cori archive | Public domain training data | Pinned English Cori model pack, downloaded on first native English Piper load |
+| Sherpa MeloTTS archive | MIT | Pinned Chinese + English VITS model pack, downloaded on first native MeloTTS load |
 | Supertonic ONNX model | OpenRAIL | HF-hosted English speed engine |
 | `@breezystack/lamejs` | LGPL-3.0 | MP3 export |
 | `pdfjs-dist` | Apache-2.0 | Local PDF text extraction |
