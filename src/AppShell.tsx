@@ -120,7 +120,7 @@ import { isShortKokoroInput, loadTimestampedKokoro, resetTimestampedKokoroSessio
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativeMelo, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { type AudioCleanupMode, type DesktopExternalFile, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
+import { type AudioCleanupMode, type DesktopExternalFile, type DesktopFolderImportResult, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
 import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
@@ -293,6 +293,7 @@ const WebGpuDiagnosticsPanel = lazy(async () => {
   const module = await import('./components/WebGpuDiagnosticsPanel.tsx')
   return { default: module.WebGpuDiagnosticsPanel }
 })
+const DesktopIntegrationsPanel = lazy(() => import('./DesktopIntegrationsPanel.tsx'))
 
 type Engine = EngineId
 type Theme = 'dark' | 'light'
@@ -560,10 +561,16 @@ function isDesktopIntegrationStatus(value: unknown): value is DesktopIntegration
   return typeof status.hotkeyEnabled === 'boolean'
     && typeof status.explorerEnabled === 'boolean'
     && typeof status.ocrEnabled === 'boolean'
+    && typeof status.trayEnabled === 'boolean'
+    && typeof status.notificationsEnabled === 'boolean'
     && typeof status.hotkey === 'string'
     && typeof status.hotkeyRegistered === 'boolean'
     && typeof status.explorerRegistered === 'boolean'
+    && typeof status.associationRegistered === 'boolean'
     && typeof status.ocrAvailable === 'boolean'
+    && typeof status.trayReady === 'boolean'
+    && typeof status.notificationsAvailable === 'boolean'
+    && (status.renderState === 'idle' || status.renderState === 'running' || status.renderState === 'complete' || status.renderState === 'error')
 }
 
 function isDesktopExternalFile(value: unknown): value is DesktopExternalFile {
@@ -573,6 +580,10 @@ function isDesktopExternalFile(value: unknown): value is DesktopExternalFile {
     && file.name.length > 0
     && typeof file.type === 'string'
     && file.bytes instanceof Uint8Array
+}
+
+function desktopExternalFiles(value: unknown): DesktopExternalFile[] {
+  return Array.isArray(value) ? value.filter(isDesktopExternalFile) : []
 }
 
 async function prepareWhisperAudio(file: File): Promise<Uint8Array> {
@@ -1596,7 +1607,7 @@ function App() {
   const [openAiTtsStatus, setOpenAiTtsStatus] = useState<OpenAiTtsServerStatus | null>(null)
   const [openAiTtsAction, setOpenAiTtsAction] = useState<'start' | 'stop' | 'refresh' | null>(null)
   const [desktopIntegrationStatus, setDesktopIntegrationStatus] = useState<DesktopIntegrationStatus | null>(null)
-  const [desktopIntegrationAction, setDesktopIntegrationAction] = useState<DesktopIntegrationKind | null>(null)
+  const [desktopIntegrationAction, setDesktopIntegrationAction] = useState<DesktopIntegrationKind | 'folder' | null>(null)
   const [loudnessPreset, setLoudnessPreset] = useState<LoudnessPresetId>('off')
   const [m4bCoverFile, setM4bCoverFile] = useState<File | null>(null)
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
@@ -1775,10 +1786,16 @@ function App() {
     hotkeyEnabled: false,
     explorerEnabled: false,
     ocrEnabled: false,
+    trayEnabled: false,
+    notificationsEnabled: false,
     hotkey: 'CommandOrControl+Alt+B',
     hotkeyRegistered: false,
     explorerRegistered: false,
+    associationRegistered: false,
     ocrAvailable: false,
+    trayReady: false,
+    notificationsAvailable: false,
+    renderState: 'idle',
   }
   const openAiServerSupported = useMemo(() => openAiTtsServerAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
@@ -2241,8 +2258,8 @@ function App() {
       showToast({ tone: 'ok', message: `Loaded ${typeof message.source === 'string' ? message.source : 'external text'} into the script.` })
     })
     const unsubscribeFiles = desktopIntegrations.onFiles((value) => {
-      if (cancelled || !Array.isArray(value)) return
-      const files = value.filter(isDesktopExternalFile).map((payload) => {
+      if (cancelled) return
+      const files = desktopExternalFiles(value).map((payload) => {
         const bytes = new Uint8Array(payload.bytes.byteLength)
         bytes.set(payload.bytes)
         return new File([bytes.buffer], payload.name, { type: payload.type })
@@ -2273,6 +2290,23 @@ function App() {
     // handlers intentionally close over the current editor/import callbacks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopIntegrations])
+
+  useEffect(() => {
+    if (!desktopIntegrations) return
+    const normalized = status.toLowerCase()
+    const renderState = isGenerating
+      ? 'running'
+      : /failed|error/.test(normalized)
+        ? 'error'
+        : /ready|complete|finished/.test(normalized)
+          ? 'complete'
+          : 'idle'
+    desktopIntegrations.setRenderStatus({
+      state: renderState,
+      message: status,
+      ...(progress === null ? {} : { progress }),
+    })
+  }, [desktopIntegrations, isGenerating, progress, status])
 
   useEffect(() => {
     if (!desktopRvc) return
@@ -3040,7 +3074,7 @@ function App() {
       if (isDesktopIntegrationStatus(next)) setDesktopIntegrationStatus(next)
       showToast({
         tone: 'ok',
-        message: `${kind === 'hotkey' ? 'Read-selection hotkey' : kind === 'explorer' ? 'Explorer context menu' : 'Screen OCR'} ${enabled ? 'enabled' : 'disabled'}.`,
+        message: `${kind === 'hotkey' ? 'Read-selection hotkey' : kind === 'explorer' ? 'Document integration' : kind === 'ocr' ? 'Screen OCR' : kind === 'tray' ? 'Tray status' : 'Render notifications'} ${enabled ? 'enabled' : 'disabled'}.`,
       })
     } catch (error) {
       showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Could not update the desktop integration.' })
@@ -3063,6 +3097,34 @@ function App() {
       showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Screen OCR failed.' })
     } finally {
       setStatus('Ready')
+      setDesktopIntegrationAction(null)
+    }
+  }
+
+  async function handleDesktopFolderImport() {
+    if (!desktopIntegrations || desktopIntegrationAction !== null) return
+    setDesktopIntegrationAction('folder')
+    try {
+      const result = await desktopIntegrations.chooseFolder() as DesktopFolderImportResult
+      if (result.canceled) return
+      const files = desktopExternalFiles(result.files).map((payload) => {
+        const bytes = new Uint8Array(payload.bytes.byteLength)
+        bytes.set(payload.bytes)
+        return new File([bytes.buffer], payload.name, { type: payload.type })
+      })
+      const importFile = importedFileHandlerRef.current
+      if (!importFile || files.length === 0) {
+        showToast({ tone: 'warn', message: 'No supported documents were found in that folder.' })
+        return
+      }
+      await files.reduce((promise, file) => promise.then(() => importFile(file, true)), Promise.resolve())
+      showToast({
+        tone: result.truncated || result.skipped > 0 ? 'warn' : 'ok',
+        message: `${files.length} document${files.length === 1 ? '' : 's'} imported${result.truncated || result.skipped > 0 ? ' within the folder limits' : ''}.`,
+      })
+    } catch (error) {
+      showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Folder import failed.' })
+    } finally {
       setDesktopIntegrationAction(null)
     }
   }
@@ -6619,68 +6681,16 @@ function App() {
                   </span>
                 </label>
                 {desktopIntegrations ? (
-                  <div className="diagnostics-panel desktop-integrations-panel" aria-label="Desktop workflow integrations">
-                    <div className="cache-manager-head">
-                      <span>
-                        <strong>Desktop workflow integrations</strong>
-                        <small>Windows-only helpers. Enable each here; web/PWA has no OS hooks.</small>
-                      </span>
-                      <span className={`openai-status ${desktopIntegrationStatus ? 'running' : ''}`} role="status">
-                        <span className="status-dot" aria-hidden="true" />
-                        {desktopIntegrationStatus ? 'Ready' : 'Checking'}
-                      </span>
-                    </div>
-                    <label className="toggle-row" htmlFor="desktop-read-selection-hotkey" aria-label="Read copied selection with a global hotkey">
-                      <input
-                        id="desktop-read-selection-hotkey"
-                        type="checkbox"
-                        checked={desktopIntegrationSnapshot.hotkeyEnabled}
-                        disabled={desktopIntegrationAction !== null}
-                        onChange={(event) => void handleDesktopIntegrationToggle('hotkey', event.target.checked)}
-                      />
-                      <span>
-                        <strong>Read copied selection with a global hotkey</strong>
-                        <small>{desktopIntegrationSnapshot.hotkey} · {desktopIntegrationSnapshot.hotkeyRegistered ? 'Registered' : desktopIntegrationSnapshot.hotkeyEnabled ? 'Not registered' : 'Disabled'}. Copy first; no input is injected.</small>
-                      </span>
-                    </label>
-                    <label className="toggle-row" htmlFor="desktop-explorer-menu" aria-label="Explorer Convert to audiobook menu">
-                      <input
-                        id="desktop-explorer-menu"
-                        type="checkbox"
-                        checked={desktopIntegrationSnapshot.explorerEnabled}
-                        disabled={desktopIntegrationAction !== null}
-                        onChange={(event) => void handleDesktopIntegrationToggle('explorer', event.target.checked)}
-                      />
-                      <span>
-                        <strong>Explorer “Convert to audiobook” menu</strong>
-                        <small>TXT, EPUB, PDF, DOCX · {desktopIntegrationSnapshot.explorerRegistered ? 'Registered' : desktopIntegrationSnapshot.explorerEnabled ? 'Not registered' : 'Disabled'}.</small>
-                      </span>
-                    </label>
-                    <label className="toggle-row" htmlFor="desktop-screen-ocr" aria-label="Screen OCR with Tesseract">
-                      <input
-                        id="desktop-screen-ocr"
-                        type="checkbox"
-                        checked={desktopIntegrationSnapshot.ocrEnabled}
-                        disabled={desktopIntegrationAction !== null}
-                        onChange={(event) => void handleDesktopIntegrationToggle('ocr', event.target.checked)}
-                      />
-                      <span>
-                        <strong>Screen OCR with Tesseract</strong>
-                        <small>{desktopIntegrationSnapshot.ocrAvailable ? 'Tesseract is available; capture runs only when requested.' : 'Install Tesseract OCR or set BETTERTTS_TESSERACT_PATH.'}</small>
-                      </span>
-                    </label>
-                    <div className="diagnostics-actions">
-                      <button
-                        type="button"
-                        onClick={() => void handleDesktopOcr()}
-                        disabled={!desktopIntegrationSnapshot.ocrEnabled || !desktopIntegrationSnapshot.ocrAvailable || desktopIntegrationAction !== null}
-                      >
-                        {desktopIntegrationAction === 'ocr' ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
-                        {desktopIntegrationAction === 'ocr' ? 'Reading screen…' : 'OCR screen to script'}
-                      </button>
-                    </div>
-                    {desktopIntegrationSnapshot.lastError ? <small className="openai-error">{shortUiLabel(desktopIntegrationSnapshot.lastError, 220)}</small> : null}
-                  </div>
+                  <Suspense fallback={null}>
+                    <DesktopIntegrationsPanel
+                      status={desktopIntegrationSnapshot}
+                      action={desktopIntegrationAction}
+                      onToggle={(kind, enabled) => void handleDesktopIntegrationToggle(kind, enabled)}
+                      onFolder={() => void handleDesktopFolderImport()}
+                      onOcr={() => void handleDesktopOcr()}
+                      labelError={shortUiLabel}
+                    />
+                  </Suspense>
                 ) : null}
                 <div className="diagnostics-panel byo-panel" aria-label="Bring-your-own non-commercial weights">
                   <div className="cache-manager-head">

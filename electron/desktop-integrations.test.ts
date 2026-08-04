@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_DESKTOP_INTEGRATIONS,
+  MAX_FOLDER_IMPORT_BYTES,
+  MAX_FOLDER_IMPORT_FILES,
+  associationProgId,
+  associationRegistrySubkeys,
+  associationRegistryValues,
   desktopIntegrationKey,
   explorerCommand,
   explorerRegistrySubkeys,
@@ -17,10 +22,14 @@ describe('desktop integration contracts', () => {
       hotkeyEnabled: true,
       explorerEnabled: false,
       ocrEnabled: false,
+      trayEnabled: false,
+      notificationsEnabled: false,
     })
     expect(desktopIntegrationKey('hotkey')).toBe('hotkeyEnabled')
     expect(desktopIntegrationKey('explorer')).toBe('explorerEnabled')
     expect(desktopIntegrationKey('ocr')).toBe('ocrEnabled')
+    expect(desktopIntegrationKey('tray')).toBe('trayEnabled')
+    expect(desktopIntegrationKey('notifications')).toBe('notificationsEnabled')
   })
 
   it('accepts only supported external document paths and maps their MIME types', () => {
@@ -42,7 +51,18 @@ describe('desktop integration contracts', () => {
 
   it('generates per-user registry commands for packaged and development launches', () => {
     expect(explorerRegistrySubkeys()).toHaveLength(4)
+    expect(associationProgId('.epub')).toBe('BetterTTS.DocumentEPUB')
+    expect(associationRegistrySubkeys()).toContain('HKCU\\Software\\Classes\\Applications\\BetterTTS.exe\\SupportedTypes')
+    expect(associationRegistryValues()).toContainEqual({
+      key: 'HKCU\\Software\\Classes\\.pdf\\OpenWithProgids',
+      name: 'BetterTTS.DocumentPDF',
+    })
     expect(explorerCommand('C:\\Apps\\BetterTTS.exe', 'C:\\Apps\\resources\\app.asar', true)).toBe('"C:\\Apps\\BetterTTS.exe" --open "%1"')
     expect(explorerCommand('C:\\Node\\electron.exe', 'C:\\Repo\\BetterTTS', false)).toBe('"C:\\Node\\electron.exe" "C:\\Repo\\BetterTTS" --open "%1"')
+  })
+
+  it('keeps folder imports bounded before Electron reads any files', () => {
+    expect(MAX_FOLDER_IMPORT_FILES).toBe(100)
+    expect(MAX_FOLDER_IMPORT_BYTES).toBe(100 * 1024 * 1024)
   })
 })

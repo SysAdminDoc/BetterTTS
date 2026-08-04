@@ -1,8 +1,8 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { execFile as execFileCallback } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { promisify } from 'node:util'
 import {
@@ -25,6 +25,10 @@ import { resolveSmokeOutputDirectory } from './smoke-output.ts'
 import {
   DEFAULT_DESKTOP_INTEGRATIONS,
   DESKTOP_INTEGRATION_HOTKEY,
+  MAX_FOLDER_IMPORT_BYTES,
+  MAX_FOLDER_IMPORT_FILES,
+  associationRegistrySubkeys,
+  associationRegistryValues,
   desktopIntegrationKey,
   explorerCommand,
   explorerRegistrySubkeys,
@@ -33,6 +37,7 @@ import {
   parseExternalOpenPath,
   sanitizeDesktopIntegrationSettings,
   type DesktopIntegrationKind,
+  type DesktopRenderStatus,
   type DesktopIntegrationSettings,
   type DesktopIntegrationStatus,
 } from './desktop-integrations.ts'
@@ -196,19 +201,25 @@ const DESKTOP_INTEGRATIONS_FILES_CHANNEL = 'bettertts:desktop-integrations-files
 const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error'
 const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
 const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
+const DESKTOP_INTEGRATIONS_RENDER_CHANNEL = 'bettertts:desktop-integrations-render'
 const MAX_EXTERNAL_FILE_BYTES = 25 * 1024 * 1024
 const MAX_EXTERNAL_TEXT_CHARS = 5_000
+const MAX_FOLDER_IMPORT_DIRECTORIES = 1_000
 type ExternalFilePayload = { name: string; type: string; bytes: Uint8Array }
+type ExternalFolderPayload = { canceled: boolean; files: ExternalFilePayload[]; skipped: number; truncated: boolean }
 
 let desktopIntegrationSettings: DesktopIntegrationSettings = { ...DEFAULT_DESKTOP_INTEGRATIONS }
 let desktopIntegrationReady: Promise<void> | null = null
 let desktopHotkeyRegistered = false
 let desktopExplorerRegistered = false
+let desktopAssociationRegistered = false
+let desktopTray: Tray | null = null
 let desktopTesseractPath: string | undefined
 let desktopIntegrationLastError: string | undefined
 let pendingExternalFiles: ExternalFilePayload[] = []
 let pendingExternalText: { text: string; source: string } | null = null
 let desktopIntegrationRendererReady = false
+let desktopRenderStatus: DesktopRenderStatus = { state: 'idle' }
 
 function desktopIntegrationSettingsPath(): string {
   return join(app.getPath('userData'), 'desktop-integrations.json')
@@ -220,7 +231,13 @@ function desktopIntegrationStatus(): DesktopIntegrationStatus {
     hotkey: DESKTOP_INTEGRATION_HOTKEY,
     hotkeyRegistered: desktopHotkeyRegistered,
     explorerRegistered: desktopExplorerRegistered,
+    associationRegistered: desktopAssociationRegistered,
     ocrAvailable: Boolean(desktopTesseractPath),
+    trayReady: Boolean(desktopTray),
+    notificationsAvailable: Notification.isSupported(),
+    renderState: desktopRenderStatus.state,
+    ...(desktopRenderStatus.message ? { renderMessage: desktopRenderStatus.message } : {}),
+    ...(desktopRenderStatus.progress === undefined ? {} : { renderProgress: desktopRenderStatus.progress }),
     ...(desktopTesseractPath ? { tesseractPath: desktopTesseractPath } : {}),
     ...(desktopIntegrationLastError ? { lastError: desktopIntegrationLastError } : {}),
   }
@@ -283,7 +300,10 @@ async function configureExplorerRegistry(enabled: boolean): Promise<void> {
   const keys = explorerRegistrySubkeys()
   if (!enabled) {
     await Promise.all(keys.map((key) => execFile('reg.exe', ['DELETE', key, '/f'], { windowsHide: true, timeout: 8000 }).catch(() => undefined)))
+    await Promise.all(associationRegistryValues().map(({ key, name }) => execFile('reg.exe', ['DELETE', key, '/v', name, '/f'], { windowsHide: true, timeout: 8000 }).catch(() => undefined)))
+    await Promise.all(associationRegistrySubkeys().map((key) => execFile('reg.exe', ['DELETE', key, '/f'], { windowsHide: true, timeout: 8000 }).catch(() => undefined)))
     desktopExplorerRegistered = false
+    desktopAssociationRegistered = false
     return
   }
   const command = explorerCommand(process.execPath, app.getAppPath(), app.isPackaged)
@@ -292,7 +312,22 @@ async function configureExplorerRegistry(enabled: boolean): Promise<void> {
     await execFile('reg.exe', ['ADD', key, '/v', 'Icon', '/d', `${process.execPath},0`, '/f'], { windowsHide: true, timeout: 8000 })
     await execFile('reg.exe', ['ADD', `${key}\\command`, '/ve', '/d', command, '/f'], { windowsHide: true, timeout: 8000 })
   }
+  const applicationRoot = 'HKCU\\Software\\Classes\\Applications\\BetterTTS.exe'
+  await execFile('reg.exe', ['ADD', applicationRoot, '/ve', '/d', 'BetterTTS', '/f'], { windowsHide: true, timeout: 8000 })
+  await execFile('reg.exe', ['ADD', `${applicationRoot}\\DefaultIcon`, '/ve', '/d', `${process.execPath},0`, '/f'], { windowsHide: true, timeout: 8000 })
+  await execFile('reg.exe', ['ADD', `${applicationRoot}\\shell\\open`, '/ve', '/d', 'Open with BetterTTS', '/f'], { windowsHide: true, timeout: 8000 })
+  await execFile('reg.exe', ['ADD', `${applicationRoot}\\shell\\open\\command`, '/ve', '/d', command, '/f'], { windowsHide: true, timeout: 8000 })
+  for (const extension of ['.txt', '.epub', '.pdf', '.docx'] as const) {
+    const progId = `BetterTTS.Document${extension.slice(1).toUpperCase()}`
+    const progIdRoot = `HKCU\\Software\\Classes\\${progId}`
+    await execFile('reg.exe', ['ADD', `${applicationRoot}\\SupportedTypes`, '/v', extension, '/t', 'REG_SZ', '/d', '', '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', `HKCU\\Software\\Classes\\${extension}\\OpenWithProgids`, '/v', progId, '/t', 'REG_SZ', '/d', '', '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', progIdRoot, '/ve', '/d', `BetterTTS ${extension.slice(1).toUpperCase()} document`, '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', `${progIdRoot}\\DefaultIcon`, '/ve', '/d', `${process.execPath},0`, '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', `${progIdRoot}\\shell\\open\\command`, '/ve', '/d', command, '/f'], { windowsHide: true, timeout: 8000 })
+  }
   desktopExplorerRegistered = true
+  desktopAssociationRegistered = true
 }
 
 function configureDesktopHotkey(enabled: boolean): void {
@@ -309,11 +344,95 @@ function configureDesktopHotkey(enabled: boolean): void {
   desktopHotkeyRegistered = true
 }
 
+function desktopTrayIcon() {
+  const candidates = [
+    join(process.resourcesPath, 'bettertts.ico'),
+    join(app.getAppPath(), 'build', 'icon.ico'),
+  ]
+  for (const candidate of candidates) {
+    const icon = nativeImage.createFromPath(candidate)
+    if (!icon.isEmpty()) return icon
+  }
+  throw new Error('BetterTTS tray icon is unavailable.')
+}
+
+function desktopRenderLabel(): string {
+  if (desktopRenderStatus.state === 'running') {
+    return desktopRenderStatus.progress === undefined
+      ? desktopRenderStatus.message ?? 'Rendering'
+      : `${desktopRenderStatus.message ?? 'Rendering'} (${Math.round(desktopRenderStatus.progress * 100)}%)`
+  }
+  if (desktopRenderStatus.state === 'error') return desktopRenderStatus.message ?? 'Render failed'
+  if (desktopRenderStatus.state === 'complete') return desktopRenderStatus.message ?? 'Render complete'
+  return 'Idle'
+}
+
+function showDesktopWindow(): void {
+  const existing = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+  const win = existing ?? (app.isReady() ? createWindow() : null)
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+function refreshDesktopTrayMenu(): void {
+  if (!desktopTray) return
+  desktopTray.setToolTip(`BetterTTS - ${desktopRenderLabel()}`)
+  desktopTray.setContextMenu(Menu.buildFromTemplate([
+    { label: `Status: ${desktopRenderLabel()}`, enabled: false },
+    { type: 'separator' },
+    { label: 'Show BetterTTS', click: showDesktopWindow },
+    { label: 'Quit BetterTTS', click: () => app.quit() },
+  ]))
+}
+
+function configureDesktopTray(enabled: boolean): void {
+  if (desktopTray) {
+    desktopTray.destroy()
+    desktopTray = null
+  }
+  if (!enabled || IS_SMOKE) return
+  desktopTray = new Tray(desktopTrayIcon())
+  desktopTray.on('click', showDesktopWindow)
+  refreshDesktopTrayMenu()
+}
+
+function notifyDesktopRender(status: DesktopRenderStatus): void {
+  if (IS_SMOKE || !desktopIntegrationSettings.notificationsEnabled || !Notification.isSupported()) return
+  try {
+    new Notification({
+      title: status.state === 'error' ? 'BetterTTS render failed' : 'BetterTTS render complete',
+      body: status.message ?? (status.state === 'error' ? 'The render could not be completed.' : 'Your audio is ready.'),
+      silent: true,
+    }).show()
+  } catch (error) {
+    setDesktopIntegrationError(error)
+  }
+}
+
+function setDesktopRenderStatus(value: unknown): void {
+  if (!value || typeof value !== 'object') return
+  const candidate = value as { state?: unknown; message?: unknown; progress?: unknown }
+  if (candidate.state !== 'idle' && candidate.state !== 'running' && candidate.state !== 'complete' && candidate.state !== 'error') return
+  const next: DesktopRenderStatus = {
+    state: candidate.state,
+    ...(typeof candidate.message === 'string' ? { message: candidate.message.slice(0, 180) } : {}),
+    ...(typeof candidate.progress === 'number' && Number.isFinite(candidate.progress) ? { progress: Math.min(1, Math.max(0, candidate.progress)) } : {}),
+  }
+  const previous = desktopRenderStatus
+  desktopRenderStatus = next
+  refreshDesktopTrayMenu()
+  broadcastDesktopIntegrationStatus()
+  if (previous.state === 'running' && (next.state === 'complete' || next.state === 'error')) notifyDesktopRender(next)
+}
+
 async function configureDesktopIntegration(kind: DesktopIntegrationKind, enabled: boolean): Promise<DesktopIntegrationStatus> {
   if (IS_SMOKE) return desktopIntegrationStatus()
   const key = desktopIntegrationKey(kind)
   if (kind === 'hotkey') configureDesktopHotkey(enabled)
   if (kind === 'explorer') await configureExplorerRegistry(enabled)
+  if (kind === 'tray') configureDesktopTray(enabled)
   desktopIntegrationSettings = { ...desktopIntegrationSettings, [key]: enabled }
   await saveDesktopIntegrationSettings()
   desktopIntegrationLastError = undefined
@@ -328,11 +447,12 @@ async function initializeDesktopIntegrations(): Promise<void> {
     await loadDesktopIntegrationSettings()
     desktopTesseractPath = await findTesseract()
     if (!IS_SMOKE) {
-      try {
-        configureDesktopHotkey(desktopIntegrationSettings.hotkeyEnabled)
-        if (desktopIntegrationSettings.explorerEnabled) await configureExplorerRegistry(true)
-      } catch (error) {
-        setDesktopIntegrationError(error)
+      try { configureDesktopHotkey(desktopIntegrationSettings.hotkeyEnabled) } catch (error) { setDesktopIntegrationError(error) }
+      if (desktopIntegrationSettings.explorerEnabled) {
+        try { await configureExplorerRegistry(true) } catch (error) { setDesktopIntegrationError(error) }
+      }
+      if (desktopIntegrationSettings.trayEnabled) {
+        try { configureDesktopTray(true) } catch (error) { setDesktopIntegrationError(error) }
       }
     }
   })()
@@ -368,7 +488,7 @@ function sendPendingDesktopIntegrationEvents(): void {
 
 async function queueExternalFile(path: string): Promise<void> {
   if (!desktopIntegrationSettings.explorerEnabled) {
-    sendDesktopIntegrationError('Explorer integration is disabled in BetterTTS settings.')
+    sendDesktopIntegrationError('Document integration is disabled in BetterTTS settings.')
     return
   }
   if (!isSupportedExternalFile(path)) {
@@ -386,6 +506,69 @@ async function queueExternalFile(path: string): Promise<void> {
   } catch (error) {
     sendDesktopIntegrationError(error)
   }
+}
+
+async function readExternalFolder(root: string): Promise<ExternalFolderPayload> {
+  const directories = [root]
+  const files: ExternalFilePayload[] = []
+  let directoriesVisited = 0
+  let totalBytes = 0
+  let skipped = 0
+  let truncated = false
+
+  while (directories.length > 0 && directoriesVisited < MAX_FOLDER_IMPORT_DIRECTORIES) {
+    const directory = directories.shift()!
+    directoriesVisited += 1
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch {
+      skipped += 1
+      continue
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.isSymbolicLink() || directories.length + directoriesVisited >= MAX_FOLDER_IMPORT_DIRECTORIES) {
+          truncated = true
+        } else {
+          directories.push(path)
+        }
+        continue
+      }
+      if (!entry.isFile() || entry.isSymbolicLink() || !isSupportedExternalFile(path)) continue
+      if (files.length >= MAX_FOLDER_IMPORT_FILES) {
+        truncated = true
+        continue
+      }
+      try {
+        const info = await stat(path)
+        if (!info.isFile() || info.size > MAX_EXTERNAL_FILE_BYTES || totalBytes + info.size > MAX_FOLDER_IMPORT_BYTES) {
+          skipped += 1
+          truncated ||= totalBytes + info.size > MAX_FOLDER_IMPORT_BYTES
+          continue
+        }
+        const bytes = new Uint8Array(await readFile(path))
+        files.push({ name: basename(path), type: externalFileMime(path), bytes })
+        totalBytes += bytes.byteLength
+      } catch {
+        skipped += 1
+      }
+    }
+  }
+  if (directories.length > 0) truncated = true
+  return { canceled: false, files, skipped, truncated }
+}
+
+async function chooseExternalFolder(owner: BrowserWindow): Promise<ExternalFolderPayload> {
+  if (IS_SMOKE) return { canceled: true, files: [], skipped: 0, truncated: false }
+  const choice = await dialog.showOpenDialog(owner, {
+    title: 'Import BetterTTS folder',
+    properties: ['openDirectory'],
+  })
+  if (choice.canceled || !choice.filePaths[0]) return { canceled: true, files: [], skipped: 0, truncated: false }
+  return readExternalFolder(choice.filePaths[0])
 }
 
 function powershellLiteral(value: string): string {
@@ -444,12 +627,21 @@ async function runDesktopOcr(): Promise<{ text: string; tesseractPath?: string }
 }
 
 ipcMain.handle(DESKTOP_INTEGRATIONS_CHANNEL, async (event, request: unknown) => {
-  if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid desktop integration request.')
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner) throw new Error('Invalid desktop integration request.')
   await initializeDesktopIntegrations()
   if (!request || typeof request !== 'object') return desktopIntegrationStatus()
   const message = request as { action?: unknown; kind?: unknown; enabled?: unknown }
   if (message.action === 'status') return desktopIntegrationStatus()
-  if (message.action === 'set-enabled' && (message.kind === 'hotkey' || message.kind === 'explorer' || message.kind === 'ocr') && typeof message.enabled === 'boolean') {
+  if (message.action === 'folder') {
+    try {
+      return await chooseExternalFolder(owner)
+    } catch (error) {
+      setDesktopIntegrationError(error)
+      throw error
+    }
+  }
+  if (message.action === 'set-enabled' && (message.kind === 'hotkey' || message.kind === 'explorer' || message.kind === 'ocr' || message.kind === 'tray' || message.kind === 'notifications') && typeof message.enabled === 'boolean') {
     try {
       return await configureDesktopIntegration(message.kind, message.enabled)
     } catch (error) {
@@ -458,6 +650,11 @@ ipcMain.handle(DESKTOP_INTEGRATIONS_CHANNEL, async (event, request: unknown) => 
     }
   }
   throw new Error('Unsupported desktop integration request.')
+})
+
+ipcMain.on(DESKTOP_INTEGRATIONS_RENDER_CHANNEL, (event, status: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  setDesktopRenderStatus(status)
 })
 
 ipcMain.handle(DESKTOP_INTEGRATIONS_OCR_CHANNEL, async (event) => {
@@ -1329,15 +1526,20 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       }
     })()`)
     result.desktopIntegrationsUi = await win.webContents.executeJavaScript(`(async () => {
-      const panel = document.querySelector('[aria-label="Desktop workflow integrations"]')
+      let panel = document.querySelector('[aria-label="Desktop workflow integrations"]')
+      for (let attempt = 0; !panel && attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        panel = document.querySelector('[aria-label="Desktop workflow integrations"]')
+      }
       panel?.scrollIntoView({ block: 'center' })
       await new Promise((resolve) => setTimeout(resolve, 50))
       const inputs = Array.from(panel?.querySelectorAll('input[type="checkbox"]') ?? [])
       return {
         panel: !!panel,
         toggleCount: inputs.length,
-        disabledByDefault: inputs.length === 3 && inputs.every((input) => !input.checked),
+        disabledByDefault: inputs.length === 5 && inputs.every((input) => !input.checked),
         ocrAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('OCR screen to script')),
+        folderAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Import folder')),
       }
     })()`)
     const desktopIntegrationsImage = await win.webContents.capturePage()
@@ -1531,10 +1733,11 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
       Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
       Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
-      Boolean((result.desktopIntegrationsUi as { panel?: boolean; toggleCount?: number; disabledByDefault?: boolean; ocrAction?: boolean } | undefined)?.panel) &&
-      (result.desktopIntegrationsUi as { toggleCount?: number } | undefined)?.toggleCount === 3 &&
+      Boolean((result.desktopIntegrationsUi as { panel?: boolean; toggleCount?: number; disabledByDefault?: boolean; ocrAction?: boolean; folderAction?: boolean } | undefined)?.panel) &&
+      (result.desktopIntegrationsUi as { toggleCount?: number } | undefined)?.toggleCount === 5 &&
       Boolean((result.desktopIntegrationsUi as { disabledByDefault?: boolean } | undefined)?.disabledByDefault) &&
       Boolean((result.desktopIntegrationsUi as { ocrAction?: boolean } | undefined)?.ocrAction) &&
+      Boolean((result.desktopIntegrationsUi as { folderAction?: boolean } | undefined)?.folderAction) &&
       Boolean((result.narratorUi as { toggle?: boolean; enabled?: boolean; narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.toggle) &&
       Boolean((result.narratorUi as { enabled?: boolean } | undefined)?.enabled) &&
       Boolean((result.narratorUi as { narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.narrationVoice) &&
@@ -1600,8 +1803,13 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   if (desktopHotkeyRegistered) globalShortcut.unregister(DESKTOP_INTEGRATION_HOTKEY)
+  if (desktopTray) {
+    desktopTray.destroy()
+    desktopTray = null
+  }
 })
 
 app.on('window-all-closed', () => {
+  if (desktopTray) return
   if (process.platform !== 'darwin') app.quit()
 })

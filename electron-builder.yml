@@ -58,6 +58,8 @@ asar: true
 # whisper.cpp is a native executable plus companion DLLs. Keep it outside the
 # asar so Windows can launch it from the packaged resources directory.
 extraResources:
+  - from: build/icon.ico
+    to: bettertts.ico
   - from: dist-electron/whisper
     to: whisper
     filter:

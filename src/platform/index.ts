@@ -114,16 +114,24 @@ export type OpenAiTtsServerBridge = {
   stop: () => Promise<OpenAiTtsServerStatus>
 }
 
-export type DesktopIntegrationKind = 'hotkey' | 'explorer' | 'ocr'
+export type DesktopIntegrationKind = 'hotkey' | 'explorer' | 'ocr' | 'tray' | 'notifications'
 
 export type DesktopIntegrationStatus = {
   hotkeyEnabled: boolean
   explorerEnabled: boolean
   ocrEnabled: boolean
+  trayEnabled: boolean
+  notificationsEnabled: boolean
   hotkey: string
   hotkeyRegistered: boolean
   explorerRegistered: boolean
+  associationRegistered: boolean
   ocrAvailable: boolean
+  trayReady: boolean
+  notificationsAvailable: boolean
+  renderState: 'idle' | 'running' | 'complete' | 'error'
+  renderMessage?: string
+  renderProgress?: number
   tesseractPath?: string
   lastError?: string
 }
@@ -134,9 +142,24 @@ export type DesktopExternalFile = {
   bytes: Uint8Array
 }
 
+export type DesktopFolderImportResult = {
+  canceled: boolean
+  files: DesktopExternalFile[]
+  skipped: number
+  truncated: boolean
+}
+
+export type DesktopRenderStatus = {
+  state: 'idle' | 'running' | 'complete' | 'error'
+  message?: string
+  progress?: number
+}
+
 export type DesktopIntegrationsBridge = {
   status: () => Promise<DesktopIntegrationStatus>
   setEnabled: (kind: DesktopIntegrationKind, enabled: boolean) => Promise<DesktopIntegrationStatus>
+  chooseFolder: () => Promise<DesktopFolderImportResult>
+  setRenderStatus: (status: DesktopRenderStatus) => void
   ocr: () => Promise<{ text: string; tesseractPath?: string }>
   onStatus: (listener: (status: DesktopIntegrationStatus) => void) => () => void
   onText: (listener: (message: { text?: unknown; source?: unknown }) => void) => () => void

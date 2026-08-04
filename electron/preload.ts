@@ -17,6 +17,7 @@ const DESKTOP_INTEGRATIONS_FILES_CHANNEL = 'bettertts:desktop-integrations-files
 const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error'
 const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
 const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
+const DESKTOP_INTEGRATIONS_RENDER_CHANNEL = 'bettertts:desktop-integrations-render'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -145,8 +146,14 @@ const bridge = {
     status(): Promise<unknown> {
       return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_CHANNEL, { action: 'status' })
     },
-    setEnabled(kind: 'hotkey' | 'explorer' | 'ocr', enabled: boolean): Promise<unknown> {
+    setEnabled(kind: 'hotkey' | 'explorer' | 'ocr' | 'tray' | 'notifications', enabled: boolean): Promise<unknown> {
       return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_CHANNEL, { action: 'set-enabled', kind, enabled })
+    },
+    chooseFolder(): Promise<unknown> {
+      return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_CHANNEL, { action: 'folder' })
+    },
+    setRenderStatus(status: unknown): void {
+      ipcRenderer.send(DESKTOP_INTEGRATIONS_RENDER_CHANNEL, status)
     },
     ocr(): Promise<unknown> {
       return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_OCR_CHANNEL)
