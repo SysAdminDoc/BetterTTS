@@ -30,6 +30,12 @@ function declareZipEntrySize(bytes: Uint8Array, size: number): Uint8Array {
 }
 
 function makePdf(text: string): ArrayBuffer {
+  const escaped = text.replace(/[()\\]/g, '\\$&')
+  const stream = text ? `BT /F1 24 Tf 100 700 Td (${escaped}) Tj ET` : ''
+  return makePdfFromStream(stream)
+}
+
+function makePdfFromStream(stream: string): ArrayBuffer {
   const parts = ['%PDF-1.4\n']
   const offsets: number[] = [0]
   const addObject = (id: number, body: string) => {
@@ -41,8 +47,6 @@ function makePdf(text: string): ArrayBuffer {
   addObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
   addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>')
   addObject(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
-  const escaped = text.replace(/[()\\]/g, '\\$&')
-  const stream = text ? `BT /F1 24 Tf 100 700 Td (${escaped}) Tj ET` : ''
   addObject(5, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
 
   const xref = parts.join('').length
@@ -54,9 +58,27 @@ function makePdf(text: string): ArrayBuffer {
   return bytesToBuffer(new TextEncoder().encode(parts.join('')))
 }
 
+function makeTwoColumnPdf(): ArrayBuffer {
+  return makePdfFromStream([
+    'BT /F1 18 Tf',
+    '1 0 0 1 60 700 Tm (Left hy-) Tj',
+    '1 0 0 1 60 680 Tm (phenated sentence continues.) Tj',
+    '1 0 0 1 320 700 Tm (Right column starts.) Tj',
+    '1 0 0 1 320 680 Tm (Right column continues.) Tj',
+    'ET',
+  ].join('\n'))
+}
+
 describe('document import adapters', () => {
   it('extracts selectable text from a PDF', async () => {
     await expect(extractPdfTextFromArrayBuffer(makePdf('Hello PDF import.'))).resolves.toContain('Hello PDF import.')
+  })
+
+  it('keeps PDF columns in reading order for re-flow', async () => {
+    const text = await extractPdfTextFromArrayBuffer(makeTwoColumnPdf())
+    expect(text.indexOf('Left')).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf('Right')).toBeGreaterThan(text.indexOf('Left'))
+    expect(text.replace(/\s+/g, ' ')).toContain('Left hy- phenated sentence continues. Right column starts. Right column continues.')
   })
 
   it('reports scanned or textless PDFs clearly', async () => {

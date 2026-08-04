@@ -222,6 +222,7 @@ export type CleanupOptions = {
   markdown: boolean
   footnotes: boolean
   pageArtifacts: boolean
+  pdfReflow: boolean
   numbers: boolean
   metadata: boolean
 }
@@ -233,8 +234,49 @@ export const DEFAULT_CLEANUP: CleanupOptions = {
   markdown: true,
   footnotes: true,
   pageArtifacts: true,
+  pdfReflow: true,
   numbers: true,
   metadata: true,
+}
+
+/**
+ * Joins the visual line fragments emitted by PDF text extraction while
+ * retaining explicit paragraph breaks. PDF line endings are layout hints, not
+ * prose boundaries; a trailing hyphen followed by a letter is a wrapped word.
+ */
+export function reflowPdfText(input: string): string {
+  const paragraphs: string[] = []
+  let current = ''
+
+  const flush = () => {
+    if (current) paragraphs.push(current)
+    current = ''
+  }
+
+  for (const rawLine of input.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.replace(/\u00ad/gu, '').trim()
+    if (!line) {
+      flush()
+      continue
+    }
+
+    const startsBlock = /^(?:[•▪◦‣]\s+|\d{1,3}[.)]\s+|[-*+]\s+)/u.test(line)
+    if (startsBlock && current) flush()
+    if (!current) {
+      current = line
+      continue
+    }
+
+    if (/\p{L}-$/u.test(current) && /^\p{L}/u.test(line)) {
+      current = `${current.slice(0, -1)}${line}`
+    } else if (/^[,.;:!?%…)}\]]/u.test(line) || /^[\u0027’”»]/u.test(line)) {
+      current += line
+    } else {
+      current += ` ${line}`
+    }
+  }
+  flush()
+  return paragraphs.join('\n\n').trim()
 }
 
 // Pre-synthesis cleanup for pasted technical/web content. Order matters:

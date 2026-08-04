@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CLEANUP, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
+import { DEFAULT_CLEANUP, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
 
 describe('checkSynthesisCompleteness', () => {
   // ~200 speakable chars of ordinary prose.
@@ -266,9 +266,16 @@ describe('cleanupText', () => {
     markdown: false,
     footnotes: false,
     pageArtifacts: false,
+    pdfReflow: false,
     numbers: false,
     metadata: false,
   }
+
+  it('reflows PDF lines, repairs wrapped hyphenation, and preserves blocks', () => {
+    expect(reflowPdfText('A hy-\nphenated sentence continues.\n\n• A separate item\non the next line.')).toBe(
+      'A hyphenated sentence continues.\n\n• A separate item on the next line.',
+    )
+  })
 
   it('strips numeric citation markers', () => {
     expect(cleanupText('Speed matters [12] a lot [1, 2] indeed [3-5].', { ...off, citations: true })).toBe(

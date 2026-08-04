@@ -89,7 +89,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis or Reader mode
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer “Convert to audiobook” entries for TXT/EPUB/PDF/DOCX, and optional Tesseract screen OCR; all three integrations are independently disableable and the web/PWA build remains unchanged
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
-- **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
+- **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
 - **Generation stats** — elapsed time, time to first audio, chars/s throughput, audio duration, realtime speed factor
@@ -204,7 +204,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (447 tests across 76 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (450 tests across 76 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

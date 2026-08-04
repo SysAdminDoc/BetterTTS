@@ -39,4 +39,9 @@ describe('persisted editor settings', () => {
     })
     expect(parseCleanupSetting('null')).toEqual(DEFAULT_CLEANUP)
   })
+
+  it('persists the PDF re-flow toggle independently', () => {
+    expect(parseCleanupSetting(JSON.stringify({ pdfReflow: false })).pdfReflow).toBe(false)
+    expect(parseCleanupSetting(JSON.stringify({ citations: false })).pdfReflow).toBe(true)
+  })
 })

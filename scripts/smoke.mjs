@@ -70,7 +70,14 @@ function makePdfUpload() {
   addObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
   addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>')
   addObject(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
-  const stream = 'BT /F1 24 Tf 100 700 Td (Worker PDF text.) Tj ET'
+  const stream = [
+    'BT /F1 18 Tf',
+    '1 0 0 1 60 700 Tm (Worker PDF hy-) Tj',
+    '1 0 0 1 60 680 Tm (phenated text continues in the left column.) Tj',
+    '1 0 0 1 320 700 Tm (Right column starts.) Tj',
+    '1 0 0 1 320 680 Tm (Right column continues.) Tj',
+    'ET',
+  ].join('\n')
   addObject(5, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
   const xref = parts.join('').length
   parts.push('xref\n0 6\n0000000000 65535 f \n')
@@ -729,7 +736,7 @@ async function runSmoke() {
     if (await piperLanguage.inputValue() !== 'en') throw new Error('Piper engine controls did not become active')
 
     if (await advancedOptionsToggle.getAttribute('aria-expanded') !== 'true') await advancedOptionsToggle.click()
-    for (const label of ['Skip citations', 'Drop page headers', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
+    for (const label of ['Skip citations', 'Drop page headers', 'Re-flow PDF lines', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
       await desktop.page.getByLabel(label).waitFor({ timeout: 20000 })
     }
 
@@ -758,7 +765,8 @@ async function runSmoke() {
     if (pdfImportResult !== 'ok') throw new Error(`PDF worker import did not complete: ${pdfImportResult}`)
     await desktop.page.waitForTimeout(200)
     const pdfImportedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
-    if (!pdfImportedText.replace(/\s/g, '').includes('WorkerPDFtext.')) {
+    const normalizedPdfText = pdfImportedText.replace(/\s/g, '')
+    if (!normalizedPdfText.includes('WorkerPDFhyphenatedtextcontinuesintheleftcolumn.') || !normalizedPdfText.includes('Rightcolumnstarts.Rightcolumncontinues.')) {
       throw new Error(`PDF worker import did not populate the editor: ${pdfImportedText}`)
     }
     console.log('Checking recoverable script clearing and cancellable article import...')

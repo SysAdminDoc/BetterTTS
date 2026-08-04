@@ -124,9 +124,51 @@ export function extractDocxTextFromArrayBuffer(buffer: ArrayBuffer): string {
 type PdfTextItem = {
   str?: string
   hasEOL?: boolean
+  transform?: number[]
+  width?: number
+  height?: number
 }
 
 function textContentToLines(items: PdfTextItem[]): string {
+  const readableItems = items.filter((item) => typeof item.str === 'string' && item.str.trim())
+  const positionedItems = readableItems.map((item, index) => {
+    const transform = item.transform
+    if (!transform || transform.length < 6) return null
+    const x = Number(transform[4])
+    const y = Number(transform[5])
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    const height = Math.abs(Number(item.height ?? transform[3])) || 12
+    const width = Math.abs(Number(item.width)) || 0
+    return { text: item.str!.trim(), x, y, width, height, index }
+  })
+
+  if (readableItems.length > 0 && positionedItems.every((item): item is NonNullable<typeof item> => item !== null)) {
+    const columnBoundary = detectPdfColumnBoundary(positionedItems)
+    const columnizedItems = positionedItems.map((item) => ({
+      ...item,
+      column: columnBoundary !== null && item.x >= columnBoundary ? 1 : 0,
+    }))
+    const lines: PdfTextLine[] = []
+    for (const item of columnizedItems) {
+      const tolerance = Math.max(2, Math.min(item.height, 16) * 0.45)
+      const existing = lines.find((line) => line.column === item.column && Math.abs(line.y - item.y) <= Math.max(tolerance, line.height * 0.45))
+      if (existing) {
+        existing.fragments.push(item)
+        existing.x = Math.min(existing.x, item.x)
+        existing.height = Math.max(existing.height, item.height)
+      } else {
+        lines.push({
+          fragments: [item],
+          x: item.x,
+          y: item.y,
+          height: item.height,
+          column: item.column,
+        })
+      }
+    }
+    return serializePdfLines(orderPdfLines(lines))
+  }
+
   const lines: string[] = []
   let current = ''
   for (const item of items) {
@@ -141,6 +183,108 @@ function textContentToLines(items: PdfTextItem[]): string {
   }
   if (current.trim()) lines.push(current)
   return normalizeTextBlocks(lines.join('\n'))
+}
+
+type PdfTextFragment = {
+  text: string
+  x: number
+  y: number
+  width: number
+  height: number
+  index: number
+  column: number
+}
+
+type PdfTextLine = {
+  fragments: PdfTextFragment[]
+  x: number
+  y: number
+  height: number
+  column: number
+}
+
+function orderPdfLines(lines: PdfTextLine[]): PdfTextLine[] {
+  const byReadingOrder = (left: PdfTextLine, right: PdfTextLine) => right.y - left.y || left.x - right.x || left.fragments[0].index - right.fragments[0].index
+  const sorted = lines.slice().sort(byReadingOrder)
+  if (sorted.length < 4) return sorted
+
+  const starts = [...new Set(lines.map((line) => line.x))].sort((left, right) => left - right)
+  let splitIndex = -1
+  let largestGap = 0
+  for (let index = 1; index < starts.length; index += 1) {
+    const gap = starts[index] - starts[index - 1]
+    if (gap > largestGap) {
+      largestGap = gap
+      splitIndex = index
+    }
+  }
+  const span = (starts.at(-1) ?? 0) - (starts[0] ?? 0)
+  if (splitIndex < 0 || largestGap <= Math.max(96, span * 0.18)) return sorted
+
+  const boundary = (starts[splitIndex - 1] + starts[splitIndex]) / 2
+  const leftColumn = sorted.filter((line) => line.x < boundary)
+  const rightColumn = sorted.filter((line) => line.x >= boundary)
+  if (leftColumn.length < 2 || rightColumn.length < 2) return sorted
+
+  return [
+    ...leftColumn.map((line) => ({ ...line, column: 0 })).sort(byReadingOrder),
+    ...rightColumn.map((line) => ({ ...line, column: 1 })).sort(byReadingOrder),
+  ]
+}
+
+function detectPdfColumnBoundary(fragments: Array<Omit<PdfTextFragment, 'column'>>): number | null {
+  if (fragments.length < 4) return null
+  const starts = [...new Set(fragments.map((fragment) => fragment.x))].sort((left, right) => left - right)
+  let splitIndex = -1
+  let largestGap = 0
+  for (let index = 1; index < starts.length; index += 1) {
+    const gap = starts[index] - starts[index - 1]
+    if (gap > largestGap) {
+      largestGap = gap
+      splitIndex = index
+    }
+  }
+  const span = (starts.at(-1) ?? 0) - (starts[0] ?? 0)
+  if (splitIndex < 0 || largestGap <= Math.max(96, span * 0.18)) return null
+
+  const boundary = (starts[splitIndex - 1] + starts[splitIndex]) / 2
+  const left = fragments.filter((fragment) => fragment.x < boundary)
+  const right = fragments.filter((fragment) => fragment.x >= boundary)
+  const rowCount = (items: typeof fragments) => new Set(items.map((item) => Math.round(item.y * 10) / 10)).size
+  if (left.length < 2 || right.length < 2 || rowCount(left) < 2 || rowCount(right) < 2) return null
+  return boundary
+}
+
+function serializePdfLines(lines: PdfTextLine[]): string {
+  let output = ''
+  let previous: PdfTextLine | null = null
+  for (const line of lines) {
+    const text = joinPdfFragments(line.fragments)
+    if (!text) continue
+    if (output && previous) {
+      const verticalGap = previous.column === line.column ? previous.y - line.y : 0
+      const paragraphBreak = previous.column === line.column && verticalGap > Math.max(previous.height, line.height) * 1.8
+      output += paragraphBreak ? '\n\n' : '\n'
+    }
+    output += text
+    previous = line
+  }
+  return normalizeTextBlocks(output)
+}
+
+function joinPdfFragments(fragments: PdfTextFragment[]): string {
+  let output = ''
+  for (const fragment of fragments.slice().sort((left, right) => left.x - right.x || left.index - right.index)) {
+    if (!fragment.text) continue
+    if (!output) {
+      output = fragment.text
+      continue
+    }
+    const noSpaceBefore = /^[,.;:!?%…)}\]]/u.test(fragment.text) || /^[\u0027’”»]/u.test(fragment.text)
+    const noSpaceAfter = /[([{«“‘‐‑]$/u.test(output) || output.endsWith('-')
+    output += noSpaceBefore || noSpaceAfter ? fragment.text : ` ${fragment.text}`
+  }
+  return output
 }
 
 function extractDocxNodeText(node: Node): string {

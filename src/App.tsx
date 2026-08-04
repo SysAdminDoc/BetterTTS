@@ -197,7 +197,7 @@ import {
   synthesizeKitten,
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
-import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
+import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
 import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting } from './lib/settings.ts'
 import {
   TECH_PRONUNCIATION_PACK,
@@ -5225,7 +5225,10 @@ function App() {
         setStatus(info.phase === 'read' ? `Reading ${extension}…` : `Parsing ${extension} ${info.done} / ${info.total}`)
       }, controller.signal)
       if (imported.kind === 'epub') throw new Error('Document parser returned an unexpected EPUB result.')
-      const cleaned = cleanupText(imported.text, cleanup)
+      const sourceText = imported.kind === 'pdf' && cleanup.pdfReflow
+        ? reflowPdfText(imported.text)
+        : imported.text
+      const cleaned = cleanupText(sourceText, cleanup)
       if (!cleaned.trim()) {
         showToast({ tone: 'warn', message: `No readable text found in ${fileLabel} after cleanup.` })
         return
@@ -7329,6 +7332,7 @@ function App() {
                     ['acronyms', 'Spell acronyms', 'Letter-space SQL, HTML, and similar.'],
                     ['markdown', 'Strip markdown', 'Drop #, *, backticks, and link syntax.'],
                     ['pageArtifacts', 'Drop page headers', 'Remove repeated headers, footers, and page numbers.'],
+                    ['pdfReflow', 'Re-flow PDF lines', 'Join wrapped lines and repair end-of-line hyphenation on PDF imports.'],
                     ['footnotes', 'Skip footnotes', 'Remove note markers and references sections.'],
                     ['numbers', 'Normalize numbers', 'Read currency, decimals, units, and percentages clearly.'],
                     ['metadata', 'Drop book metadata', 'Remove ISBN, DOI, and cataloging lines.'],
