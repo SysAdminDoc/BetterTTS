@@ -13,6 +13,7 @@ function makeJob(id: string, chunks = 3): QueueJob {
     speed: 1,
     format: 'wav',
     bitrate: 128,
+    narratorMode: false,
     chunks: Array.from({ length: chunks }, (_, i) => ({
       index: i,
       text: `Chunk ${i} text.`,
@@ -186,6 +187,37 @@ describe('queue', () => {
     expect(migrated.chunks[0].cues).toEqual([{ index: 1, startSec: 0, endSec: 1.2, text: 'Chunk text.' }])
   })
 
+  it('persists narrator role and per-chunk voice assignments', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('narrator', 2),
+      narratorMode: true,
+      voice: 'af_heart',
+      chunks: [
+        { index: 0, text: 'Narration.', status: 'pending', role: 'narration', voice: 'af_heart' },
+        { index: 1, text: 'Dialogue.', status: 'pending', role: 'dialogue', speaker: 'Eve', voice: 'af_bella' },
+      ],
+    })
+
+    expect(migrated.narratorMode).toBe(true)
+    expect(migrated.chunks).toMatchObject([
+      { role: 'narration', voice: 'af_heart' },
+      { role: 'dialogue', speaker: 'Eve', voice: 'af_bella' },
+    ])
+  })
+
+  it('drops malformed narrator metadata during migration', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('bad-narrator', 1),
+      narratorMode: 'yes',
+      chunks: [{ index: 0, text: 'Text.', status: 'pending', role: 'other', voice: { id: 'unsafe' }, speaker: 42 }],
+    })
+
+    expect(migrated.narratorMode).toBe(false)
+    expect(migrated.chunks[0].voice).toBeUndefined()
+    expect(migrated.chunks[0].role).toBeUndefined()
+    expect(migrated.chunks[0].speaker).toBeUndefined()
+  })
+
   it('sanitizes malformed persisted synthesis settings and chunk indexes', () => {
     const migrated = migrateQueueJob({
       ...makeJob('malformed', 1),
@@ -279,6 +311,13 @@ describe('queue', () => {
     expect(next.chunks[1]).toEqual(job.chunks[1])
     expect(job.chunks[0].text).toBe('Chunk 0 text.')
     expect(job.chunks[0].error).toBe('old failure')
+  })
+
+  it('keeps narrator voice metadata when editing chunk text or titles', () => {
+    const job = makeJob('narrator-edit', 1)
+    job.chunks[0] = { ...job.chunks[0], role: 'dialogue', speaker: 'Eve', voice: 'af_bella' }
+    const next = replaceQueueChunk(job, 0, { text: 'New line.', status: 'pending', chapterTitle: 'Dialogue' })
+    expect(next.chunks[0]).toMatchObject({ role: 'dialogue', speaker: 'Eve', voice: 'af_bella' })
   })
 
   it('persists engine-specific queue settings', async () => {

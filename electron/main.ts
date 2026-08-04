@@ -1007,6 +1007,28 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         stoppedByDefault: panel?.querySelector('[role="status"]')?.textContent?.includes('Stopped') ?? false,
       }
     })()`)
+    result.narratorUi = await win.webContents.executeJavaScript(`(async () => {
+      const advancedToggle = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Advanced options'))
+      if (advancedToggle && advancedToggle.getAttribute('aria-expanded') !== 'true') advancedToggle.click()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const toggle = document.querySelector('#narrator-mode')
+      if (toggle && !toggle.checked) toggle.click()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return {
+        toggle: !!toggle,
+        enabled: toggle?.checked ?? false,
+        narrationVoice: !!document.querySelector('[aria-label="Narration voice"]'),
+        dialogueVoice: !!document.querySelector('[aria-label="Dialogue voice"]'),
+      }
+    })()`)
+    await win.webContents.executeJavaScript(`(() => {
+      document.querySelector('[aria-label="Narrator role voices"]')?.scrollIntoView({ block: 'center' })
+    })()`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const narratorImage = await win.webContents.capturePage()
+    const narratorScreenshotPath = join(smokeOutputDirectory, 'narrator-smoke.png')
+    await writeFile(narratorScreenshotPath, narratorImage.toPNG())
+    result.narratorScreenshot = narratorScreenshotPath
     result.rvcUi = await win.webContents.executeJavaScript(`(async () => {
       const panel = document.querySelector('[aria-label="RVC model registry"]')
       panel?.scrollIntoView({ block: 'center' })
@@ -1142,6 +1164,10 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
       Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
       Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
+      Boolean((result.narratorUi as { toggle?: boolean; enabled?: boolean; narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.toggle) &&
+      Boolean((result.narratorUi as { enabled?: boolean } | undefined)?.enabled) &&
+      Boolean((result.narratorUi as { narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.narrationVoice) &&
+      Boolean((result.narratorUi as { narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.dialogueVoice) &&
       Boolean((result.rvcUi as { panel?: boolean; consent?: boolean; registerAction?: boolean; setupAction?: boolean } | undefined)?.panel) &&
       Boolean((result.rvcUi as { consent?: boolean } | undefined)?.consent) &&
       Boolean((result.rvcUi as { registerAction?: boolean } | undefined)?.registerAction) &&

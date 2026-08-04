@@ -166,7 +166,7 @@ import {
   synthesizeKitten,
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
-import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './lib/text.ts'
+import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
 import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationSetting } from './lib/settings.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
@@ -211,6 +211,9 @@ type RvcDraft = {
 
 type QueueSourceChunk = {
   text: string
+  voice?: string
+  role?: NarratorRole
+  speaker?: string
   chapterTitle?: string
   chapterIndex?: number
 }
@@ -464,9 +467,14 @@ function cacheStatusText(row: EngineCacheStatus, supported: boolean): string {
 }
 
 function queueEngineText(job: QueueJob): string {
-  if (job.engine === 'supertonic') return `Supertonic - ${job.supertonicSteps ?? SUPERTONIC_DEFAULT_STEPS} steps`
-  if (job.engine === 'kitten') return `KittenTTS - ${(job.kittenModel ?? KITTEN_DEFAULT_MODEL).toUpperCase()}`
-  return `Kokoro - ${job.language ?? 'English US'}`
+  const engine = job.engine === 'supertonic'
+    ? `Supertonic - ${job.supertonicSteps ?? SUPERTONIC_DEFAULT_STEPS} steps`
+    : job.engine === 'kitten'
+      ? `KittenTTS - ${(job.kittenModel ?? KITTEN_DEFAULT_MODEL).toUpperCase()}`
+      : job.engine === 'piper'
+        ? `Piper-plus - ${job.language ?? 'en'}`
+        : `Kokoro - ${job.language ?? 'English US'}`
+  return job.narratorMode ? `${engine} · Narrator mode` : engine
 }
 
 function m4bCapabilityTone(capability: M4bCapability | null): 'ok' | 'warn' | 'muted' {
@@ -1120,6 +1128,7 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
         <strong>{String(chunk.index + 1).padStart(3, '0')}</strong>
         <span>{chunk.chapterTitle ?? chunk.text}</span>
         <small>
+          {chunk.role ? `${chunk.role === 'dialogue' ? 'Dialogue' : 'Narration'}${chunk.speaker ? ` · ${chunk.speaker}` : ''} - ` : ''}
           {chunk.duration ?? format.toUpperCase()}
           {chunk.cues?.length ? ` - ${chunk.cues.length} cues` : ' - time resume'}
         </small>
@@ -1329,6 +1338,10 @@ function App() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showSystemTools, setShowSystemTools] = useState(false)
   const [showPronunciations, setShowPronunciations] = useState(false)
+  const [narratorMode, setNarratorMode] = useState(false)
+  const [dialogueVoiceId, setDialogueVoiceId] = useState('af_bella')
+  const [dialogueSupertonicVoiceId, setDialogueSupertonicVoiceId] = useState<SupertonicVoiceId>('M1')
+  const [dialogueKittenVoiceId, setDialogueKittenVoiceId] = useState<KittenVoiceId>('Jasper')
   const [voiceMixEnabled, setVoiceMixEnabled] = useState(false)
   const [voiceMixEntries, setVoiceMixEntries] = useState<VoiceMixEntry[]>([
     { voiceId: 'af_heart', weight: 2 },
@@ -1526,6 +1539,77 @@ function App() {
               : engine === 'qwen'
                 ? qwenSpeaker
               : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
+
+  function voiceIdForNarratorRole(role: NarratorRole): string {
+    if (role === 'narration') {
+      if (engine === 'kokoro') return selectedVoice.id
+      if (engine === 'supertonic') return selectedSupertonicVoice.id
+      if (engine === 'kitten') return selectedKittenVoice.id
+      if (engine === 'piper') return piperLanguage
+      if (engine === 'qwen') return qwenSpeaker
+      if (engine === 'browser') return browserVoiceUri
+      return selectedVoice.id
+    }
+    if (engine === 'kokoro') return availableVoices.some((voice) => voice.id === dialogueVoiceId) ? dialogueVoiceId : selectedVoice.id
+    if (engine === 'supertonic') return dialogueSupertonicVoiceId
+    if (engine === 'kitten') return dialogueKittenVoiceId
+    // Piper-plus has one selectable language route, while the direct-only
+    // engines expose one active voice/reference in this workflow. Returning
+    // the narration voice keeps narrator mode a clean single-voice fallback.
+    return voiceIdForNarratorRole('narration')
+  }
+
+  function setVoiceIdForNarratorRole(role: NarratorRole, value: string): void {
+    if (role === 'narration') {
+      if (engine === 'kokoro') setVoiceId(value)
+      else if (engine === 'supertonic') setSupertonicVoiceId(value as SupertonicVoiceId)
+      else if (engine === 'kitten') setKittenVoiceId(value as KittenVoiceId)
+      else if (engine === 'piper') setPiperLanguage(value as PiperPlusLanguage)
+      return
+    }
+    if (engine === 'kokoro') setDialogueVoiceId(value)
+    else if (engine === 'supertonic') setDialogueSupertonicVoiceId(value as SupertonicVoiceId)
+    else if (engine === 'kitten') setDialogueKittenVoiceId(value as KittenVoiceId)
+  }
+
+  function narratorRoleVoicePicker(role: NarratorRole): ReactNode {
+    const selectedId = voiceIdForNarratorRole(role)
+    if (engine === 'kokoro') {
+      return (
+        <select
+          aria-label={`${role === 'narration' ? 'Narration' : 'Dialogue'} voice`}
+          value={selectedId}
+          onChange={(event) => setVoiceIdForNarratorRole(role, event.target.value)}
+        >
+          {availableVoices.map((voice) => <option value={voice.id} key={voice.id}>{voice.name} ({voice.gender})</option>)}
+        </select>
+      )
+    }
+    if (engine === 'supertonic') {
+      return (
+        <select
+          aria-label={`${role === 'narration' ? 'Narration' : 'Dialogue'} voice`}
+          value={selectedId}
+          onChange={(event) => setVoiceIdForNarratorRole(role, event.target.value)}
+        >
+          {SUPERTONIC_VOICES.map((voice) => <option value={voice.id} key={voice.id}>{voice.name} ({voice.gender})</option>)}
+        </select>
+      )
+    }
+    if (engine === 'kitten') {
+      return (
+        <select
+          aria-label={`${role === 'narration' ? 'Narration' : 'Dialogue'} voice`}
+          value={selectedId}
+          onChange={(event) => setVoiceIdForNarratorRole(role, event.target.value)}
+        >
+          {KITTEN_VOICES.map((voice) => <option value={voice.id} key={voice.id}>{voice.name} ({voice.gender})</option>)}
+        </select>
+      )
+    }
+    return <span className="narrator-fallback-voice">{activeVoiceName} (single voice)</span>
+  }
+
   const activeSampleRate =
     engine === 'supertonic'
       ? `${(SUPERTONIC_SAMPLE_RATE / 1000).toFixed(1)} kHz`
@@ -1549,7 +1633,7 @@ function App() {
               ? 'M4B / AAC'
               : `WAV - ${activeSampleRate}`
   const captionModeLabel = wordTimestamps && englishKokoro ? 'Word-level captions' : engine === 'browser' ? 'Live only' : 'SRT + VTT'
-  const editorModeLabel = dialogMode ? 'Dialog script' : separateLines ? 'Line export' : 'Single clip'
+  const editorModeLabel = narratorMode ? 'Narrator mode' : dialogMode ? 'Dialog script' : separateLines ? 'Line export' : 'Single clip'
   const completedQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.filter((chunk) => chunk.status === 'done').length, 0)
   const totalQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.length, 0)
   const queueSummaryLabel = queueJobs.length > 0
@@ -1812,6 +1896,12 @@ function App() {
       setVoiceId(availableVoices[0]?.id ?? 'af_heart')
     }
   }, [availableVoices, voiceId])
+
+  useEffect(() => {
+    if (!availableVoices.some((voice) => voice.id === dialogueVoiceId)) {
+      setDialogueVoiceId(availableVoices.find((voice) => voice.id !== voiceId)?.id ?? availableVoices[0]?.id ?? 'af_heart')
+    }
+  }, [availableVoices, dialogueVoiceId, voiceId])
 
   useEffect(() => {
     if (!englishKokoro) {
@@ -2666,6 +2756,8 @@ function App() {
   type SynthJob = {
     text: string
     voice: string
+    role?: NarratorRole
+    speaker?: string
     label: string
     filenamePrefix: string
     voiceBin?: Float32Array
@@ -3361,10 +3453,34 @@ function App() {
     }
   }
 
+  function createNarratorJobs(segments: NarratorSegment[]): SynthJob[] {
+    return segments.map((segment, index) => ({
+      text: segment.text,
+      voice: voiceIdForNarratorRole(segment.role),
+      role: segment.role,
+      speaker: segment.speaker,
+      label: `${segment.role === 'dialogue' ? 'Dialogue' : 'Narration'}${segment.speaker ? ` · ${segment.speaker}` : ''}: ${segment.text.slice(0, 50)}`,
+      filenamePrefix: `${String(index + 1).padStart(3, '0')}-${segment.role}-${slugify(segment.text)}`,
+    }))
+  }
+
+  async function generateNarrator(sourceText: string) {
+    const segments = splitNarratorText(sourceText)
+    if (segments.length === 0) return
+    await runSynthesis(createNarratorJobs(segments), {
+      zipPrefix: 'bettertts-narrator',
+      successMessage: 'Narrator mode generated separate narration and dialogue clips.',
+    })
+  }
+
   async function handleGenerate() {
     if (generatingRef.current) return
     if (rvcSettings.enabled && !engineSupportsPostStage(engine, 'rvc')) {
       showToast({ tone: 'warn', message: 'RVC post-processing requires an exported audio engine; Browser playback cannot be converted.' })
+      return
+    }
+    if (narratorMode && engine === 'browser') {
+      showToast({ tone: 'warn', message: 'Narrator mode needs an export-capable local engine; Browser voices remain single-voice playback.' })
       return
     }
     if (engine === 'chatterbox' && chatterboxNeedsSetup) {
@@ -3376,12 +3492,17 @@ function App() {
       })
       return
     }
-    const effectiveDialog = dialogMode && engine === 'kokoro'
+    const effectiveNarrator = narratorMode && engine !== 'browser'
+    const effectiveDialog = !effectiveNarrator && dialogMode && engine === 'kokoro'
     const sourceText = cleanupText(usableText, cleanup)
-    const chunks = effectiveDialog ? [] : splitInput(sourceText, separateLines)
+    const chunks = effectiveNarrator || effectiveDialog ? [] : splitInput(sourceText, separateLines)
 
-    if (!effectiveDialog && chunks.length === 0) {
+    if (!effectiveNarrator && !effectiveDialog && chunks.length === 0) {
       showToast({ tone: 'warn', message: 'Enter text before generating audio.' })
+      return
+    }
+    if (effectiveNarrator && splitNarratorText(sourceText).length === 0) {
+      showToast({ tone: 'warn', message: 'Enter text before generating narrator audio.' })
       return
     }
     if (effectiveDialog && parseDialogLines(sourceText).length === 0) {
@@ -3407,7 +3528,9 @@ function App() {
     setIsGenerating(true)
 
     try {
-      if (effectiveDialog) {
+      if (effectiveNarrator) {
+        await generateNarrator(sourceText)
+      } else if (effectiveDialog) {
         await generateDialog(sourceText)
       } else if (engine === 'kokoro') {
         await generateKokoro(chunks)
@@ -3646,22 +3769,20 @@ function App() {
       title,
       createdAt: Date.now(),
       engine: queueEngine,
-      voice: queueEngine === 'kokoro'
-        ? selectedVoice.id
-        : queueEngine === 'supertonic'
-          ? selectedSupertonicVoice.id
-          : queueEngine === 'piper'
-            ? piperLanguage
-            : selectedKittenVoice.id,
+      voice: voiceIdForNarratorRole('narration'),
       language: queueEngine === 'kokoro' ? locale : queueEngine === 'piper' ? piperLanguage : undefined,
       speed,
       format: audioFormat,
       bitrate: mp3Bitrate,
+      narratorMode,
       supertonicSteps: queueEngine === 'supertonic' ? supertonicSteps : undefined,
       kittenModel: queueEngine === 'kitten' ? kittenModelSize : undefined,
       chunks: chunks.map((chunk, index) => ({
         index,
         text: chunk.text,
+        voice: chunk.voice,
+        role: chunk.role,
+        speaker: chunk.speaker,
         chapterTitle: chunk.chapterTitle,
         chapterIndex: chunk.chapterIndex,
         status: 'pending',
@@ -3671,11 +3792,19 @@ function App() {
 
   async function queueCurrentText() {
     if (!usableText.trim()) return
-    const chunks = splitInput(cleanupText(usableText, cleanup), separateLines)
+    const sourceText = cleanupText(usableText, cleanup)
+    const chunks: QueueSourceChunk[] = narratorMode
+      ? splitNarratorText(sourceText).map((segment) => ({
+        text: segment.text,
+        voice: voiceIdForNarratorRole(segment.role),
+        role: segment.role,
+        speaker: segment.speaker,
+      }))
+      : splitInput(sourceText, separateLines).map((text) => ({ text }))
     if (chunks.length === 0) return
     const job = createQueueJob(
       usableText.slice(0, 50).replace(/\s+/g, ' ').trim(),
-      chunks.map((text) => ({ text })),
+      chunks,
     )
     if (!job) {
       showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot be queued for file export.' })
@@ -3696,6 +3825,7 @@ function App() {
     text: string,
     synthesize: LoadedQueueEngine['synthesize'],
     sampleRate: number,
+    voice = job.voice,
   ): Promise<{ blob: Blob; duration: string; cues?: Cue[]; warning?: string } | null> {
     const sentences = splitIntoSentences(applyPronunciations(text))
     const parts: Float32Array[] = []
@@ -3709,7 +3839,7 @@ function App() {
         aborted = true
         break
       }
-      const audio = await synthesize(sentence, job.voice, job.speed, undefined, generationAbortRef.current?.signal)
+      const audio = await synthesize(sentence, voice, job.speed, undefined, generationAbortRef.current?.signal)
       if (abortRef.current) {
         aborted = true
         break
@@ -3788,7 +3918,7 @@ function App() {
         setQueueJobs((prev) => prev.map((j) => (j.id === jobId ? { ...job } : j)))
 
         try {
-          const replacement = await synthesizeQueueChunkBlob(job, chunk.text, synthesize, sampleRate)
+          const replacement = await synthesizeQueueChunkBlob(job, chunk.text, synthesize, sampleRate, chunk.voice ?? job.voice)
           if (!replacement) {
             chunk.status = 'pending'
           } else {
@@ -3909,7 +4039,7 @@ function App() {
         if (info.status === 'ready') setStatus('Model ready')
       }
       const { synthesize, sampleRate } = await ensureQueueEngine(job, onProgress)
-      const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate)
+      const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate, chunk.voice ?? job.voice)
       if (!replacement) {
         showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
         return false
@@ -3964,6 +4094,9 @@ function App() {
         index: number
         filename: string
         text: string
+        voice?: string
+        role?: NarratorRole
+        speaker?: string
         chapterTitle?: string
         chapterIndex?: number
       }> = []
@@ -3978,6 +4111,9 @@ function App() {
             index: chunk.index,
             filename,
             text: chunk.text,
+            voice: chunk.voice,
+            role: chunk.role,
+            speaker: chunk.speaker,
             chapterTitle: chunk.chapterTitle,
             chapterIndex: chunk.chapterIndex,
           })
@@ -4204,13 +4340,23 @@ function App() {
         showToast({ tone: 'warn', message: 'No readable text found in this EPUB.' })
         return
       }
-      const job = createQueueJob(
-        file.name.replace(/\.epub$/i, ''),
-        allChunks.map((chunk) => ({
+      const queueChunks: QueueSourceChunk[] = narratorMode
+        ? allChunks.flatMap((chunk) => splitNarratorText(chunk.text).map((segment) => ({
+          text: segment.text.slice(0, MAX_TEXT_CHARS),
+          voice: voiceIdForNarratorRole(segment.role),
+          role: segment.role,
+          speaker: segment.speaker,
+          chapterTitle: chunk.title,
+          chapterIndex: chunk.chapterIndex,
+        })))
+        : allChunks.map((chunk) => ({
           text: chunk.text.slice(0, MAX_TEXT_CHARS),
           chapterTitle: chunk.title,
           chapterIndex: chunk.chapterIndex,
-        })),
+        }))
+      const job = createQueueJob(
+        file.name.replace(/\.epub$/i, ''),
+        queueChunks,
       )
       if (!job) {
         showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot queue EPUB text for file export.' })
@@ -6223,7 +6369,15 @@ function App() {
 
                 {engine === 'kokoro' ? (
                   <label className="toggle-row">
-                    <input type="checkbox" checked={dialogMode} onChange={(event) => setDialogMode(event.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={dialogMode}
+                      disabled={isGenerating || narratorMode}
+                      onChange={(event) => {
+                        setDialogMode(event.target.checked)
+                        if (event.target.checked) setNarratorMode(false)
+                      }}
+                    />
                     <span>
                       Dialog mode
                       <small>Map [speaker:Name] prefixes to voices.</small>
@@ -6231,7 +6385,40 @@ function App() {
                   </label>
                 ) : null}
 
-                {dialogMode && engine === 'kokoro' ? (
+                <label className="toggle-row" htmlFor="narrator-mode">
+                  <input
+                    id="narrator-mode"
+                    type="checkbox"
+                    checked={narratorMode}
+                    disabled={isGenerating || engine === 'browser'}
+                    onChange={(event) => {
+                      setNarratorMode(event.target.checked)
+                      if (event.target.checked) setDialogMode(false)
+                    }}
+                  />
+                  <span>
+                    Narrator mode
+                    <small>Auto-split quoted dialogue from narration and assign a voice per role for queue/M4B exports.</small>
+                  </span>
+                </label>
+
+                {narratorMode ? (
+                  <div className="speaker-map narrator-role-map" aria-label="Narrator role voices">
+                    <div className="speaker-row">
+                      <span>Narration voice</span>
+                      {narratorRoleVoicePicker('narration')}
+                    </div>
+                    <div className="speaker-row">
+                      <span>Dialogue voice</span>
+                      {narratorRoleVoicePicker('dialogue')}
+                    </div>
+                    <small className="narrator-note">
+                      Quoted speech and [speaker:Name] lines use the dialogue voice. Plain text falls back to narration; {engine === 'piper' || engine === 'chatterbox' || engine === 'qwen' ? 'this engine exposes one active voice, so both roles use it.' : 'queue chunks retain the role assignment for resume and M4B export.'}
+                    </small>
+                  </div>
+                ) : null}
+
+                {dialogMode && !narratorMode && engine === 'kokoro' ? (
                   <div className="speaker-map">
                     {[...new Set(parseDialogLines(usableText).map((d) => d.speaker).filter(Boolean))].map((name) => (
                       <div className="speaker-row" key={name}>

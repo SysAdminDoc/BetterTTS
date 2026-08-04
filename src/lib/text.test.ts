@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CLEANUP, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences } from './text.ts'
+import { DEFAULT_CLEANUP, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
 
 describe('checkSynthesisCompleteness', () => {
   // ~200 speakable chars of ordinary prose.
@@ -211,6 +211,50 @@ describe('parseDialogLines', () => {
   it('is case insensitive on the speaker tag', () => {
     const result = parseDialogLines('[Speaker:Eve] Test')
     expect(result[0].speaker).toBe('Eve')
+  })
+})
+
+describe('splitNarratorText', () => {
+  it('auto-splits straight and curly quoted dialogue from narration', () => {
+    expect(splitNarratorText('The door opened. "We should go," Alice said. “Now.”')).toEqual([
+      { role: 'narration', text: 'The door opened.' },
+      { role: 'dialogue', text: 'We should go,', speaker: undefined },
+      { role: 'narration', text: 'Alice said.' },
+      { role: 'dialogue', text: 'Now.' },
+    ])
+  })
+
+  it('keeps explicit speaker prefixes and merges adjacent narration', () => {
+    expect(splitNarratorText('Narration line.\n[speaker: Eve] Hello there.\nNext paragraph.')).toEqual([
+      { role: 'narration', text: 'Narration line.' },
+      { role: 'dialogue', text: 'Hello there.', speaker: 'Eve' },
+      { role: 'narration', text: 'Next paragraph.' },
+    ])
+  })
+
+  it('records a simple leading speaker attribution on quoted dialogue', () => {
+    expect(splitNarratorText('Alice said, "Stay here."')).toEqual([
+      { role: 'narration', text: 'Alice said,' },
+      { role: 'dialogue', text: 'Stay here.', speaker: 'Alice' },
+    ])
+  })
+
+  it('records a simple trailing speaker attribution on quoted dialogue', () => {
+    expect(splitNarratorText('"Stay here," Alice said.')).toEqual([
+      { role: 'dialogue', text: 'Stay here.', speaker: 'Alice' },
+      { role: 'narration', text: 'Alice said.' },
+    ])
+  })
+
+  it('does not treat apostrophes or unmatched quotes as dialogue', () => {
+    expect(splitNarratorText("It's a 6\" sample.")).toEqual([{ role: 'narration', text: `It's a 6" sample.` }])
+    expect(splitNarratorText('He said "unfinished line.')).toEqual([{ role: 'narration', text: 'He said "unfinished line.' }])
+  })
+
+  it('falls back to one narration segment for plain long-form text', () => {
+    expect(splitNarratorText('First paragraph.\nSecond paragraph.')).toEqual([
+      { role: 'narration', text: 'First paragraph. Second paragraph.' },
+    ])
   })
 })
 

@@ -112,6 +112,109 @@ export function parseDialogLines(text: string): DialogLine[] {
     .filter((d) => d.text.length > 0)
 }
 
+export type NarratorRole = 'narration' | 'dialogue'
+
+export type NarratorSegment = {
+  role: NarratorRole
+  text: string
+  speaker?: string
+}
+
+const NARRATOR_QUOTE_PAIRS: Record<string, string> = {
+  '"': '"',
+  '“': '”',
+  '«': '»',
+  '‘': '’',
+}
+
+const NARRATOR_SPEAKER_ATTRIBUTION = /(?:^|[.!?]\s+|,\s+)([A-Z][\p{L}\p{M}'’-]*(?:\s+[A-Z][\p{L}\p{M}'’-]*){0,2})\s+(?:said|says|asked|replied|answered|whispered|shouted|muttered|called)\s*,\s*$/u
+const NARRATOR_TRAILING_ATTRIBUTION = /^,?\s*([A-Z][\p{L}\p{M}'’-]*(?:\s+[A-Z][\p{L}\p{M}'’-]*){0,2})\s+(?:said|says|asked|replied|answered|whispered|shouted|muttered|called)\b/u
+
+function inferNarratorSpeaker(prefix: string): string | undefined {
+  return prefix.match(NARRATOR_SPEAKER_ATTRIBUTION)?.[1]
+}
+
+function mergeNarratorSegment(segments: NarratorSegment[], next: NarratorSegment): void {
+  if (!next.text) return
+  const previous = segments.at(-1)
+  if (previous && previous.role === next.role && previous.speaker === next.speaker) {
+    previous.text = `${previous.text} ${next.text}`.trim()
+    return
+  }
+  segments.push(next)
+}
+
+function splitQuotedNarratorLine(line: string): NarratorSegment[] {
+  const segments: NarratorSegment[] = []
+  let role: NarratorRole = 'narration'
+  let closingQuote: string | null = null
+  let speaker: string | undefined
+  let buffer = ''
+  let closedQuote = false
+
+  const flush = () => {
+    const text = buffer.trim()
+    buffer = ''
+    if (text) mergeNarratorSegment(segments, { role, text, ...(role === 'dialogue' && speaker ? { speaker } : {}) })
+  }
+
+  for (const character of line) {
+    if (role === 'narration') {
+      const matchingClose = NARRATOR_QUOTE_PAIRS[character]
+      if (matchingClose) {
+        flush()
+        role = 'dialogue'
+        closingQuote = matchingClose
+        speaker = inferNarratorSpeaker(segments.at(-1)?.text ?? '')
+        buffer = ''
+        continue
+      }
+    } else if (character === closingQuote) {
+      flush()
+      role = 'narration'
+      closingQuote = null
+      speaker = undefined
+      closedQuote = true
+      continue
+    }
+    buffer += character
+  }
+
+  // An unmatched quote is more likely a measurement or a typo than dialogue.
+  // Return the original line so the user gets a clean single-voice fallback
+  // instead of losing the opening punctuation or misclassifying the paragraph.
+  if (closingQuote && !closedQuote) return line.trim() ? [{ role: 'narration', text: line.trim() }] : []
+  const trailingAttribution = role === 'narration' && closedQuote ? buffer.trim().match(NARRATOR_TRAILING_ATTRIBUTION)?.[1] : undefined
+  const previous = segments.at(-1)
+  if (trailingAttribution && previous?.role === 'dialogue' && !previous.speaker) {
+    previous.speaker = trailingAttribution
+    previous.text = previous.text.replace(/,\s*$/, '.').trim()
+  }
+  flush()
+  return segments
+}
+
+/**
+ * Splits long-form text into narration and quoted dialogue segments.
+ * Explicit [speaker:Name] lines remain supported and are treated as dialogue;
+ * ordinary quoted speech is detected without treating apostrophes as quotes.
+ */
+export function splitNarratorText(text: string): NarratorSegment[] {
+  const segments: NarratorSegment[] = []
+  for (const rawLine of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const explicitSpeaker = line.match(SPEAKER_PREFIX)
+    if (explicitSpeaker) {
+      const content = line.slice(explicitSpeaker[0].length).trim()
+      if (content) mergeNarratorSegment(segments, { role: 'dialogue', speaker: explicitSpeaker[1].trim(), text: content })
+      continue
+    }
+    for (const segment of splitQuotedNarratorLine(line)) mergeNarratorSegment(segments, segment)
+  }
+  return segments
+}
+
 export type CleanupOptions = {
   citations: boolean
   urls: boolean

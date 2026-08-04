@@ -5,9 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-387%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-396%20passing-53d889.svg)](#)
 
-**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
+**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
@@ -46,6 +46,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
 - **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
+- **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
 - **41 Kokoro voices** — 28 English voices plus Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
@@ -54,6 +55,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Native desktop inference** — the Electron build runs Kokoro and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
 - **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
+- **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
 - **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
@@ -149,6 +151,8 @@ The **Bring-your-own weights** panel is disabled by default and is available in 
 
 The **RVC voice conversion** post-stage is available only in the Windows desktop app. Enable the consent gate under **Voice chain -> Engine -> System & diagnostics**, register a local `.pth` model and optional `.index` file with its license and provenance, then enable RVC in Advanced options. A second registered model can be blended through two inference passes. BetterTTS keeps the original files in place and records the selected model metadata on each converted clip; the optional Python 3.10 runtime and `rvc-python` package are installed only when you choose setup. If the package, runtime, or selected model is missing, the stage reports recovery guidance instead of silently falling back.
 
+**Narrator mode** is available in the Voice chain for local engines. Enable it in Advanced options to split ordinary quoted speech and explicit `[speaker:Name]` lines from narration, then choose the narration and dialogue voices. Plain text remains a single narration segment. Queue jobs persist the role, optional speaker, and exact voice on each chunk; ZIP manifests include the same metadata and M4B export uses the already-rendered role-specific audio. Engines with one active voice use the narration voice for both roles.
+
 The **Local OpenAI-compatible TTS server** is also desktop-only and starts only from **Voice chain -> Engine -> System & diagnostics**. It binds to `127.0.0.1` on the selected port (default `8765`) and exposes `GET /health`, `GET /v1/models`, and `POST /v1/audio/speech`. A minimal request is `{"input":"Hello","model":"kokoro","voice":"af_heart","response_format":"wav"}`; add `"stream":true` or `"stream_format":"sse"` for SSE events containing base64 audio chunks followed by `data: [DONE]`. Supported models are `kokoro`, `kokoro-82m`, `piper`, and `piper-plus`; the native provider currently maps Piper voices to English Cori. The server does not expose browser-only engines and never listens on a non-loopback interface.
 
 The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
@@ -169,6 +173,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
 | Sidecar runtime | Optional Windows-only Python 3.12 environment; `torch` and `qwen-tts` install into user data and model weights are downloaded on demand |
 | RVC post-stage | Optional Windows-only Python 3.10 environment; `rvc-python` and user-selected `.pth`/`.index` files remain outside the installer |
+| Narrator segmentation | Bounded local quote/speaker parser with per-queue-chunk role and voice metadata |
 | Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
 | Local API | Opt-in loopback-only Electron server for OpenAI-compatible speech requests, native Kokoro/Piper output, and SSE audio chunks |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
@@ -179,7 +184,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (387 tests across 67 files) + Playwright smoke |
+| Testing | Vitest (396 tests across 67 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -213,7 +218,7 @@ src/
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
 │   ├── wav.ts               # Raw PCM → WAV encoder
-│   ├── text.ts              # Sentence splitting, pause parsing, cleanup
+│   ├── text.ts              # Sentence splitting, pause parsing, cleanup, narrator segmentation
 │   ├── voices.ts            # 41-voice Kokoro catalog with quality grades
 │   ├── webspeech.ts         # Browser Speech API wrapper
 │   ├── subtitles.ts         # SRT/VTT serializers
@@ -257,6 +262,7 @@ sidecar/
 - Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
 - The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, bounds request/input/audio surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that closes the listener and active sockets
 - RVC is an explicit desktop-only post-stage: consent and model provenance are required, model paths are user-managed, optional blending performs two bounded inference passes, and converted clips retain the selected model metadata
+- Narrator mode is a bounded text transformation before synthesis: quoted and explicit-speaker segments receive per-chunk role/voice metadata, plain text remains narration, and queue/M4B exports consume the persisted rendered chunks
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
 - Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages

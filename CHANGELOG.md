@@ -18,6 +18,7 @@
 - Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 - Added an opt-in loopback-only OpenAI-compatible desktop TTS server. `POST /v1/audio/speech` supports native Kokoro/Piper model and voice selection, WAV/MP3/Opus/FLAC output, bounded SSE base64 chunks, `/health` and `/v1/models`, an explicit port control, and a stop path that closes the listener.
 - Added an opt-in Windows-only RVC post-stage. Users can register consented local `.pth`/`.index` models with license and provenance, re-timbre a generated clip after TTS, optionally blend a second model through a bounded second inference pass, and retain the conversion metadata on the saved clip; the optional Python runtime is never bundled.
+- Added narrator mode for long-form scripts. Quote-aware and explicit-speaker parsing separates narration from dialogue, per-role voices persist on queue chunks, ZIP manifests retain the assignments, and chaptered M4B export uses the rendered role-specific audio.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -43,6 +44,7 @@
 - Added BYO metadata schema, consent/visibility, provenance bounds, desktop picker IPC, and web-bridge isolation coverage.
 - Added OpenAI-compatible request/IPC validation, raw audio and SSE endpoint tests, loopback binding, health/model discovery, and listener shutdown coverage.
 - Added RVC model metadata, consent, blend/provenance, conversion IPC/client, Python adapter protocol, missing-runtime/model recovery, and web-bridge isolation coverage.
+- Added narrator quote/speaker parsing, unmatched-quote fallback, queue role/voice migration, metadata preservation during regeneration, and packaged Narrator mode UI smoke coverage.
 
 ## v0.21.0 - 2026-07-29
 

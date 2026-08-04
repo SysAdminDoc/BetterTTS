@@ -2275,6 +2275,31 @@ select:focus-visible {
   height: 36px;
 }
 
+.narrator-role-map {
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.narrator-note,
+.narrator-fallback-voice {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.narrator-note {
+  display: block;
+  line-height: 1.45;
+}
+
+.narrator-fallback-voice {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
 .pron-toggle {
   display: block;
   margin-bottom: 10px;

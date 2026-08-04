@@ -1,6 +1,7 @@
 import type { AudioFormat } from './encode.ts'
 import { publishStoreChange } from './coordination.ts'
 import type { Cue } from './subtitles.ts'
+import type { NarratorRole } from './text.ts'
 import type { KokoroLocale, VoiceId } from './voices.ts'
 import type { PiperPlusLanguage } from './piper-plus.ts'
 
@@ -11,6 +12,9 @@ export type QueueChunk = {
   index: number
   text: string
   status: ChunkStatus
+  voice?: string
+  role?: NarratorRole
+  speaker?: string
   chapterTitle?: string
   chapterIndex?: number
   duration?: string
@@ -32,6 +36,7 @@ export type QueueJob = {
   speed: number
   format: AudioFormat
   bitrate: number
+  narratorMode?: boolean
   supertonicSteps?: number
   kittenModel?: 'nano' | 'micro' | 'mini'
   chunks: QueueChunk[]
@@ -238,7 +243,7 @@ export function nextPendingChunk(job: QueueJob): QueueChunk | null {
 export function replaceQueueChunk(
   job: QueueJob,
   chunkIndex: number,
-  patch: Pick<QueueChunk, 'text' | 'status'> & Partial<Pick<QueueChunk, 'chapterTitle' | 'chapterIndex' | 'duration' | 'cues'>>,
+  patch: Pick<QueueChunk, 'text' | 'status'> & Partial<Pick<QueueChunk, 'voice' | 'role' | 'speaker' | 'chapterTitle' | 'chapterIndex' | 'duration' | 'cues'>>,
 ): QueueJob {
   return {
     ...job,
@@ -248,6 +253,9 @@ export function replaceQueueChunk(
             ...chunk,
             text: patch.text,
             status: patch.status,
+            voice: patch.voice ?? chunk.voice,
+            role: patch.role ?? chunk.role,
+            speaker: patch.speaker ?? chunk.speaker,
             chapterTitle: patch.chapterTitle,
             chapterIndex: patch.chapterIndex ?? chunk.chapterIndex,
             duration: patch.duration,
@@ -280,6 +288,7 @@ export function migrateQueueJob(raw: unknown): QueueJob {
   const title = typeof job.title === 'string' && job.title ? job.title.slice(0, 500) : 'Untitled job'
   const voice = typeof job.voice === 'string' && job.voice && job.voice.length <= 200 ? job.voice : 'af_heart'
   const language = typeof job.language === 'string' && job.language.length <= 50 ? job.language : undefined
+  const narratorMode = job.narratorMode === true
   return {
     schemaVersion: 2,
     id,
@@ -291,6 +300,7 @@ export function migrateQueueJob(raw: unknown): QueueJob {
     speed,
     format,
     bitrate,
+    narratorMode,
     supertonicSteps: engine === 'supertonic' && Number.isFinite(job.supertonicSteps)
       ? Math.round(Math.max(1, Math.min(10, Number(job.supertonicSteps))))
       : engine === 'supertonic' ? 5 : undefined,
@@ -306,10 +316,16 @@ function migrateQueueChunk(raw: unknown, index: number): QueueChunk {
   // 'generating' is an in-memory state only: a persisted 'generating' chunk is
   // a zombie from a crashed session, so demote it to 'pending' for clean resume.
   const status = chunk.status === 'done' || chunk.status === 'failed' ? chunk.status : 'pending'
+  const voice = typeof chunk.voice === 'string' && chunk.voice.trim() && chunk.voice.length <= 200 ? chunk.voice.trim() : undefined
+  const role: NarratorRole | undefined = chunk.role === 'narration' || chunk.role === 'dialogue' ? chunk.role : undefined
+  const speaker = typeof chunk.speaker === 'string' && chunk.speaker.trim() && chunk.speaker.length <= 120 ? chunk.speaker.trim() : undefined
   return {
     index: Number.isSafeInteger(chunk.index) && Number(chunk.index) >= 0 ? Number(chunk.index) : index,
     text: typeof chunk.text === 'string' ? chunk.text.slice(0, 10_000) : '',
     status,
+    ...(voice ? { voice } : {}),
+    ...(role ? { role } : {}),
+    ...(speaker ? { speaker } : {}),
     chapterTitle: typeof chunk.chapterTitle === 'string' ? chunk.chapterTitle.slice(0, 500) : undefined,
     chapterIndex: Number.isSafeInteger(chunk.chapterIndex) && Number(chunk.chapterIndex) >= 0 ? Number(chunk.chapterIndex) : undefined,
     duration: typeof chunk.duration === 'string' ? chunk.duration.slice(0, 50) : undefined,
