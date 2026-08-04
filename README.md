@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-512%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-513%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -108,7 +108,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
-- **Installable PWA** with service worker for offline app shell, per-build cache versioning, and desktop/mobile install screenshots
+- **Installable PWA** with service worker for offline app shell, per-build cache versioning, safe waiting-worker updates that retain the previous shell generation until reload, and desktop/mobile install screenshots
 - **Companion MV3 browser extension** — permission-minimal selection/page context actions open the PWA with the captured text; the packaged archive is built with `npm run extension:build`
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds

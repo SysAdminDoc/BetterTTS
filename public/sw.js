@@ -25,15 +25,14 @@ function createShellCacheRequest(request) {
   })
 }
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting())
-})
-
 self.addEventListener('activate', (event) => {
   event.waitUntil(
+    // Replacement workers stay waiting until the current page reloads. At
+    // activation there are no clients using the previous worker, so stale
+    // generations can be removed without breaking old hashed lazy chunks.
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k.startsWith('bettertts-shell-') && k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    )
   )
 })
 

@@ -33,7 +33,10 @@ if (!isDesktop() && 'serviceWorker' in navigator) {
           })
         }
       })
-      if (reg.active && !navigator.serviceWorker.controller && !window.crossOriginIsolated) {
+      // A first install can still be waiting when register() resolves. Reload
+      // once for either state so the worker can become active and inject the
+      // cross-origin isolation headers before the app starts using WASM.
+      if ((reg.active || reg.waiting) && !navigator.serviceWorker.controller && !window.crossOriginIsolated) {
         reloadOnceForIsolation()
       }
     })
