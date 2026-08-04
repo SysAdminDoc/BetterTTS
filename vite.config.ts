@@ -24,7 +24,7 @@ function swBuildId(): Plugin {
 function cspInjector(): Plugin {
   const csp = [
     "default-src 'self'",
-    "script-src 'self' blob: 'wasm-unsafe-eval'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     // https: is broad, but article import fetches arbitrary pages; script-src
     // 'self' still blocks the injection an exfiltration attack would need.
     "connect-src 'self' https: blob:",
