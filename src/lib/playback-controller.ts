@@ -24,10 +24,12 @@ export class PlaybackController {
     currentTime: 0,
     duration: 0,
   }
+  private playbackRate = 1
   private mediaSessionInstalled = false
 
   register(key: string, audio: HTMLAudioElement, label: string): () => void {
     this.entries.get(key)?.cleanup()
+    audio.playbackRate = this.playbackRate
     const update = () => this.updateSnapshot(key)
     const onPlay = () => {
       this.activate(key)
@@ -82,6 +84,16 @@ export class PlaybackController {
 
   getSnapshot(): PlaybackSnapshot {
     return this.snapshot
+  }
+
+  setPlaybackRate(rate: number): void {
+    if (!Number.isFinite(rate)) return
+    this.playbackRate = Math.min(4, Math.max(0.25, rate))
+    for (const entry of this.entries.values()) entry.audio.playbackRate = this.playbackRate
+  }
+
+  getPlaybackRate(): number {
+    return this.playbackRate
   }
 
   async play(key: string): Promise<void> {

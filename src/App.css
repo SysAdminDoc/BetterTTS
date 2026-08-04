@@ -2192,6 +2192,62 @@ select:focus-visible {
   gap: 7px;
 }
 
+.listening-trainer-panel {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.listening-trainer-panel .toggle-row {
+  margin: 0;
+}
+
+.trainer-status {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-1);
+}
+
+.trainer-status strong {
+  color: var(--accent-text);
+  font-size: 13px;
+}
+
+.trainer-status small {
+  color: var(--muted);
+}
+
+.trainer-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.trainer-controls > label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.trainer-controls select {
+  min-width: 0;
+  margin: 0;
+}
+
+.trainer-cap-row {
+  margin-bottom: 0;
+}
+
 .bgm-row {
   margin-bottom: 16px;
 }

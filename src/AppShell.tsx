@@ -183,6 +183,17 @@ import {
   shouldPersistPlayback,
 } from './lib/playback.ts'
 import { playbackController } from './lib/playback-controller.ts'
+import {
+  addListeningSeconds,
+  DEFAULT_LISTENING_TRAINER,
+  LISTENING_TRAINER_INTERVALS,
+  LISTENING_TRAINER_STORAGE_KEY,
+  listeningTrainerRate,
+  listeningTrainerSecondsToNextStep,
+  parseListeningTrainerSetting,
+  resetListeningTrainer,
+  type ListeningTrainerSettings,
+} from './lib/listening-trainer.ts'
 import { readLruEntry, writeLruEntry } from './lib/bounded-cache.ts'
 import {
   KITTEN_DEFAULT_MODEL,
@@ -1475,6 +1486,11 @@ function App() {
   const [qwenSetupBusy, setQwenSetupBusy] = useState(false)
   const [qwenSetupProgress, setQwenSetupProgress] = useState(0)
   const [speed, setSpeed] = useState(1)
+  const [listeningTrainer, setListeningTrainer] = useState<ListeningTrainerSettings>(() => {
+    try {
+      return parseListeningTrainerSetting(window.localStorage.getItem(LISTENING_TRAINER_STORAGE_KEY))
+    } catch { return DEFAULT_LISTENING_TRAINER }
+  })
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
   const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav')
@@ -1617,6 +1633,7 @@ function App() {
   const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
   const scriptEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  const listeningTrainerRef = useRef<ListeningTrainerSettings>(listeningTrainer)
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
   const systemToolsToggleRef = useRef<HTMLButtonElement | null>(null)
@@ -1962,6 +1979,13 @@ function App() {
     : engine === 'kokoro' && pitchSemitones !== 0
     ? `${speed.toFixed(2)}x / ${pitchSemitones > 0 ? `+${pitchSemitones}` : pitchSemitones} st`
     : `${speed.toFixed(2)}x`
+  const trainerRate = listeningTrainerRate(listeningTrainer)
+  const trainerNextStepSeconds = listeningTrainerSecondsToNextStep(listeningTrainer)
+  const trainerStatus = !listeningTrainer.enabled
+    ? 'Off — playback stays at 1.00x.'
+    : trainerNextStepSeconds === null
+      ? `${trainerRate.toFixed(2)}x cap reached.`
+      : `${trainerRate.toFixed(2)}x now · ${formatPlaybackTime(trainerNextStepSeconds)} to the next +5%.`
 
   function persistSetting(key: string, value: string) {
     let storage: Storage | null = null
@@ -2065,6 +2089,43 @@ function App() {
   useEffect(() => {
     persistSetting('bettertts-cleanup', JSON.stringify(cleanup))
   }, [cleanup])
+
+  useEffect(() => {
+    listeningTrainerRef.current = listeningTrainer
+    playbackController.setPlaybackRate(listeningTrainerRate(listeningTrainer))
+    persistSetting(LISTENING_TRAINER_STORAGE_KEY, JSON.stringify(listeningTrainer))
+  }, [listeningTrainer])
+
+  useEffect(() => {
+    let lastPlayingAt: number | null = null
+    const syncPlaying = (snapshot: { playing: boolean }) => {
+      if (snapshot.playing && listeningTrainerRef.current.enabled) {
+        lastPlayingAt ??= performance.now()
+      } else {
+        lastPlayingAt = null
+      }
+    }
+    const unsubscribe = playbackController.subscribe(syncPlaying)
+    const timer = window.setInterval(() => {
+      const current = listeningTrainerRef.current
+      if (!current.enabled || !playbackController.getSnapshot().playing) {
+        lastPlayingAt = null
+        return
+      }
+      const now = performance.now()
+      if (lastPlayingAt === null) {
+        lastPlayingAt = now
+        return
+      }
+      const elapsed = Math.min(2, Math.max(0, (now - lastPlayingAt) / 1000))
+      lastPlayingAt = now
+      if (elapsed > 0) setListeningTrainer((settings) => settings.enabled ? addListeningSeconds(settings, elapsed) : settings)
+    }, 1000)
+    return () => {
+      unsubscribe()
+      window.clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     persistSetting('bettertts-punctuation-pauses', JSON.stringify(punctuationPauses))
@@ -7265,6 +7326,53 @@ function App() {
               />
             </div>
             {engine === 'chatterbox' ? <small className="engine-note">Chatterbox controls rhythm through its model sampler and emotion dial rather than playback speed.</small> : null}
+
+            <div className="listening-trainer-panel" aria-label="Listening speed trainer">
+              <label className="toggle-row" htmlFor="listening-speed-trainer">
+                <input
+                  id="listening-speed-trainer"
+                  type="checkbox"
+                  checked={listeningTrainer.enabled}
+                  onChange={(event) => setListeningTrainer((current) => ({ ...current, enabled: event.target.checked }))}
+                />
+                <span>
+                  Listening speed trainer
+                  <small>Ramp playback by +5% after each interval of active listening. Audio generation speed is unchanged.</small>
+                </span>
+              </label>
+              <div className="trainer-status" role="status" aria-live="polite">
+                <strong>{trainerStatus}</strong>
+                <small>{Math.floor(listeningTrainer.listenedSeconds / 60)} min listened · cap {listeningTrainer.cap.toFixed(2)}x</small>
+              </div>
+              {listeningTrainer.enabled ? (
+                <div className="trainer-controls">
+                  <label>
+                    Ramp every
+                    <select
+                      aria-label="Trainer ramp interval"
+                      value={listeningTrainer.intervalMinutes}
+                      onChange={(event) => setListeningTrainer((current) => ({ ...current, intervalMinutes: Number(event.target.value) }))}
+                    >
+                      {LISTENING_TRAINER_INTERVALS.map((minutes) => <option value={minutes} key={minutes}>{minutes} listening minutes</option>)}
+                    </select>
+                  </label>
+                  <div className="range-row trainer-cap-row">
+                    <label htmlFor="trainer-cap">Speed cap</label>
+                    <span>{listeningTrainer.cap.toFixed(2)}x</span>
+                    <input
+                      id="trainer-cap"
+                      type="range"
+                      min="1"
+                      max="2"
+                      step="0.05"
+                      value={listeningTrainer.cap}
+                      onChange={(event) => setListeningTrainer((current) => ({ ...current, cap: Number(event.target.value) }))}
+                    />
+                  </div>
+                  <button type="button" className="heading-action" onClick={() => setListeningTrainer((current) => resetListeningTrainer(current))}>Reset trainer progress</button>
+                </div>
+              ) : null}
+            </div>
 
             <div className="chain-step">
               <span aria-hidden="true">4</span>

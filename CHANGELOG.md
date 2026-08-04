@@ -19,6 +19,7 @@
 - Added SRT/VTT re-voicing in the generated-output panel. Imported cues are synthesized with the selected local engine, placed on their absolute timeline with silence gaps and overlap mixing, padded or moderately compressed to fit, and clipped with visible warnings when a cue cannot fit; the aligned result exports as one selected audio file with sibling SRT/VTT downloads.
 - Added ASS caption export with Karaoke fill, Pop-on, and Outline presets. Generated and imported-caption results expose a persisted style picker; adjacent word cues become `\\k` karaoke tags, while sentence/cue-level timings remain valid ASS events in VLC/Aegisub.
 - Added a persisted Prosody panel for opt-in punctuation pauses plus reversible selection markup for per-span rate and pitch deltas. Defaults remain unchanged; direct generation and resumable queue chunks share the same dispatcher and post-processing path.
+- Added an opt-in listening speed trainer shared by generated, queue, library, and Reader playback. It persists per-profile progress, ramps +5% after the selected active-listening interval, clamps to a visible user cap, and exposes reset controls without changing synthesis speed.
 - Added an optional Windows-only Qwen3-TTS 0.6B CustomVoice engine through an isolated Python sidecar. The desktop UI can provision a private Python 3.12 environment, then lazily download `torch`, `qwen-tts`, and model weights into user data; sidecar setup, progress, cancellation, and crash recovery stay on the same bounded desktop bridge while web/PWA mode remains unchanged.
 - Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 - Added an opt-in loopback-only OpenAI-compatible desktop TTS server. `POST /v1/audio/speech` supports native Kokoro/Piper model and voice selection, WAV/MP3/Opus/FLAC output, bounded SSE base64 chunks, `/health` and `/v1/models`, an explicit port control, and a stop path that closes the listener.
@@ -79,6 +80,7 @@
 - Added App decomposition coverage for the public shell entrypoint, generation failure paths, URL cleanup, and queue/library hook state (457 tests across 79 files).
 - Added SRT/VTT parser, cue-fit, absolute-timeline, overlap-mix, missing-audio, ASS serializer, preset, and browser import smoke coverage (466 tests across 79 files).
 - Added punctuation-pause persistence, bounded prosody parsing, cleanup protection for prosody attributes, span-rate/pitch dispatcher coverage, queue routing, and browser smoke assertions (474 tests across 79 files).
+- Added listening-trainer schedule/cap/reset coverage, shared controller playback-rate coverage, and browser smoke assertions for the persisted playback ramp controls (478 tests across 80 files).
 
 ## v0.21.0 - 2026-07-29
 

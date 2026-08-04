@@ -3,6 +3,7 @@ import { PlaybackController } from './playback-controller.ts'
 
 class FakeAudio extends EventTarget {
   paused = true
+  playbackRate = 1
   currentTime = 0
   duration = 30
 
@@ -54,5 +55,20 @@ describe('shared playback controller', () => {
       currentTime: 0,
       duration: 0,
     })
+  })
+
+  it('applies a sanitized playback rate to current and future registrations', () => {
+    const controller = new PlaybackController()
+    const first = new FakeAudio()
+    controller.setPlaybackRate(1.25)
+    controller.register('first', first as unknown as HTMLAudioElement, 'First')
+    expect(first.playbackRate).toBe(1.25)
+
+    controller.setPlaybackRate(9)
+    expect(first.playbackRate).toBe(4)
+    expect(controller.getPlaybackRate()).toBe(4)
+    const second = new FakeAudio()
+    controller.register('second', second as unknown as HTMLAudioElement, 'Second')
+    expect(second.playbackRate).toBe(4)
   })
 })
