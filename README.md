@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-524%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-532%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -76,7 +76,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Sentence retakes** — select a sentence in a completed queue chunk, edit and regenerate up to four local A/B takes, then apply the chosen take with a cue-boundary crossfade; the original stays intact until commit
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT, VTT, and ASS subtitle import/export** with sentence-level timing, cue-by-cue timeline re-voicing, and karaoke/pop-on/outline styling presets, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
-- **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
+- **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, restore their last playback position, and support label/filename search, voice/engine/cue filters, created/duration/size sorting, storage-cap visibility, lazy audio loading, and missing-blob recovery
 - **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, optional line focus, and EPUB queue audio tracks
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
@@ -225,7 +225,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (524 tests across 90 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (532 tests across 91 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

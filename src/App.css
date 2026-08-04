@@ -1278,6 +1278,132 @@ ul.queue-chunk-list > li {
   grid-column: 3;
 }
 
+.library-heading {
+  align-items: start;
+}
+
+.library-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.library-filter-status {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.library-storage-card {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+}
+
+.library-storage-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--heading);
+  font-size: 12px;
+}
+
+.library-storage-heading span,
+.library-storage-card small {
+  color: var(--muted);
+}
+
+.library-storage-card small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.library-storage-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-strong) 72%, transparent);
+}
+
+.library-storage-bar span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.library-storage-card:has([aria-valuenow="100"]) .library-storage-bar span {
+  background: var(--warning);
+}
+
+.library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.7fr) repeat(4, minmax(112px, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.library-toolbar label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.library-toolbar input,
+.library-toolbar select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--control-bg);
+  color: var(--heading);
+  font: 500 12px/1 var(--sans);
+}
+
+.library-toolbar input:focus-visible,
+.library-toolbar select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+.library-missing {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.library-missing button {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.library-no-match button {
+  min-height: 34px;
+}
+
 .queue-chunk-list {
   grid-column: 1 / -1;
   display: grid;
@@ -3248,6 +3374,10 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .library-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .normalization-rule-list,
   .normalization-diff-columns {
     grid-template-columns: 1fr;
@@ -3390,6 +3520,20 @@ footer {
 
   .workspace-header .section-heading {
     margin-bottom: 2px;
+  }
+
+  .library-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .library-storage-heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .library-missing button {
+    margin-left: 0;
   }
 
   .settings-scroll,

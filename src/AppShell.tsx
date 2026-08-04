@@ -127,7 +127,7 @@ import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } f
 import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesizeQwen, QWEN_LANGUAGES, QWEN_MODEL_ID, QWEN_SPEAKERS, type QwenLanguage, type QwenSpeaker, type SidecarStatus } from './platform/qwen.ts'
 import { cancelRvcGeneration, chooseRvcIndex, chooseRvcModel, convertRvcAudio, getRvcRuntimeStatus, rvcAvailable, rvcWeightsAvailable, setupRvcRuntime, type RvcRuntimeStatus } from './platform/rvc.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
-import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
+import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, enforceLibraryCap, freeLibrarySpace, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import type { VoiceProvenance } from './lib/voice-lab.ts'
 import type { GenerationProvenanceManifest, ProvenanceCueTiming, ProvenanceReplayContext } from './lib/provenance.ts'
 import type { M4bCapability } from './lib/m4b.ts'
@@ -286,6 +286,10 @@ const EpubMappingPanel = lazy(async () => {
 const NormalizationPreview = lazy(async () => {
   const module = await import('./components/NormalizationPreview.tsx')
   return { default: module.NormalizationPreview }
+})
+const LibraryPanel = lazy(async () => {
+  const module = await import('./components/LibraryPanel.tsx')
+  return { default: module.LibraryPanel }
 })
 const SentenceRetakePanel = lazy(async () => {
   const module = await import('./components/SentenceRetakePanel.tsx')
@@ -1258,13 +1262,6 @@ function ResultRow({ result, selected, isSpeaking, assCaptionPreset, onSelect, o
   )
 }
 
-type LibraryClipRowProps = {
-  clip: ClipRecord
-  onDeleted: (snapshot: ClipSnapshot) => void
-  onNotice: (toast: Toast) => void
-  replayContext?: ProvenanceReplayContext
-}
-
 function cueDataUrl(cues?: Cue[]): string | undefined {
   if (!cues?.length) return undefined
   return `data:text/vtt;charset=utf-8,${encodeURIComponent(toVTT(cues))}`
@@ -1273,22 +1270,6 @@ function cueDataUrl(cues?: Cue[]): string | undefined {
 function assDataUrl(cues: Cue[] | undefined, title: string, preset: AssCaptionPresetId): string | undefined {
   if (!cues?.length) return undefined
   return `data:text/plain;charset=utf-8,${encodeURIComponent(toASS(cues, { preset, title }))}`
-}
-
-function provenanceReplayWarning(manifest: GenerationProvenanceManifest | null | undefined, current?: ProvenanceReplayContext): string | null {
-  const engine = manifest?.engine
-  const sourceHash = manifest?.source?.textHash
-  if (!manifest || manifest.legacy || !engine || engine.id === 'unknown' || !sourceHash) {
-    return 'Replay may differ: this clip has incomplete generation provenance from an older runtime.'
-  }
-  if (!current) return null
-  if (engine.id !== current.engineId) return `Replay may differ: this clip used ${engine.id}, but the current engine is ${current.engineId}.`
-  if (current.modelId && (engine.modelId !== current.modelId || engine.modelRevision !== current.modelRevision)) {
-    return 'Replay may differ: the selected model revision does not match this clip.'
-  }
-  return manifest.runtime?.label === current.runtimeLabel
-    ? null
-    : 'Replay may differ: the selected runtime does not match this clip.'
 }
 
 function updateProvenanceCueSummary(manifest: GenerationProvenanceManifest, cueCount: number, timing: ProvenanceCueTiming): GenerationProvenanceManifest {
@@ -1301,105 +1282,6 @@ function updateProvenanceCueSummary(manifest: GenerationProvenanceManifest, cueC
       timing: timing === 'word' || timing === 'sentence' ? timing : 'none',
     },
   }
-}
-
-function LibraryClipRow({ clip, onDeleted, onNotice, replayContext }: LibraryClipRowProps) {
-  const [url, setUrl] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'load' | 'download' | 'delete' | null>(null)
-  const vttUrl = useMemo(() => cueDataUrl(clip.cues), [clip.cues])
-  const replayWarning = provenanceReplayWarning(clip.generationProvenance, replayContext)
-
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url)
-    }
-  }, [url])
-
-  const loadPlayer = async () => {
-    if (url) return
-    setBusy('load')
-    try {
-      const blob = await getClipBlob(clip.id)
-      if (!blob) {
-        onNotice({ tone: 'warn', message: 'Saved audio is missing for this clip.' })
-        return
-      }
-      setUrl(URL.createObjectURL(blob))
-    } catch {
-      onNotice({ tone: 'error', message: 'Could not load saved audio.' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const downloadClip = async () => {
-    setBusy('download')
-    try {
-      const blob = await getClipBlob(clip.id)
-      if (!blob) {
-        onNotice({ tone: 'warn', message: 'Saved audio is missing for this clip.' })
-        return
-      }
-      const downloadUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = clip.filename
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
-    } catch {
-      onNotice({ tone: 'error', message: 'Could not download saved audio.' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const removeClip = async () => {
-    setBusy('delete')
-    try {
-      const snapshot = await deleteClipWithSnapshot(clip.id)
-      if (!snapshot) throw new Error('Saved audio is missing for this clip.')
-      if (url) URL.revokeObjectURL(url)
-      onDeleted(snapshot)
-    } catch (error) {
-      onNotice({ tone: 'error', message: error instanceof Error ? error.message : 'Could not remove this saved clip.' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <div className="result-row library-row">
-      <div className="result-meta">
-        <span className="ready-dot" aria-hidden="true" />
-        <strong>{clip.label}</strong>
-        <span>{clip.duration}</span>
-        <span>{formatBytes(clip.size)}</span>
-        {clip.cues?.length ? <span>{clip.cues.length} cues</span> : <span>time resume</span>}
-      </div>
-      {replayWarning ? (
-        <div className="capability-strip warn" role="status">
-          <Info size={15} aria-hidden="true" />
-          <span>{replayWarning}</span>
-        </div>
-      ) : null}
-      {url ? (
-        <PlaybackAudio playbackKey={`clip:${clip.id}`} src={url} label={clip.filename} cues={clip.cues} vttUrl={vttUrl} />
-      ) : null}
-      <div className="result-actions">
-        <button type="button" onClick={loadPlayer} disabled={busy !== null || url !== null}>
-          {busy === 'load' ? <Loader2 size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-          {url ? 'Loaded' : 'Play'}
-        </button>
-        <button type="button" onClick={downloadClip} disabled={busy !== null}>
-          {busy === 'download' ? <Loader2 size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
-          Download
-        </button>
-        <button type="button" onClick={removeClip} disabled={busy !== null} aria-label={`Remove ${clip.label}`}>
-          {busy === 'delete' ? <Loader2 size={16} aria-hidden="true" /> : <Trash2 size={16} aria-hidden="true" />}
-        </button>
-      </div>
-    </div>
-  )
 }
 
 type QueueChunkPlayerProps = {
@@ -4241,6 +4123,7 @@ function App() {
         filename,
         label: result.label,
         voice: job.voice,
+        engine,
         speed,
         createdAt: Date.now(),
         size: blob.size,
@@ -5747,6 +5630,22 @@ function App() {
     }
   }
 
+  function handleLibraryClipDeleted(snapshot: ClipSnapshot) {
+    setLibrary((prev) => prev.filter((item) => item.id !== snapshot.record.id))
+    showToast({
+      tone: 'ok',
+      message: `Removed ${shortUiLabel(snapshot.record.label, 48)} from the library.`,
+      action: {
+        label: 'Undo',
+        run: async () => {
+          await restoreClipSnapshots([snapshot])
+          setLibrary((prev) => [snapshot.record, ...prev.filter((item) => item.id !== snapshot.record.id)].sort((a, b) => b.createdAt - a.createdAt))
+          showToast({ tone: 'ok', message: `Restored ${shortUiLabel(snapshot.record.label, 48)}.` })
+        },
+      },
+    })
+  }
+
   async function clearSavedLibrary() {
     try {
       const snapshots = await clearLibraryWithSnapshot()
@@ -6860,57 +6759,17 @@ function App() {
               </section>
             )}
 
-            {library.length > 0 ? (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-labelledby="library-panel-tab library-heading" tabIndex={-1}>
-                <div className="section-heading">
-                  <h3 id="library-heading">Clip library ({library.length})</h3>
-                  <button
-                    type="button"
-                    className="heading-action"
-                    onClick={clearSavedLibrary}
-                  >
-                    Clear library
-                  </button>
-                </div>
-                <ul className="result-list" aria-label="Saved clips">
-                  {visibleLibrary.map((clip) => (
-                    <li key={clip.id}>
-                      <LibraryClipRow
-                        clip={clip}
-                        onDeleted={(snapshot) => {
-                          setLibrary((prev) => prev.filter((item) => item.id !== snapshot.record.id))
-                          showToast({
-                            tone: 'ok',
-                            message: `Removed ${shortUiLabel(snapshot.record.label, 48)} from the library.`,
-                            action: {
-                              label: 'Undo',
-                              run: async () => {
-                                await restoreClipSnapshots([snapshot])
-                                setLibrary((prev) => [snapshot.record, ...prev.filter((item) => item.id !== snapshot.record.id)].sort((a, b) => b.createdAt - a.createdAt))
-                                showToast({ tone: 'ok', message: `Restored ${shortUiLabel(snapshot.record.label, 48)}.` })
-                              },
-                            },
-                          })
-                        }}
-                        onNotice={showToast}
-                        replayContext={currentReplayContext}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : (
-              <section className={`output-panel library-panel workspace-panel ${activeWorkspaceHash === 'library-panel' ? 'active' : ''}`} id="library-panel" role="tabpanel" aria-labelledby="library-panel-tab library-heading" tabIndex={-1}>
-                <div className="section-heading">
-                  <h3 id="library-heading">Clip library (0)</h3>
-                </div>
-                <div className="compact-empty">
-                  <Download size={28} aria-hidden="true" />
-                  <strong>No saved clips</strong>
-                  <span>Generated clips saved on this device appear here with playback and export controls.</span>
-                </div>
-              </section>
-            )}
+            <Suspense fallback={<section className="output-panel library-panel workspace-panel active" id="library-panel" role="tabpanel" aria-label="Clip library" tabIndex={-1}>Loading clip library…</section>}>
+              <LibraryPanel
+                active={activeWorkspaceHash === 'library-panel'}
+                library={library}
+                onClear={clearSavedLibrary}
+                onClipDeleted={handleLibraryClipDeleted}
+                onNotice={showToast}
+                replayContext={currentReplayContext}
+                playbackAudio={PlaybackAudio}
+              />
+            </Suspense>
               </div>
             </div>
           </div>

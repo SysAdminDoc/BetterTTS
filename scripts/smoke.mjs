@@ -248,18 +248,47 @@ async function seedCompletedQueueJob(page, id) {
       req.onerror = () => reject(req.error)
     })
     const libraryTx = libraryDb.transaction(['clips', 'blobs'], 'readwrite')
-    libraryTx.objectStore('clips').put({
-      id: 'smoke-library',
-      filename: 'smoke-library.wav',
-      label: 'Smoke library clip',
-      voice: 'af_heart',
-      speed: 1,
-      createdAt: Date.now(),
-      size: 48044,
-      duration: '3.0s',
-      cues: cueSet,
-    })
-    libraryTx.objectStore('blobs').put(makeWavBlob(), 'smoke-library')
+    const libraryCreatedAt = Date.now()
+    const libraryClips = [
+      {
+        id: 'smoke-library',
+        filename: 'smoke-library.wav',
+        label: 'Smoke library clip',
+        voice: 'af_heart',
+        engine: 'kokoro',
+        speed: 1,
+        createdAt: libraryCreatedAt,
+        size: 48044,
+        duration: '3.0s',
+        cues: cueSet,
+      },
+      {
+        id: 'smoke-library-older',
+        filename: 'older-chapter.wav',
+        label: 'Older chapter',
+        voice: 'M1',
+        engine: 'supertonic',
+        speed: 1,
+        createdAt: libraryCreatedAt - 2000,
+        size: 32000,
+        duration: '1m 15s',
+      },
+      {
+        id: 'smoke-library-uncued',
+        filename: 'uncued-note.wav',
+        label: 'Uncued note',
+        voice: 'af_bella',
+        engine: 'piper',
+        speed: 1,
+        createdAt: libraryCreatedAt - 1000,
+        size: 64000,
+        duration: '5.0s',
+      },
+    ]
+    for (const clip of libraryClips) {
+      libraryTx.objectStore('clips').put(clip)
+      libraryTx.objectStore('blobs').put(makeWavBlob(), clip.id)
+    }
     await new Promise((resolve, reject) => {
       libraryTx.oncomplete = resolve
       libraryTx.onerror = () => reject(libraryTx.error)
@@ -1052,16 +1081,33 @@ async function runSmoke() {
 
     console.log('Checking library playback controls...')
     await desktop.page.getByRole('tab', { name: /Library/ }).click()
-    const libraryPanel = desktop.page.getByLabel('Clip library')
+    const libraryPanel = desktop.page.getByRole('tabpanel', { name: /Clip library/ })
     await libraryPanel.scrollIntoViewIfNeeded()
     await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'library-dark.png'), fullPage: false })
+    const librarySearch = libraryPanel.getByLabel('Search saved clips')
+    await librarySearch.focus()
+    await librarySearch.fill('Smoke')
+    await libraryPanel.getByText('1 of 3 clips shown').waitFor({ timeout: 20000 })
+    await libraryPanel.getByLabel('Sort saved clips').selectOption('size-asc')
+    await librarySearch.fill('')
+    await libraryPanel.getByLabel('Filter saved clips by voice').selectOption('M1')
+    await libraryPanel.getByText('Older chapter').waitFor({ timeout: 20000 })
+    await libraryPanel.getByLabel('Filter saved clips by engine').selectOption('supertonic')
+    await libraryPanel.getByLabel('Filter saved clips by cue state').selectOption('without-cues')
+    await libraryPanel.getByText('1 of 3 clips shown').waitFor({ timeout: 20000 })
+    await libraryPanel.getByLabel('Filter saved clips by voice').selectOption('all')
+    await libraryPanel.getByLabel('Filter saved clips by engine').selectOption('all')
+    await libraryPanel.getByLabel('Filter saved clips by cue state').selectOption('all')
+    await librarySearch.fill('Smoke')
     await libraryPanel.getByRole('button', { name: 'Play' }).click()
     await libraryPanel.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByText(/Resumed at/).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Remove Smoke library clip' }).click()
-    await libraryPanel.getByText('No saved clips').waitFor({ timeout: 20000 })
+    await libraryPanel.getByText('No clips match these filters').waitFor({ timeout: 20000 })
+    await libraryPanel.getByRole('button', { name: 'Clear filters' }).click()
+    await libraryPanel.getByText('Older chapter').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
     await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Clear library' }).click()

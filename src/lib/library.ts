@@ -9,6 +9,7 @@ export type ClipRecord = {
   filename: string
   label: string
   voice: string
+  engine?: string
   speed: number
   createdAt: number
   size: number
@@ -68,11 +69,15 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     : undefined
   const rvc = migrateRvcProvenance(record.rvc)
   const generationProvenance = migrateGenerationProvenance(record.generationProvenance)
+  const engine = typeof record.engine === 'string' && record.engine.length > 0 && record.engine.length <= 100
+    ? record.engine
+    : undefined
   return {
     id: record.id,
     filename: record.filename,
     label: record.label,
     voice: record.voice,
+    ...(engine ? { engine } : {}),
     speed: Math.max(0.5, Math.min(2, Number(record.speed))),
     createdAt: Number(record.createdAt),
     size: Number(record.size),
