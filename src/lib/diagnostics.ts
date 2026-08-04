@@ -4,10 +4,13 @@ import { readModelCacheStatus, type ModelCacheSummary } from './model-cache.ts'
 import { getPersistenceOutcome, type PersistenceOutcome } from './persistence.ts'
 import { piperPlusRuntimeSupport, type PiperPlusRuntimeSupport } from './piper-plus.ts'
 import {
+  denylistWebGpuAdapter,
   detectCrossOriginStorage,
+  probeWebGpuCapability,
   transformersUpgradeReadiness,
   type CrossOriginStorageStatus,
   type TransformersUpgradeReadiness,
+  type WebGpuAdapterInfo,
 } from './runtime-readiness.ts'
 
 export type DiagnosticLevel = 'warn' | 'error'
@@ -33,6 +36,15 @@ export type DiagnosticsSelection = {
   modelRoutes: Record<string, string>
 }
 
+export type GenerationDiagnostics = {
+  engine: string
+  runtime: string
+  elapsedMs: number
+  timeToFirstAudioMs: number | null
+  audioDurationSeconds: number
+  chars: number
+}
+
 export type StorageDiagnostics = {
   supported: boolean
   persisted?: boolean
@@ -45,13 +57,17 @@ export type StorageDiagnostics = {
 export type WebGpuDiagnostics = {
   supported: boolean
   adapterAvailable: boolean
+  usable: boolean
+  denylisted: boolean
   status: string
-  adapterInfo?: Record<string, string | number | boolean | null>
+  adapterInfo?: WebGpuAdapterInfo
+  adapterKey?: string
+  denylistReason?: string
   error?: string
 }
 
 export type DiagnosticsBundle = {
-  schemaVersion: 1
+  schemaVersion: 2
   generatedAt: string
   app: {
     name: 'BetterTTS'
@@ -69,6 +85,7 @@ export type DiagnosticsBundle = {
     deviceMemoryGb: number | null
   }
   selection: DiagnosticsSelection
+  generation: GenerationDiagnostics | null
   capabilities: {
     webGpu: WebGpuDiagnostics
     webCodecs: {
@@ -121,6 +138,12 @@ export type DiagnosticsProbes = {
   recentEvents?: () => DiagnosticEvent[]
 }
 
+export type WebGpuBadAudioReport = {
+  recorded: boolean
+  capability: WebGpuDiagnostics
+  message: string
+}
+
 const MAX_EVENTS = 20
 const recentEvents: DiagnosticEvent[] = []
 let captureInstalled = false
@@ -167,6 +190,7 @@ export async function collectDiagnostics(
   input: {
     appVersion: string
     selection: DiagnosticsSelection
+    generation?: GenerationDiagnostics
   },
   probes: DiagnosticsProbes = {},
 ): Promise<DiagnosticsBundle> {
@@ -179,6 +203,8 @@ export async function collectDiagnostics(
     readSafely(probes.webGpu ?? readWebGpuDiagnostics, {
       supported: false,
       adapterAvailable: false,
+      usable: false,
+      denylisted: false,
       status: 'WebGPU probe failed',
     }),
     readSafely(probes.storage ?? readStorageDiagnostics, { supported: false }),
@@ -225,7 +251,7 @@ export async function collectDiagnostics(
   } satisfies PiperPlusRuntimeSupport)
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: now.toISOString(),
     app: {
       name: 'BetterTTS',
@@ -243,6 +269,7 @@ export async function collectDiagnostics(
       deviceMemoryGb: navigatorLike?.deviceMemory ?? null,
     },
     selection: input.selection,
+    generation: input.generation ?? null,
     capabilities: {
       webGpu,
       webCodecs: {
@@ -293,28 +320,38 @@ export async function readStorageDiagnostics(): Promise<StorageDiagnostics> {
 }
 
 export async function readWebGpuDiagnostics(): Promise<WebGpuDiagnostics> {
-  if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
-    return { supported: false, adapterAvailable: false, status: 'navigator.gpu unavailable' }
+  const result = await probeWebGpuCapability()
+  return {
+    supported: result.supported,
+    adapterAvailable: result.adapterAvailable,
+    usable: result.usable,
+    denylisted: result.denylisted,
+    status: result.status,
+    adapterInfo: result.adapterInfo,
+    adapterKey: result.adapterKey,
+    denylistReason: result.denylistReason,
+    error: result.error ? sanitizeDiagnosticText(result.error) : undefined,
+  }
+}
+
+export async function reportWebGpuBadAudio(
+  reason = 'User reported corrupted or unusable WebGPU audio.',
+): Promise<WebGpuBadAudioReport> {
+  const before = await readWebGpuDiagnostics()
+  if (!before.adapterAvailable || !before.adapterKey) {
+    const message = 'No identifiable WebGPU adapter is available to report in this session.'
+    recordDiagnosticEvent('warn', message, 'webgpu.bad-audio')
+    return { recorded: false, capability: before, message }
   }
 
-  try {
-    const gpu = navigator.gpu as { requestAdapter(): Promise<unknown | null> }
-    const adapter = await gpu.requestAdapter()
-    if (!adapter) return { supported: true, adapterAvailable: false, status: 'no adapter available' }
-    return {
-      supported: true,
-      adapterAvailable: true,
-      status: 'adapter available',
-      adapterInfo: readAdapterInfo(adapter),
-    }
-  } catch (err) {
-    return {
-      supported: true,
-      adapterAvailable: false,
-      status: 'adapter probe failed',
-      error: sanitizeDiagnosticText(err),
-    }
-  }
+  const recorded = denylistWebGpuAdapter(before.adapterKey, before.adapterInfo, reason)
+  const capability = await readWebGpuDiagnostics()
+  const adapterLabel = formatAdapterInfo(before.adapterInfo) || before.adapterKey
+  const message = recorded
+    ? `WebGPU audio issue recorded for ${adapterLabel}. Kokoro will use WASM q8 on this adapter until the report is cleared.`
+    : 'Could not store the WebGPU adapter report; WASM fallback remains available for this session.'
+  recordDiagnosticEvent(recorded ? 'warn' : 'error', `${message} ${reason}`, 'webgpu.bad-audio')
+  return { recorded, capability, message }
 }
 
 export function sanitizeDiagnosticText(value: unknown): string {
@@ -363,11 +400,10 @@ function readSyncSafely<T extends object>(reader: () => T, fallback: T): T & { e
   }
 }
 
-function readAdapterInfo(adapter: unknown): Record<string, string | number | boolean | null> | undefined {
-  const info = (adapter as { info?: unknown }).info
-  if (!info || typeof info !== 'object') return undefined
-  const entries = Object.entries(info as Record<string, unknown>)
-    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value) || value == null)
-    .map(([key, value]) => [key, value as string | number | boolean | null])
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+function formatAdapterInfo(info: WebGpuAdapterInfo | undefined): string {
+  if (!info) return ''
+  return Object.entries(info)
+    .filter(([, value]) => value != null && String(value).trim().length > 0)
+    .map(([key, value]) => `${key}=${String(value).slice(0, 120)}`)
+    .join(', ')
 }

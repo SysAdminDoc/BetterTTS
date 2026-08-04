@@ -33,7 +33,10 @@ import {
   collectDiagnostics,
   installGlobalDiagnosticsCapture,
   recordDiagnosticEvent,
+  readWebGpuDiagnostics,
+  reportWebGpuBadAudio,
   type DiagnosticsSelection,
+  type WebGpuDiagnostics,
 } from './lib/diagnostics.ts'
 import {
   EXPERIMENTAL_CHATTERBOX_STORAGE_KEY,
@@ -119,6 +122,7 @@ import {
 } from './lib/model-cache.ts'
 import {
   TRANSFORMERS_RUNTIME_VERSION,
+  clearWebGpuAdapterDenylist,
   detectCrossOriginStorage,
   transformersUpgradeReadiness,
 } from './lib/runtime-readiness.ts'
@@ -220,6 +224,10 @@ const SentenceRetakePanel = lazy(async () => {
 const KokoroWebGpuDtypeControl = lazy(async () => {
   const module = await import('./components/KokoroWebGpuDtypeControl.tsx')
   return { default: module.KokoroWebGpuDtypeControl }
+})
+const WebGpuDiagnosticsPanel = lazy(async () => {
+  const module = await import('./components/WebGpuDiagnosticsPanel.tsx')
+  return { default: module.WebGpuDiagnosticsPanel }
 })
 
 type Engine = EngineId
@@ -1406,7 +1414,7 @@ function App() {
   )
   const [modelCache, setModelCache] = useState<ModelCacheSummary | null>(null)
   const [cacheAction, setCacheAction] = useState<string | null>(null)
-  const [diagnosticsAction, setDiagnosticsAction] = useState<'copy' | 'download' | null>(null)
+  const [diagnosticsAction, setDiagnosticsAction] = useState<'copy' | 'download' | 'report-webgpu' | 'clear-webgpu' | null>(null)
   const [backupAction, setBackupAction] = useState<'download' | 'inspect' | 'restore' | null>(null)
   const [projectAction, setProjectAction] = useState<'open' | 'save' | 'save-as' | 'autosave' | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
@@ -1425,7 +1433,7 @@ function App() {
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
-  const [genStats, setGenStats] = useState<{ elapsed: number; chars: number; audioDuration: number } | null>(null)
+  const [genStats, setGenStats] = useState<{ elapsed: number; chars: number; audioDuration: number; timeToFirstAudioMs: number | null } | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showSystemTools, setShowSystemTools] = useState(false)
   const [showPronunciations, setShowPronunciations] = useState(false)
@@ -1459,6 +1467,7 @@ function App() {
   const [zipExportingJobId, setZipExportingJobId] = useState<string | null>(null)
   const [epubExportingJobId, setEpubExportingJobId] = useState<string | null>(null)
   const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
+  const [webGpuDiagnostics, setWebGpuDiagnostics] = useState<WebGpuDiagnostics | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
   const persistenceWarnedRef = useRef(false)
@@ -2079,6 +2088,20 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
+    readWebGpuDiagnostics()
+      .then((capability) => {
+        if (!cancelled) setWebGpuDiagnostics(capability)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) recordDiagnosticEvent('warn', error, 'webgpu.diagnostics')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
     checkM4bCapability()
       .then((capability) => {
         if (!cancelled) setM4bCapability(capability)
@@ -2269,8 +2292,63 @@ function App() {
     const diagnostics = await collectDiagnostics({
       appVersion: APP_VERSION,
       selection: buildDiagnosticsSelection(),
+      generation: genStats
+        ? {
+          engine,
+          runtime: runtimeLabel,
+          elapsedMs: Math.round(genStats.elapsed * 1000),
+          timeToFirstAudioMs: genStats.timeToFirstAudioMs == null ? null : Math.round(genStats.timeToFirstAudioMs),
+          audioDurationSeconds: genStats.audioDuration,
+          chars: genStats.chars,
+        }
+        : undefined,
     })
     return JSON.stringify(diagnostics, null, 2)
+  }
+
+  async function handleReportWebGpuBadAudio() {
+    if (diagnosticsAction) return
+    setDiagnosticsAction('report-webgpu')
+    try {
+      const report = await reportWebGpuBadAudio()
+      setWebGpuDiagnostics(report.capability)
+      if (report.recorded) {
+        resetKokoroSession()
+        resetTimestampedKokoroSession()
+        resetWorker()
+        if (!forceNative) setRuntimeLabel('WebAssembly q8')
+        showToast({ tone: 'warn', message: report.message })
+      } else {
+        showToast({ tone: 'warn', message: report.message })
+      }
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'webgpu.bad-audio')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not record the WebGPU audio report.' })
+    } finally {
+      setDiagnosticsAction(null)
+    }
+  }
+
+  async function handleClearWebGpuAdapterReport() {
+    if (diagnosticsAction) return
+    setDiagnosticsAction('clear-webgpu')
+    try {
+      clearWebGpuAdapterDenylist(webGpuDiagnostics?.adapterKey)
+      resetKokoroSession()
+      resetTimestampedKokoroSession()
+      resetWorker()
+      const capability = await readWebGpuDiagnostics()
+      setWebGpuDiagnostics(capability)
+      if (forceNative) setRuntimeLabel('Sherpa-ONNX CPU')
+      else if (forceWasm) setRuntimeLabel('WebAssembly q8')
+      else setRuntimeLabel(capability.usable ? `WebGPU ${getKokoroWebGpuDtype()}` : 'WebAssembly q8')
+      showToast({ tone: 'ok', message: 'WebGPU adapter report cleared. Retry generation to probe the adapter again.' })
+    } catch (error) {
+      recordDiagnosticEvent('error', error, 'webgpu.clear-report')
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not clear the WebGPU adapter report.' })
+    } finally {
+      setDiagnosticsAction(null)
+    }
   }
 
   async function handleCopyDiagnostics() {
@@ -3259,6 +3337,7 @@ function App() {
   }
 
   async function runSynthesis(jobs: SynthJob[], opts: { zipPrefix: string; successMessage?: string }) {
+    const requestStart = performance.now()
     const rvcPlan = resolveRvcInferencePlan(rvcSettings, rvcModels, rvcConsent)
     if (rvcPlan) {
       if (!engineSupportsPostStage(engine, 'rvc')) throw new Error('RVC post-processing requires an exported audio engine, not Browser playback.')
@@ -3319,6 +3398,7 @@ function App() {
 
     setStatus('Generating local audio')
     const genStart = performance.now()
+    let timeToFirstAudioMs: number | null = null
     let totalSamples = 0
     const outputSampleRate = engine === 'supertonic'
       ? SUPERTONIC_SAMPLE_RATE
@@ -3404,6 +3484,9 @@ function App() {
           )
           if (audio) {
             if (audio.sampleRate !== outputSampleRate) throw new Error('Generated chunks used mixed sample rates.')
+            if (timeToFirstAudioMs === null && audio.samples.length > 0) {
+              timeToFirstAudioMs = performance.now() - requestStart
+            }
             const completeness = checkSynthesisCompleteness(sentence, audio.samples.length / outputSampleRate, speed)
             if (completeness.suspect) {
               flaggedSentences += 1
@@ -3593,7 +3676,7 @@ function App() {
     refreshStorageEstimate()
     const elapsed = (performance.now() - genStart) / 1000
     const audioDuration = totalSamples / outputSampleRate
-    setGenStats({ elapsed, chars: totalChars, audioDuration })
+    setGenStats({ elapsed, chars: totalChars, audioDuration, timeToFirstAudioMs })
     if (abortRef.current) {
       setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
       showToast({ tone: 'warn', message: 'Generation cancelled.' })
@@ -6529,11 +6612,20 @@ function App() {
                 ) : null}
                 <div className="diagnostics-panel" aria-label="Diagnostics export">
                 <div className="cache-manager-head">
-                  <span>
-                    <strong>Diagnostics</strong>
-                    <small>Local support bundle. No script text or imported URLs.</small>
-                  </span>
+                 <span>
+                   <strong>Diagnostics</strong>
+                   <small>Local support bundle. No script text or imported URLs.</small>
+                 </span>
                 </div>
+                <Suspense fallback={null}>
+                  <WebGpuDiagnosticsPanel
+                    capability={webGpuDiagnostics}
+                    action={diagnosticsAction === 'report-webgpu' ? 'report' : diagnosticsAction === 'clear-webgpu' ? 'clear' : null}
+                    disabled={isGenerating}
+                    onReport={handleReportWebGpuBadAudio}
+                    onClear={handleClearWebGpuAdapterReport}
+                  />
+                </Suspense>
                 <dl className="diagnostics-facts">
                   <div><dt>Runtime</dt><dd title={runtimeLabel}>{runtimeLabel}</dd></div>
                   <div><dt>Opus export</dt><dd>{opusSupported() ? 'Available' : 'Unavailable'}</dd></div>
@@ -6541,6 +6633,7 @@ function App() {
                   <div><dt>M4B export</dt><dd>{m4bExportReady ? (ffmpegStatus?.available ? 'Native chapters ready' : 'WebCodecs AAC ready') : 'ZIP fallback'}</dd></div>
                   <div><dt>Storage</dt><dd title={storageEstimate ?? 'Unknown'}>{storageEstimate ?? 'Unknown'}</dd></div>
                   <div><dt>Settings persistence</dt><dd title={persistenceOutcome.reason ?? 'Verified localStorage writes'}>{persistenceOutcome.state === 'durable' ? 'Durable' : persistenceOutcome.state === 'degraded' ? 'Session only' : 'Unavailable'}</dd></div>
+                  <div><dt>First audio</dt><dd>{genStats?.timeToFirstAudioMs != null ? `${Math.round(genStats.timeToFirstAudioMs)} ms` : 'Not measured'}</dd></div>
                   <div><dt>Storage mode</dt><dd title={crossOriginStorage.message}>{crossOriginStorageShortLabel(crossOriginStorage.usable)}</dd></div>
                   <div>
                     <dt>Transformers</dt>
@@ -7430,6 +7523,7 @@ function App() {
               {genStats && !isGenerating ? (
                 <div className="gen-stats">
                   <span>{genStats.elapsed.toFixed(1)}s elapsed</span>
+                  <span>{genStats.timeToFirstAudioMs != null ? `${(genStats.timeToFirstAudioMs / 1000).toFixed(1)}s first audio` : 'first audio —'}</span>
                   <span>{Math.round(genStats.chars / genStats.elapsed)} chars/s</span>
                   <span>{genStats.audioDuration.toFixed(1)}s audio</span>
                   <span>{(genStats.audioDuration / genStats.elapsed).toFixed(1)}x realtime</span>

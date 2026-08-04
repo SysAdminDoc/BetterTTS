@@ -137,6 +137,20 @@ describe('checkM4bCapability', () => {
     })
   })
 
+  it('recognizes Safari/WebKit AAC when the codec probe passes', async () => {
+    const capability = await checkM4bCapability({
+      audioData: {},
+      audioContext: {},
+      audioEncoder: {
+        isConfigSupported: async (config: AudioEncoderConfig) => ({ supported: config.sampleRate === 48000 }),
+      },
+      navigator: { platform: 'MacIntel', userAgent: 'Mozilla/5.0 Version/26.0 Safari/605.1.15' },
+    })
+
+    expect(capability).toMatchObject({ supported: true, sampleRate: 48000 })
+    expect(capability.message).toContain('Safari/WebKit')
+  })
+
   it('explains missing WebCodecs with a Firefox-specific ZIP fallback', async () => {
     const capability = await checkM4bCapability({
       audioContext: {},

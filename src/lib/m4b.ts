@@ -126,7 +126,7 @@ export async function checkM4bCapability(env = readM4bEnvironment()): Promise<M4
         supported: true,
         codec: AAC_CODEC,
         sampleRate,
-        message: `M4B AAC export available (${sampleRate} Hz AAC-LC).`,
+        message: m4bAvailableMessage(env.navigator, sampleRate),
       }
     }
     return {
@@ -304,6 +304,14 @@ function m4bFallbackMessage(navigatorLike: M4bCapabilityEnvironment['navigator']
     return `${reason} Safari/WebKit support varies by version. ${fallback}`
   }
   return `${reason} ${fallback}`
+}
+
+function m4bAvailableMessage(navigatorLike: M4bCapabilityEnvironment['navigator'], sampleRate: number): string {
+  const userAgent = navigatorLike?.userAgent?.toLowerCase() ?? ''
+  const isSafariWebKit = userAgent.includes('safari') && !userAgent.includes('chrome') && !userAgent.includes('chromium')
+  return isSafariWebKit
+    ? `M4B AAC export available (${sampleRate} Hz AAC-LC via Safari/WebKit).`
+    : `M4B AAC export available (${sampleRate} Hz AAC-LC).`
 }
 
 async function encodeAacChapters(

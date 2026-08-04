@@ -29,6 +29,7 @@
 - Added a staged EPUB chapter-mapping review before queueing. Users can rename, split, merge, reorder, or exclude chapters, assign supported per-chapter voices, and configure weighted Kokoro blends; the persisted mapping flows through resumable synthesis, ZIP manifests, M4B chapters, and EPUB media-overlay exports. The lazy review surface keeps the initial shell within its performance budget, and “Queue with defaults” preserves the one-click import path.
 - Added sentence-level retakes for completed queue chunks. Users can edit a selected sentence, generate up to four local A/B takes, audition them beside the original, and atomically apply one with resampling and cue-boundary crossfades; failed or cancelled splices leave the original blob untouched.
 - Re-benchmarked Kokoro fp16 on the Transformers.js 4.2.0 WebGPU path. Chrome 151 on an NVIDIA Lovelace adapter produced clean RIFF/WAV output in both fp32 and fp16; fp32 remains the default while a persisted fp16 opt-in resets the active session and falls back to WASM q8 on load failure. Firefox 137 has no `navigator.gpu` on this host, Firefox 141 is unavailable, and Safari 26 is unavailable on Windows. Blob-backed waveform decoding is now covered by the CSP connect policy.
+- Refreshed WebGPU capability detection for current Chromium, Firefox, and WebKit implementations: adapter identity is captured through the modern/legacy info surfaces, a bounded local denylist can force WASM q8 after a user-reported bad-audio artifact, and the diagnostics bundle records the denylist state plus the last generation's time to first audio. M4B preflight now labels successful Safari/WebKit AAC probes explicitly.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -60,8 +61,9 @@
 - Added Reader document-coordinate, sentence/word cue-binding, resume-persistence, queue source-identity, and browser smoke coverage for EPUB launch, chapter navigation, paragraph interaction, and line focus (419 tests across 71 files).
 - Added EPUB3 Media Overlay package tests, legacy cue fallback coverage, queue source-kind migration coverage, and smoke/EPUBCheck validation of the downloaded package.
 - Added immutable EPUB mapping tests for chapter edits and per-chapter blend editing, bounded queue blend migration coverage, and browser smoke assertions for the staged review, split action, voice controls, and defaults-preserving queue path (424 tests across 72 files).
-- Added sentence-retake splice/resampling/text-replacement unit coverage and smoke assertions for completed-queue sentence selection and edited-text controls (432 tests across 74 files after the Kokoro dtype coverage).
+- Added sentence-retake splice/resampling/text-replacement unit coverage and smoke assertions for completed-queue sentence selection and edited-text controls (436 tests across 75 files after the Kokoro dtype and WebGPU capability coverage).
 - Added Kokoro WebGPU dtype parser/worker request coverage, persisted fp16 smoke checks, and the cross-browser fp32/fp16 benchmark matrix.
+- Added cross-browser WebGPU adapter probing, optional adapter denylisting/report recovery, Safari/WebKit AAC preflight, diagnostics generation timing, and first-audio UI smoke coverage.
 - Added FFmpeg cleanup filter contract coverage, native denoise/Studio/loudness probes, cleanup UI smoke assertions, and the packaged output before/after audit path.
 - Added MeloTTS model-pack validation, IPC/queue migration coverage, a real native Chinese + English host probe, packaged UI assertions for Melo and the new Kokoro languages, and headless real-engine synthesis checks for Japanese and Mandarin.
 

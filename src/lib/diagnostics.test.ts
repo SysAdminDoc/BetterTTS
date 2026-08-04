@@ -53,6 +53,14 @@ describe('collectDiagnostics', () => {
           kokoroRemote: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/',
         },
       },
+      generation: {
+        engine: 'kokoro',
+        runtime: 'WebAssembly q8',
+        elapsedMs: 2400,
+        timeToFirstAudioMs: 810,
+        audioDurationSeconds: 3.2,
+        chars: 120,
+      },
     }, {
       now: () => new Date('2026-07-09T00:00:00.000Z'),
       location: { href: 'https://example.test/BetterTTS/?url=https%3A%2F%2Farticle.example%2Fprivate&text=Shared%20article#clip' },
@@ -65,7 +73,7 @@ describe('collectDiagnostics', () => {
         hardwareConcurrency: 8,
         deviceMemory: 16,
       },
-      webGpu: async () => ({ supported: true, adapterAvailable: false, status: 'no adapter available' }),
+      webGpu: async () => ({ supported: true, adapterAvailable: false, usable: false, denylisted: false, status: 'no adapter available' }),
       storage: async () => ({ supported: true, persisted: true, usageBytes: 10, quotaBytes: 100, usagePct: 10 }),
       cache: async () => ({ supported: true, engines: [], totalBytes: 0, unknownSizeCount: 0 }),
       m4b: async () => ({ supported: false, reason: 'aac-unsupported', message: 'AAC missing' }),
@@ -99,10 +107,12 @@ describe('collectDiagnostics', () => {
     })
 
     expect(bundle.generatedAt).toBe('2026-07-09T00:00:00.000Z')
+    expect(bundle.schemaVersion).toBe(2)
     expect(bundle.app.version).toBe('0.22.0')
     expect(bundle.app.location).toBe('https://example.test/BetterTTS/')
     expect(bundle.browser).toMatchObject({ userAgent: 'UnitTest', hardwareConcurrency: 8, deviceMemoryGb: 16 })
     expect(bundle.capabilities.webGpu.status).toBe('no adapter available')
+    expect(bundle.generation?.timeToFirstAudioMs).toBe(810)
     expect(bundle.capabilities.webCodecs.opus).toBe(true)
     expect(bundle.capabilities.webCodecs.aacM4b.supported).toBe(false)
     expect(bundle.capabilities.crossOriginStorage.defaultBehavior).toBe('disabled')

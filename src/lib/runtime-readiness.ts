@@ -1,5 +1,156 @@
 export const TRANSFORMERS_RUNTIME_VERSION = '4.2.0'
 export const TRANSFORMERS_V43_TARGET_VERSION = '4.3.0'
+export const WEBGPU_ADAPTER_DENYLIST_STORAGE_KEY = 'bettertts-webgpu-adapter-denylist'
+
+const MAX_WEBGPU_DENYLIST_ENTRIES = 8
+const WEBGPU_ADAPTER_INFO_KEYS = ['vendor', 'architecture', 'device', 'description', 'name'] as const
+
+export type WebGpuAdapterInfo = Record<string, string | number | boolean | null>
+
+export type WebGpuDenylistEntry = {
+  adapterKey: string
+  adapterInfo?: WebGpuAdapterInfo
+  reason: string
+  reportedAt: string
+}
+
+export type WebGpuProbeResult = {
+  supported: boolean
+  adapterAvailable: boolean
+  usable: boolean
+  denylisted: boolean
+  status: string
+  adapterInfo?: WebGpuAdapterInfo
+  adapterKey?: string
+  denylistReason?: string
+  error?: string
+}
+
+type WebGpuNavigatorLike = {
+  gpu?: {
+    requestAdapter?: (options?: { powerPreference?: 'high-performance' | 'low-power' }) => Promise<unknown | null>
+  }
+}
+
+type WebGpuAdapterLike = {
+  info?: unknown
+  requestAdapterInfo?: () => Promise<unknown>
+  [key: string]: unknown
+}
+
+let memoryWebGpuDenylist: WebGpuDenylistEntry[] | null = null
+
+export async function probeWebGpuCapability(
+  navigatorLike: WebGpuNavigatorLike | undefined = typeof navigator === 'undefined' ? undefined : navigator as unknown as WebGpuNavigatorLike,
+): Promise<WebGpuProbeResult> {
+  const gpu = navigatorLike?.gpu
+  if (!gpu) {
+    return {
+      supported: false,
+      adapterAvailable: false,
+      usable: false,
+      denylisted: false,
+      status: 'navigator.gpu unavailable',
+    }
+  }
+  if (typeof gpu.requestAdapter !== 'function') {
+    return {
+      supported: true,
+      adapterAvailable: false,
+      usable: false,
+      denylisted: false,
+      status: 'requestAdapter unavailable',
+    }
+  }
+
+  try {
+    let adapter: unknown | null = null
+    try {
+      adapter = await gpu.requestAdapter()
+    } catch {
+      // Older implementations may require the optional preference dictionary.
+      try {
+        adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' })
+      } catch {
+        adapter = null
+      }
+    }
+    if (!adapter) {
+      return {
+        supported: true,
+        adapterAvailable: false,
+        usable: false,
+        denylisted: false,
+        status: 'no adapter available',
+      }
+    }
+
+    const adapterInfo = await readWebGpuAdapterInfo(adapter)
+    const adapterKey = createWebGpuAdapterKey(adapterInfo)
+    const denylistEntry = adapterKey
+      ? readWebGpuAdapterDenylist().find((entry) => entry.adapterKey === adapterKey)
+      : undefined
+    const denylisted = denylistEntry != null
+    return {
+      supported: true,
+      adapterAvailable: true,
+      usable: !denylisted,
+      denylisted,
+      status: denylisted ? 'adapter denylisted' : 'adapter available',
+      adapterInfo,
+      adapterKey,
+      denylistReason: denylistEntry?.reason,
+    }
+  } catch (err) {
+    return {
+      supported: true,
+      adapterAvailable: false,
+      usable: false,
+      denylisted: false,
+      status: 'adapter probe failed',
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+export function readWebGpuAdapterDenylist(): WebGpuDenylistEntry[] {
+  if (memoryWebGpuDenylist) return cloneWebGpuDenylist(memoryWebGpuDenylist)
+
+  let parsed: unknown
+  try {
+    const raw = typeof window === 'undefined' ? null : window.localStorage.getItem(WEBGPU_ADAPTER_DENYLIST_STORAGE_KEY)
+    parsed = raw ? JSON.parse(raw) : []
+  } catch {
+    parsed = []
+  }
+  memoryWebGpuDenylist = normalizeWebGpuDenylist(parsed)
+  return cloneWebGpuDenylist(memoryWebGpuDenylist)
+}
+
+export function denylistWebGpuAdapter(
+  adapterKey: string | undefined,
+  adapterInfo: WebGpuAdapterInfo | undefined,
+  reason = 'User reported corrupted or unusable WebGPU audio.',
+  now = new Date(),
+): boolean {
+  if (!adapterKey) return false
+  const entry: WebGpuDenylistEntry = {
+    adapterKey: adapterKey.slice(0, 500),
+    ...(adapterInfo ? { adapterInfo: cloneWebGpuAdapterInfo(adapterInfo) } : {}),
+    reason: reason.slice(0, 240),
+    reportedAt: now.toISOString(),
+  }
+  const entries = [entry, ...readWebGpuAdapterDenylist().filter((current) => current.adapterKey !== entry.adapterKey)]
+  writeWebGpuDenylist(entries.slice(0, MAX_WEBGPU_DENYLIST_ENTRIES))
+  return true
+}
+
+export function clearWebGpuAdapterDenylist(adapterKey?: string): void {
+  const entries = adapterKey
+    ? readWebGpuAdapterDenylist().filter((entry) => entry.adapterKey !== adapterKey)
+    : []
+  writeWebGpuDenylist(entries)
+}
 
 export type CrossOriginStorageStatus = {
   api: 'navigator.crossOriginStorage'
@@ -96,6 +247,75 @@ export function transformersUpgradeReadiness(input: TransformersReadinessInput =
     readyToSwitch: criteria.every((criterion) => !criterion.required || criterion.met),
     criteria,
   }
+}
+
+async function readWebGpuAdapterInfo(adapter: unknown): Promise<WebGpuAdapterInfo | undefined> {
+  const candidate = adapter as WebGpuAdapterLike
+  let info = candidate.info
+  if ((!info || typeof info !== 'object') && typeof candidate.requestAdapterInfo === 'function') {
+    try {
+      info = await candidate.requestAdapterInfo()
+    } catch {
+      info = undefined
+    }
+  }
+
+  const source: Record<string, unknown> = info && typeof info === 'object' ? info as Record<string, unknown> : candidate as Record<string, unknown>
+  const entries: Array<[string, string | number | boolean | null]> = WEBGPU_ADAPTER_INFO_KEYS.flatMap((key) => {
+    const value = source[key] ?? (candidate[key] as unknown)
+    if (!['string', 'number', 'boolean'].includes(typeof value) && value != null) return []
+    return [[key, (typeof value === 'string' ? value.slice(0, 200) : value) as string | number | boolean | null]]
+  })
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function createWebGpuAdapterKey(adapterInfo: WebGpuAdapterInfo | undefined): string | undefined {
+  if (!adapterInfo) return undefined
+  const values = WEBGPU_ADAPTER_INFO_KEYS.map((key) => {
+    const value = adapterInfo[key]
+    return typeof value === 'string' ? value.trim().toLowerCase() : value == null ? '' : String(value)
+  })
+  if (!values.some(Boolean)) return undefined
+  return WEBGPU_ADAPTER_INFO_KEYS.map((key, index) => `${key}=${values[index]}`).join('|')
+}
+
+function normalizeWebGpuDenylist(value: unknown): WebGpuDenylistEntry[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((entry): entry is Partial<WebGpuDenylistEntry> => Boolean(entry) && typeof entry === 'object')
+    .map((entry) => ({
+      adapterKey: typeof entry.adapterKey === 'string' ? entry.adapterKey.slice(0, 500) : '',
+      ...(entry.adapterInfo && typeof entry.adapterInfo === 'object' ? { adapterInfo: cloneWebGpuAdapterInfo(entry.adapterInfo as WebGpuAdapterInfo) } : {}),
+      reason: typeof entry.reason === 'string' ? entry.reason.slice(0, 240) : 'User reported corrupted or unusable WebGPU audio.',
+      reportedAt: typeof entry.reportedAt === 'string' ? entry.reportedAt : new Date(0).toISOString(),
+    }))
+    .filter((entry) => entry.adapterKey.length > 0)
+    .slice(0, MAX_WEBGPU_DENYLIST_ENTRIES)
+}
+
+function writeWebGpuDenylist(entries: WebGpuDenylistEntry[]): void {
+  memoryWebGpuDenylist = cloneWebGpuDenylist(entries)
+  try {
+    if (typeof window === 'undefined') return
+    if (entries.length === 0) window.localStorage.removeItem(WEBGPU_ADAPTER_DENYLIST_STORAGE_KEY)
+    else window.localStorage.setItem(WEBGPU_ADAPTER_DENYLIST_STORAGE_KEY, JSON.stringify(entries))
+  } catch {
+    // The in-memory denylist still protects this session when storage is blocked.
+  }
+}
+
+function cloneWebGpuDenylist(entries: WebGpuDenylistEntry[]): WebGpuDenylistEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    ...(entry.adapterInfo ? { adapterInfo: cloneWebGpuAdapterInfo(entry.adapterInfo) } : {}),
+  }))
+}
+
+function cloneWebGpuAdapterInfo(info: WebGpuAdapterInfo): WebGpuAdapterInfo {
+  const entries: Array<[string, string | number | boolean | null]> = Object.entries(info)
+    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value) || value == null)
+    .map(([key, value]) => [key, (typeof value === 'string' ? value.slice(0, 200) : value) as string | number | boolean | null])
+  return Object.fromEntries(entries)
 }
 
 function compareSemver(left: string, right: string): number {

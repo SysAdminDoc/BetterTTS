@@ -50,7 +50,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
 - **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `ja`, `cmn`, `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
-- **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support, plus a persisted experimental fp16 opt-in; fp32 remains the default
+- **Cross-browser WebGPU acceleration** with adapter probing, automatic WASM q8 fallback, a local bad-audio denylist, and a persisted experimental fp16 opt-in; fp32 remains the default
 - **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
@@ -91,13 +91,13 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
 - **Pronunciation dictionary** — custom word/replacement pairs persisted in localStorage
-- **Generation stats** — elapsed time, chars/s throughput, audio duration, realtime speed factor
+- **Generation stats** — elapsed time, time to first audio, chars/s throughput, audio duration, realtime speed factor
 - **Cancel button** — abort generation mid-run, keep partial results
 - **Completeness check** — every sentence is verified against a speech-rate floor; possibly truncated or missing audio is flagged in the output, queue, and diagnostics instead of failing silently
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
 - **EPUB import** — chapter-aware parsing with TOC title extraction, an editable pre-queue mapping step, per-chapter voice/blend metadata, resumable batch generation, and EPUB3 Media Overlay export after synthesis
 - **Engine-aware persistent job queue** — queue Kokoro, Supertonic, and KittenTTS jobs; pause, resume, edit/regenerate completed chunks safely, play completed chunks, ZIP-download, and M4B audiobook export survive tab close via IndexedDB checkpointing
-- **M4B preflight + fallback** — queue UI reports WebCodecs AAC support before export; Firefox/Linux AAC gaps get a chaptered ZIP/Opus fallback path
+- **M4B preflight + fallback** — queue UI probes WebCodecs AAC before export, including Safari/WebKit AAC when its codec probe passes; Firefox/Linux gaps get a chaptered ZIP/Opus fallback path
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
@@ -106,7 +106,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Content-Security-Policy** baked into production builds
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
 - **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
-- **Diagnostics export** — copy or download a local JSON support bundle with browser, WebGPU, codec, storage, cache, model-route, and recent sanitized error state
+- **Diagnostics export** — copy or download a local JSON support bundle with browser, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8
 - **Media Session API** — lock-screen play/pause controls for generated audio
 - **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
 - **Responsive layout** — works on desktop and mobile
@@ -149,7 +149,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 
 ## Troubleshooting
 
-Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, WebGPU adapter status, WebCodecs AAC/Opus support, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs.
+Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, WebGPU adapter identity and denylist state, WebCodecs AAC/Opus support, the last generation's time to first audio, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs. If a WebGPU clip is corrupted or produces screeching audio, choose **Report bad audio** in the WebGPU adapter panel; BetterTTS stores only the adapter fingerprint and uses WASM q8 for that adapter until you clear the report.
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
@@ -203,7 +203,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (432 tests across 74 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (436 tests across 75 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

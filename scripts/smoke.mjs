@@ -634,6 +634,8 @@ async function runSmoke() {
     if (!(await persistedFp16Toggle.isChecked())) throw new Error('Kokoro WebGPU fp16 preference did not persist')
     await persistedFp16Toggle.uncheck()
     await desktop.page.getByLabel('Diagnostics export').scrollIntoViewIfNeeded()
+    await desktop.page.getByLabel('WebGPU adapter diagnostics').waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('button', { name: 'Report bad audio' }).waitFor({ timeout: 20000 })
     await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'diagnostics-light.png'), fullPage: false })
     await desktop.page.getByRole('button', { name: 'Copy JSON' }).click()
