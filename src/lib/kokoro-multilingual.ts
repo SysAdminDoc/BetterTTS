@@ -1,5 +1,6 @@
 import { fetchVoiceBin } from './voice-mix.ts'
 import { kokoroLanguageForVoice, type KokoroLanguage } from './voices.ts'
+import { splitPronunciationTags } from './pronunciations.ts'
 export { needsDirectKokoroPath } from './kokoro-direct.ts'
 
 type TensorLike = {
@@ -62,17 +63,32 @@ export async function synthesizeDirectKokoro(
 }
 
 export async function phonemizeKokoroText(text: string, language: KokoroLanguage): Promise<string> {
-  const normalized = normalizeKokoroText(text)
-  if (!normalized) return ''
+  const segments = splitPronunciationTags(text)
+  const output: string[] = []
+  let englishPhonemizer: typeof import('phonemizer').phonemize | null = null
+  let ephone: EphoneModule | null = null
 
-  if (language.phonemeLanguage === 'en-us' || language.phonemeLanguage === 'en') {
-    const { phonemize } = await import('phonemizer')
-    return postProcessEnglishPhonemes((await phonemize(normalized, language.phonemeLanguage)).join(' '), language.phonemeLanguage === 'en-us')
+  for (const segment of segments) {
+    if (segment.kind === 'phoneme') {
+      if (segment.value.phonemes.trim()) output.push(segment.value.phonemes.trim())
+      continue
+    }
+    const normalized = normalizeKokoroText(segment.value)
+    if (!normalized) continue
+
+    if (language.phonemeLanguage === 'en-us' || language.phonemeLanguage === 'en') {
+      englishPhonemizer ??= (await import('phonemizer')).phonemize
+      output.push(postProcessEnglishPhonemes(
+        (await englishPhonemizer(normalized, language.phonemeLanguage)).join(' '),
+        language.phonemeLanguage === 'en-us',
+      ))
+    } else {
+      ephone ??= await loadEphone(language.phonemeLanguage)
+      ephone.setVoice(language.phonemeLanguage)
+      output.push(textToIpaQuietly(ephone, normalized))
+    }
   }
-
-  const ephone = await loadEphone(language.phonemeLanguage)
-  ephone.setVoice(language.phonemeLanguage)
-  return textToIpaQuietly(ephone, normalized)
+  return output.filter(Boolean).join(' ').trim()
 }
 
 async function loadEphone(language: KokoroLanguage['phonemeLanguage']): Promise<EphoneModule> {

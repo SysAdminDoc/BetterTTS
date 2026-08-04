@@ -1,6 +1,7 @@
 import { fetchVoiceBin } from './voice-mix.ts'
 import type { ProgressInfo } from './kokoro.ts'
 import type { Cue } from './subtitles.ts'
+import { splitPronunciationTags } from './pronunciations.ts'
 
 export const KOKORO_TIMESTAMPED_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX-timestamped'
 const KOKORO_TIMESTAMPED_SAMPLE_RATE = 24000
@@ -96,21 +97,36 @@ export async function synthesizeTimestampedKokoro(
 
 export async function buildTimestampTokens(text: string, language: string): Promise<TimestampToken[]> {
   const { phonemize } = await import('phonemizer')
-  const matches = [...text.matchAll(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*|[^\sA-Za-z0-9]/gu)]
   const tokens: TimestampToken[] = []
 
-  for (let i = 0; i < matches.length; i += 1) {
-    const match = matches[i]
-    const value = match[0]
-    const nextIndex = i + 1 < matches.length ? matches[i + 1].index ?? text.length : text.length
-    const end = (match.index ?? 0) + value.length
-    const whitespace = /\s/.test(text.slice(end, nextIndex))
-    const kind = /^[A-Za-z0-9]/.test(value) ? 'word' : 'punctuation'
-    const phonemes = kind === 'punctuation'
-      ? normalizePunctuation(value)
-      : postProcessKokoroPhonemes((await phonemize(normalizeKokoroText(value), language)).join(' '), language === 'en-us')
+  const segments = splitPronunciationTags(text)
+  for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+    const segment = segments[segmentIndex]
+    if (segment.kind === 'phoneme') {
+      const following = segments[segmentIndex + 1]
+      tokens.push({
+        text: segment.value.word,
+        phonemes: segment.value.phonemes,
+        whitespace: following?.kind === 'text' && /^\s/u.test(following.value),
+        kind: 'word',
+      })
+      continue
+    }
 
-    if (phonemes) tokens.push({ text: value, phonemes, whitespace, kind })
+    const matches = [...segment.value.matchAll(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*|[^\sA-Za-z0-9]/gu)]
+    for (let i = 0; i < matches.length; i += 1) {
+      const match = matches[i]
+      const value = match[0]
+      const nextIndex = i + 1 < matches.length ? matches[i + 1].index ?? segment.value.length : segment.value.length
+      const end = (match.index ?? 0) + value.length
+      const whitespace = /\s/.test(segment.value.slice(end, nextIndex))
+      const kind = /^[A-Za-z0-9]/.test(value) ? 'word' : 'punctuation'
+      const phonemes = kind === 'punctuation'
+        ? normalizePunctuation(value)
+        : postProcessKokoroPhonemes((await phonemize(normalizeKokoroText(value), language)).join(' '), language === 'en-us')
+
+      if (phonemes) tokens.push({ text: value, phonemes, whitespace, kind })
+    }
   }
 
   return tokens

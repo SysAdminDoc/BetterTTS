@@ -198,7 +198,18 @@ import {
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
 import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
-import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationSetting } from './lib/settings.ts'
+import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting } from './lib/settings.ts'
+import {
+  TECH_PRONUNCIATION_PACK,
+  applyPronunciationRules,
+  createPronunciationPack,
+  mergePronunciationPack,
+  parsePronunciationPack,
+  serializePronunciationDictionary,
+  serializePronunciationPack,
+  type PronunciationDictionary,
+  type PronunciationMode,
+} from './lib/pronunciations.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
@@ -1437,9 +1448,9 @@ function App() {
   const [bgmDuckDepth, setBgmDuckDepth] = useState(0.65)
   const [dialogMode, setDialogMode] = useState(false)
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({})
-  const [pronunciations, setPronunciations] = useState<Record<string, string>>(() => {
+  const [pronunciations, setPronunciations] = useState<PronunciationDictionary>(() => {
     try {
-      return parsePronunciationSetting(window.localStorage.getItem('bettertts-pronunciations'))
+      return parsePronunciationDictionarySetting(window.localStorage.getItem('bettertts-pronunciations'))
     } catch { return {} }
   })
   const [cleanup, setCleanup] = useState<CleanupOptions>(() => {
@@ -1516,6 +1527,7 @@ function App() {
   ])
   const [newWord, setNewWord] = useState('')
   const [newPronunciation, setNewPronunciation] = useState('')
+  const [newPronunciationMode, setNewPronunciationMode] = useState<PronunciationMode>('respelling')
   const [importUrlValue, setImportUrlValue] = useState('')
   const [importingUrl, setImportingUrl] = useState(false)
   const [isImportingFile, setIsImportingFile] = useState(false)
@@ -1550,6 +1562,7 @@ function App() {
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const captionInputRef = useRef<HTMLInputElement | null>(null)
   const chatterboxReferenceInputRef = useRef<HTMLInputElement | null>(null)
+  const pronunciationPackInputRef = useRef<HTMLInputElement | null>(null)
   const pronunciationsToggleRef = useRef<HTMLButtonElement | null>(null)
   const pronunciationsSectionRef = useRef<HTMLDivElement | null>(null)
 
@@ -1610,6 +1623,7 @@ function App() {
   }
 
   const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
+  const hasPhonemePronunciations = Object.values(pronunciations).some((rule) => rule.mode === 'phoneme')
   const epubMappingVoiceOptions = useMemo<EpubMappingVoiceOption[]>(() => {
     if (engine === 'kokoro') return availableVoices.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
     if (engine === 'supertonic') return SUPERTONIC_VOICES.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
@@ -1981,7 +1995,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    persistSetting('bettertts-pronunciations', JSON.stringify(pronunciations))
+    persistSetting('bettertts-pronunciations', serializePronunciationDictionary(pronunciations))
   }, [pronunciations])
 
   useEffect(() => {
@@ -3151,19 +3165,7 @@ function App() {
   }
 
   function applyPronunciations(input: string): string {
-    const entries = Object.entries(pronunciations).filter(([word]) => word)
-    if (entries.length === 0) return input
-    const map = new Map(entries)
-    // Single pass so one rule's output can never feed another rule; longest key
-    // first so overlapping entries match greedily; word-bounded so "cat" -> "kat"
-    // cannot corrupt "catalog".
-    const pattern = entries
-      .map(([word]) => word)
-      .sort((a, b) => b.length - a.length)
-      .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .join('|')
-    const re = new RegExp(`(?<!\\w)(?:${pattern})(?!\\w)`, 'g')
-    return input.replace(re, (match) => map.get(match) ?? match)
+    return applyPronunciationRules(input, pronunciations, { phonemeTags: engine === 'kokoro' })
   }
 
   async function buildResult(blob: Blob, label: string, filename: string, replayText?: string): Promise<AudioResult> {
@@ -3223,7 +3225,7 @@ function App() {
       }
     }
 
-    if (forceNative && nativeAvailable) {
+    if (forceNative && nativeAvailable && !hasPhonemePronunciations) {
       const runtime = await loadNativeKokoro(onProgress)
       const packSuffix = runtime.modelPack?.verified ? ' · verified pack' : ''
       setRuntimeLabel(`Sherpa-ONNX ${runtime.ep.toUpperCase()} q8 · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}${packSuffix}`)
@@ -3253,7 +3255,7 @@ function App() {
     }
 
     const hasGpu = !forceWasm && (await probeWebGpu())
-    if (useWorker) {
+    if (useWorker && !hasPhonemePronunciations) {
       try {
         await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', onProgress)
         setRuntimeLabel(hasGpu ? `WebGPU ${getKokoroWebGpuDtype()}` : 'WebAssembly q8')
@@ -3272,7 +3274,7 @@ function App() {
     const tts = await loadKokoro(onProgress)
     return {
       synthesize: async (text, voice, spd, bin) => {
-        if (needsDirectKokoroPath(voice, bin)) {
+        if (needsDirectKokoroPath(voice, bin) || hasPhonemePronunciations) {
           const { synthesizeDirectKokoro } = await import('./lib/kokoro-multilingual.ts')
           return synthesizeDirectKokoro(tts, text, voice, spd, bin)
         }
@@ -5312,6 +5314,39 @@ function App() {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
     if (file) void handleImportedFile(file)
+  }
+
+  async function handlePronunciationPackChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    try {
+      const pack = parsePronunciationPack(await file.text())
+      setPronunciations((current) => mergePronunciationPack(current, pack))
+      showToast({ tone: 'ok', message: `Imported ${pack.entries.length} pronunciation entr${pack.entries.length === 1 ? 'y' : 'ies'} from ${shortUiLabel(pack.name, 48)}.` })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Pronunciation pack import failed.' })
+    }
+  }
+
+  function addTechPronunciationPack() {
+    setPronunciations((current) => mergePronunciationPack(current, TECH_PRONUNCIATION_PACK))
+    showToast({ tone: 'ok', message: `Added ${TECH_PRONUNCIATION_PACK.entries.length} tech pronunciation entries.` })
+  }
+
+  function exportPronunciationPack() {
+    const pack = createPronunciationPack(
+      'BetterTTS pronunciations',
+      pronunciations,
+      'Pronunciation rules exported from BetterTTS.',
+    )
+    const url = URL.createObjectURL(new Blob([serializePronunciationPack(pack)], { type: 'application/json' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'bettertts-pronunciations.json'
+    anchor.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    showToast({ tone: 'ok', message: `Exported ${pack.entries.length} pronunciation entr${pack.entries.length === 1 ? 'y' : 'ies'}.` })
   }
 
   function handleBgmFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -7561,12 +7596,31 @@ function App() {
                     >
                       Pronunciations ({Object.keys(pronunciations).length})
                     </button>
+                    <div className="pronunciation-tools">
+                      <button type="button" className="heading-action" onClick={addTechPronunciationPack}>
+                        Add tech starter
+                      </button>
+                      <button type="button" className="heading-action" onClick={() => pronunciationPackInputRef.current?.click()}>
+                        Import pack
+                      </button>
+                      <button type="button" className="heading-action" onClick={exportPronunciationPack} disabled={Object.keys(pronunciations).length === 0}>
+                        Export pack
+                      </button>
+                      <input
+                        ref={pronunciationPackInputRef}
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={(event) => void handlePronunciationPackChange(event)}
+                        hidden
+                      />
+                    </div>
                     {showPronunciations ? (
                       <div className="speaker-map" role="group" aria-label="Pronunciation dictionary" ref={pronunciationsSectionRef}>
                         {Object.entries(pronunciations).map(([word, pron]) => (
-                          <div className="speaker-row" key={word}>
+                          <div className="speaker-row pronunciation-entry" key={word}>
                             <span>{word}</span>
-                            <span className="pron-replacement">{pron}</span>
+                            <span className="pron-replacement">{pron.mode === 'phoneme' ? `/${pron.replacement}/` : pron.replacement}</span>
+                            <small>{pron.mode === 'phoneme' ? 'eSpeak phonemes' : 'Respelling'}</small>
                             <button
                               type="button"
                               className="heading-action"
@@ -7581,7 +7635,7 @@ function App() {
                             </button>
                           </div>
                         ))}
-                        <div className="speaker-row">
+                        <div className="speaker-row pronunciation-editor">
                           <input
                             type="text"
                             className="pron-input"
@@ -7594,12 +7648,20 @@ function App() {
                           <input
                             type="text"
                             className="pron-input"
-                            placeholder="Sounds like"
+                            placeholder={newPronunciationMode === 'phoneme' ? 'eSpeak phonemes' : 'Sounds like'}
                             value={newPronunciation}
                             onChange={(e) => setNewPronunciation(e.target.value)}
                             aria-label="Pronunciation replacement"
                             maxLength={MAX_PRONUNCIATION_VALUE_CHARS}
                           />
+                          <select
+                            value={newPronunciationMode}
+                            onChange={(event) => setNewPronunciationMode(event.target.value as PronunciationMode)}
+                            aria-label="Pronunciation mode"
+                          >
+                            <option value="respelling">Respelling</option>
+                            <option value="phoneme">eSpeak phonemes</option>
+                          </select>
                           <button
                             type="button"
                             className="heading-action"
@@ -7610,7 +7672,10 @@ function App() {
                             }
                             onClick={() => {
                               if (newWord.trim() && newPronunciation.trim()) {
-                                setPronunciations((prev) => ({ ...prev, [newWord.trim()]: newPronunciation.trim() }))
+                                setPronunciations((prev) => ({
+                                  ...prev,
+                                  [newWord.trim()]: { replacement: newPronunciation.trim(), mode: newPronunciationMode },
+                                }))
                                 setNewWord('')
                                 setNewPronunciation('')
                               }

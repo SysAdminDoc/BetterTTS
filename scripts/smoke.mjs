@@ -102,6 +102,18 @@ function makeBgmUpload() {
   return { name: 'smoke-bgm.wav', mimeType: 'audio/wav', buffer }
 }
 
+function makePronunciationPackUpload() {
+  return {
+    name: 'smoke-pronunciations.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      name: 'Smoke pronunciation pack',
+      entries: [{ word: 'README', replacement: 'read me', mode: 'respelling' }],
+    })),
+  }
+}
+
 function makeEpubUpload() {
   const zipped = zipSync({
     'META-INF/container.xml': new TextEncoder().encode('<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>'),
@@ -686,6 +698,28 @@ async function runSmoke() {
     await duckDepth.waitFor({ timeout: 20000 })
     await duckDepth.fill('0.8')
     if (await duckDepth.inputValue() !== '0.8') throw new Error('BGM duck depth did not update')
+
+    console.log('Checking pronunciation dictionary packs...')
+    const pronunciationsToggle = desktop.page.getByRole('button', { name: /Pronunciations \(/ })
+    await pronunciationsToggle.click()
+    await desktop.page.getByRole('button', { name: 'Add tech starter' }).click()
+    await desktop.page.getByText('API', { exact: true }).waitFor({ timeout: 20000 })
+    const pronunciationMode = desktop.page.getByLabel('Pronunciation mode')
+    await pronunciationMode.selectOption('phoneme')
+    await desktop.page.getByLabel('Pronunciation word').fill('SQL')
+    await desktop.page.getByLabel('Pronunciation replacement').fill('sˌiːkwəl')
+    await desktop.page.getByRole('button', { name: 'Add', exact: true }).click()
+    await desktop.page.locator('small').filter({ hasText: 'eSpeak phonemes' }).waitFor({ timeout: 20000 })
+    const pronunciationPackInput = desktop.page.locator('input[type="file"][accept="application/json,.json"]')
+    await pronunciationPackInput.setInputFiles(makePronunciationPackUpload())
+    await desktop.page.getByText(/Imported 1 pronunciation entry from Smoke pronunciation pack\./).waitFor({ timeout: 20000 })
+    await desktop.page.getByText('README', { exact: true }).waitFor({ timeout: 20000 })
+    const downloadPromise = desktop.page.waitForEvent('download')
+    await desktop.page.getByRole('button', { name: 'Export pack' }).click()
+    const pronunciationDownload = await downloadPromise
+    if (pronunciationDownload.suggestedFilename() !== 'bettertts-pronunciations.json') {
+      throw new Error(`Unexpected pronunciation pack filename: ${pronunciationDownload.suggestedFilename()}`)
+    }
 
     console.log('Checking experimental Piper-plus controls...')
     await desktop.page.getByRole('checkbox', { name: 'Enable experimental Piper-plus' }).check()

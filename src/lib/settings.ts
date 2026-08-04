@@ -1,31 +1,26 @@
 import { type CleanupOptions, DEFAULT_CLEANUP } from './text.ts'
+import {
+  parsePronunciationDictionary,
+  type PronunciationDictionary,
+} from './pronunciations.ts'
 
-export const MAX_PRONUNCIATIONS = 500
-export const MAX_PRONUNCIATION_WORD_CHARS = 80
-export const MAX_PRONUNCIATION_VALUE_CHARS = 160
+export { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS } from './pronunciations.ts'
+
+export function parsePronunciationSetting(raw: string | null): Record<string, string> {
+  const dictionary = parsePronunciationDictionary(raw)
+  return Object.fromEntries(
+    Object.entries(dictionary)
+      .filter(([, rule]) => rule.mode === 'respelling')
+      .map(([word, rule]) => [word, rule.replacement]),
+  )
+}
+
+export function parsePronunciationDictionarySetting(raw: string | null): PronunciationDictionary {
+  return parsePronunciationDictionary(raw)
+}
 
 function plainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function parsePronunciationSetting(raw: string | null): Record<string, string> {
-  if (!raw) return {}
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!plainRecord(parsed)) return {}
-    const entries = Object.entries(parsed)
-      .filter(([word, replacement]) => (
-        word.length > 0
-        && word.length <= MAX_PRONUNCIATION_WORD_CHARS
-        && typeof replacement === 'string'
-        && replacement.length > 0
-        && replacement.length <= MAX_PRONUNCIATION_VALUE_CHARS
-      ))
-      .slice(0, MAX_PRONUNCIATIONS) as Array<[string, string]>
-    return Object.fromEntries(entries)
-  } catch {
-    return {}
-  }
 }
 
 export function parseCleanupSetting(raw: string | null): CleanupOptions {
