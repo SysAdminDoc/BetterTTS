@@ -1,8 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { execFile as execFileCallback } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
+import { promisify } from 'node:util'
 import {
   ProjectConflictError,
   readProjectSnapshot,
@@ -20,6 +22,20 @@ import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
 import { resolveSmokeOutputDirectory } from './smoke-output.ts'
+import {
+  DEFAULT_DESKTOP_INTEGRATIONS,
+  DESKTOP_INTEGRATION_HOTKEY,
+  desktopIntegrationKey,
+  explorerCommand,
+  explorerRegistrySubkeys,
+  externalFileMime,
+  isSupportedExternalFile,
+  parseExternalOpenPath,
+  sanitizeDesktopIntegrationSettings,
+  type DesktopIntegrationKind,
+  type DesktopIntegrationSettings,
+  type DesktopIntegrationStatus,
+} from './desktop-integrations.ts'
 
 // In dev the renderer is served by Vite; in production it is served from the
 // packaged dist/ over a custom app:// scheme so we control the response headers
@@ -38,6 +54,24 @@ if (IS_SMOKE && process.env.BETTERTTS_SMOKE_USER_DATA) {
   // Isolation smoke runs use a disposable profile so the user's existing
   // Electron state is never opened or modified.
   app.setPath('userData', process.env.BETTERTTS_SMOKE_USER_DATA)
+}
+const HAS_SINGLE_INSTANCE_LOCK = app.requestSingleInstanceLock()
+if (!HAS_SINGLE_INSTANCE_LOCK) app.quit()
+
+const execFile = promisify(execFileCallback)
+const initialExternalOpenPath = parseExternalOpenPath(process.argv)
+
+if (HAS_SINGLE_INSTANCE_LOCK) {
+  app.on('second-instance', (_event, commandLine) => {
+    const externalPath = parseExternalOpenPath(commandLine)
+    if (externalPath) void initializeDesktopIntegrations().then(() => queueExternalFile(externalPath))
+    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
 }
 
 // Serving the renderer over app:// keeps it a proper secure origin (needed for
@@ -151,6 +185,294 @@ let activeProjectIdentity: {
   mtimeMs: number
   size: number
 } | null = null
+
+// --- Windows workflow integrations (TF-123) -------------------------------
+// All three integrations are opt-in and persisted outside the renderer. The
+// renderer receives file bytes rather than arbitrary paths, and OCR runs in a
+// short-lived PowerShell capture + Tesseract process with no shell expansion.
+const DESKTOP_INTEGRATIONS_STATUS_CHANNEL = 'bettertts:desktop-integrations-status'
+const DESKTOP_INTEGRATIONS_TEXT_CHANNEL = 'bettertts:desktop-integrations-text'
+const DESKTOP_INTEGRATIONS_FILES_CHANNEL = 'bettertts:desktop-integrations-files'
+const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error'
+const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
+const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
+const MAX_EXTERNAL_FILE_BYTES = 25 * 1024 * 1024
+const MAX_EXTERNAL_TEXT_CHARS = 5_000
+type ExternalFilePayload = { name: string; type: string; bytes: Uint8Array }
+
+let desktopIntegrationSettings: DesktopIntegrationSettings = { ...DEFAULT_DESKTOP_INTEGRATIONS }
+let desktopIntegrationReady: Promise<void> | null = null
+let desktopHotkeyRegistered = false
+let desktopExplorerRegistered = false
+let desktopTesseractPath: string | undefined
+let desktopIntegrationLastError: string | undefined
+let pendingExternalFiles: ExternalFilePayload[] = []
+let pendingExternalText: { text: string; source: string } | null = null
+let desktopIntegrationRendererReady = false
+
+function desktopIntegrationSettingsPath(): string {
+  return join(app.getPath('userData'), 'desktop-integrations.json')
+}
+
+function desktopIntegrationStatus(): DesktopIntegrationStatus {
+  return {
+    ...desktopIntegrationSettings,
+    hotkey: DESKTOP_INTEGRATION_HOTKEY,
+    hotkeyRegistered: desktopHotkeyRegistered,
+    explorerRegistered: desktopExplorerRegistered,
+    ocrAvailable: Boolean(desktopTesseractPath),
+    ...(desktopTesseractPath ? { tesseractPath: desktopTesseractPath } : {}),
+    ...(desktopIntegrationLastError ? { lastError: desktopIntegrationLastError } : {}),
+  }
+}
+
+function broadcastDesktopIntegrationStatus(): void {
+  const status = desktopIntegrationStatus()
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(DESKTOP_INTEGRATIONS_STATUS_CHANNEL, status)
+  }
+}
+
+function setDesktopIntegrationError(error: unknown): void {
+  desktopIntegrationLastError = (error instanceof Error ? error.message : String(error)).replaceAll(process.cwd(), '<app>').slice(0, 300)
+  broadcastDesktopIntegrationStatus()
+}
+
+async function saveDesktopIntegrationSettings(): Promise<void> {
+  await mkdir(app.getPath('userData'), { recursive: true })
+  await writeFile(desktopIntegrationSettingsPath(), `${JSON.stringify(desktopIntegrationSettings, null, 2)}\n`, 'utf8')
+}
+
+async function loadDesktopIntegrationSettings(): Promise<void> {
+  try {
+    desktopIntegrationSettings = sanitizeDesktopIntegrationSettings(JSON.parse(await readFile(desktopIntegrationSettingsPath(), 'utf8')))
+  } catch {
+    desktopIntegrationSettings = { ...DEFAULT_DESKTOP_INTEGRATIONS }
+  }
+}
+
+async function findTesseract(): Promise<string | undefined> {
+  const candidates = [
+    process.env.BETTERTTS_TESSERACT_PATH,
+    join(app.getPath('userData'), 'tesseract', 'tesseract.exe'),
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, 'Tesseract-OCR', 'tesseract.exe') : undefined,
+    process.env['ProgramFiles(x86)'] ? join(process.env['ProgramFiles(x86)'], 'Tesseract-OCR', 'tesseract.exe') : undefined,
+    process.resourcesPath ? join(process.resourcesPath, 'tesseract', 'tesseract.exe') : undefined,
+  ]
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      const info = await stat(candidate)
+      if (info.isFile()) return candidate
+    } catch {
+      // Continue to the next configured location or PATH lookup.
+    }
+  }
+  if (process.platform !== 'win32') return undefined
+  try {
+    const result = await execFile('where.exe', ['tesseract.exe'], { windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024 })
+    const path = result.stdout.split(/\r?\n/u).map((line) => line.trim()).find(Boolean)
+    return path || undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function configureExplorerRegistry(enabled: boolean): Promise<void> {
+  if (process.platform !== 'win32') throw new Error('Explorer integration is available on Windows only.')
+  const keys = explorerRegistrySubkeys()
+  if (!enabled) {
+    await Promise.all(keys.map((key) => execFile('reg.exe', ['DELETE', key, '/f'], { windowsHide: true, timeout: 8000 }).catch(() => undefined)))
+    desktopExplorerRegistered = false
+    return
+  }
+  const command = explorerCommand(process.execPath, app.getAppPath(), app.isPackaged)
+  for (const key of keys) {
+    await execFile('reg.exe', ['ADD', key, '/ve', '/d', 'Listen in BetterTTS', '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', key, '/v', 'Icon', '/d', `${process.execPath},0`, '/f'], { windowsHide: true, timeout: 8000 })
+    await execFile('reg.exe', ['ADD', `${key}\\command`, '/ve', '/d', command, '/f'], { windowsHide: true, timeout: 8000 })
+  }
+  desktopExplorerRegistered = true
+}
+
+function configureDesktopHotkey(enabled: boolean): void {
+  if (desktopHotkeyRegistered) {
+    globalShortcut.unregister(DESKTOP_INTEGRATION_HOTKEY)
+    desktopHotkeyRegistered = false
+  }
+  if (!enabled || IS_SMOKE) return
+  if (!globalShortcut.register(DESKTOP_INTEGRATION_HOTKEY, () => {
+    const text = clipboard.readText().trim().slice(0, MAX_EXTERNAL_TEXT_CHARS)
+    if (text) sendDesktopIntegrationText(text, 'clipboard / copied selection')
+    else setDesktopIntegrationError('Copy a selection first, then press the BetterTTS read-selection hotkey.')
+  })) throw new Error(`Could not register ${DESKTOP_INTEGRATION_HOTKEY}; another application may already use it.`)
+  desktopHotkeyRegistered = true
+}
+
+async function configureDesktopIntegration(kind: DesktopIntegrationKind, enabled: boolean): Promise<DesktopIntegrationStatus> {
+  if (IS_SMOKE) return desktopIntegrationStatus()
+  const key = desktopIntegrationKey(kind)
+  if (kind === 'hotkey') configureDesktopHotkey(enabled)
+  if (kind === 'explorer') await configureExplorerRegistry(enabled)
+  desktopIntegrationSettings = { ...desktopIntegrationSettings, [key]: enabled }
+  await saveDesktopIntegrationSettings()
+  desktopIntegrationLastError = undefined
+  desktopTesseractPath = await findTesseract()
+  broadcastDesktopIntegrationStatus()
+  return desktopIntegrationStatus()
+}
+
+async function initializeDesktopIntegrations(): Promise<void> {
+  if (desktopIntegrationReady) return desktopIntegrationReady
+  desktopIntegrationReady = (async () => {
+    await loadDesktopIntegrationSettings()
+    desktopTesseractPath = await findTesseract()
+    if (!IS_SMOKE) {
+      try {
+        configureDesktopHotkey(desktopIntegrationSettings.hotkeyEnabled)
+        if (desktopIntegrationSettings.explorerEnabled) await configureExplorerRegistry(true)
+      } catch (error) {
+        setDesktopIntegrationError(error)
+      }
+    }
+  })()
+  return desktopIntegrationReady
+}
+
+function sendDesktopIntegrationText(text: string, source: string): void {
+  const payload = { text: text.slice(0, MAX_EXTERNAL_TEXT_CHARS), source }
+  const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+  if (win && desktopIntegrationRendererReady) win.webContents.send(DESKTOP_INTEGRATIONS_TEXT_CHANNEL, payload)
+  else pendingExternalText = payload
+}
+
+function sendDesktopIntegrationError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+  if (win && desktopIntegrationRendererReady) win.webContents.send(DESKTOP_INTEGRATIONS_ERROR_CHANNEL, { message })
+  setDesktopIntegrationError(message)
+}
+
+function sendPendingDesktopIntegrationEvents(): void {
+  const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+  if (!win || !desktopIntegrationRendererReady) return
+  if (pendingExternalText) {
+    win.webContents.send(DESKTOP_INTEGRATIONS_TEXT_CHANNEL, pendingExternalText)
+    pendingExternalText = null
+  }
+  if (pendingExternalFiles.length > 0) {
+    win.webContents.send(DESKTOP_INTEGRATIONS_FILES_CHANNEL, pendingExternalFiles)
+    pendingExternalFiles = []
+  }
+}
+
+async function queueExternalFile(path: string): Promise<void> {
+  if (!desktopIntegrationSettings.explorerEnabled) {
+    sendDesktopIntegrationError('Explorer integration is disabled in BetterTTS settings.')
+    return
+  }
+  if (!isSupportedExternalFile(path)) {
+    sendDesktopIntegrationError('BetterTTS Explorer import supports TXT, EPUB, PDF, and DOCX files.')
+    return
+  }
+  try {
+    const info = await stat(path)
+    if (!info.isFile() || info.size > MAX_EXTERNAL_FILE_BYTES) throw new Error('The selected file is missing, not a regular file, or larger than 25 MB.')
+    const bytes = new Uint8Array(await readFile(path))
+    const payload: ExternalFilePayload = { name: basename(path), type: externalFileMime(path), bytes }
+    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
+    if (win && desktopIntegrationRendererReady) win.webContents.send(DESKTOP_INTEGRATIONS_FILES_CHANNEL, [payload])
+    else pendingExternalFiles.push(payload)
+  } catch (error) {
+    sendDesktopIntegrationError(error)
+  }
+}
+
+function powershellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+async function captureScreenPng(): Promise<{ root: string; imagePath: string }> {
+  if (process.platform !== 'win32') throw new Error('Screen OCR is available on Windows only.')
+  const root = await mkdtemp(join(app.getPath('temp'), 'bettertts-ocr-'))
+  const imagePath = join(root, 'screen.png')
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    `$out = ${powershellLiteral(imagePath)}`,
+    '$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen',
+    '$bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)',
+    '$graphics = [System.Drawing.Graphics]::FromImage($bitmap)',
+    '$graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bitmap.Size)',
+    '$bitmap.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$graphics.Dispose()',
+    '$bitmap.Dispose()',
+  ].join('; ')
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  try {
+    await execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
+      windowsHide: true,
+      timeout: 30_000,
+      maxBuffer: 256 * 1024,
+    })
+    return { root, imagePath }
+  } catch (error) {
+    await rm(root, { recursive: true, force: true }).catch(() => undefined)
+    throw new Error(`Could not capture the Windows screen for OCR: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function runDesktopOcr(): Promise<{ text: string; tesseractPath?: string }> {
+  if (!desktopIntegrationSettings.ocrEnabled) throw new Error('Screen OCR is disabled in BetterTTS settings.')
+  desktopTesseractPath ??= await findTesseract()
+  if (!desktopTesseractPath) throw new Error('Tesseract was not found. Install Tesseract OCR or set BETTERTTS_TESSERACT_PATH, then enable Screen OCR again.')
+  const captured = await captureScreenPng()
+  try {
+    const result = await execFile(desktopTesseractPath, [captured.imagePath, 'stdout', '-l', 'eng', '--psm', '6'], {
+      windowsHide: true,
+      timeout: 120_000,
+      maxBuffer: 2 * 1024 * 1024,
+      env: process.env,
+    })
+    const text = result.stdout.replace(/\r\n?/gu, '\n').trim().slice(0, MAX_EXTERNAL_TEXT_CHARS)
+    if (!text) throw new Error('Tesseract found no readable text on the captured screen.')
+    return { text, tesseractPath: desktopTesseractPath }
+  } finally {
+    await rm(captured.root, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+ipcMain.handle(DESKTOP_INTEGRATIONS_CHANNEL, async (event, request: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid desktop integration request.')
+  await initializeDesktopIntegrations()
+  if (!request || typeof request !== 'object') return desktopIntegrationStatus()
+  const message = request as { action?: unknown; kind?: unknown; enabled?: unknown }
+  if (message.action === 'status') return desktopIntegrationStatus()
+  if (message.action === 'set-enabled' && (message.kind === 'hotkey' || message.kind === 'explorer' || message.kind === 'ocr') && typeof message.enabled === 'boolean') {
+    try {
+      return await configureDesktopIntegration(message.kind, message.enabled)
+    } catch (error) {
+      setDesktopIntegrationError(error)
+      throw error
+    }
+  }
+  throw new Error('Unsupported desktop integration request.')
+})
+
+ipcMain.handle(DESKTOP_INTEGRATIONS_OCR_CHANNEL, async (event) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid screen OCR request.')
+  await initializeDesktopIntegrations()
+  try {
+    const result = await runDesktopOcr()
+    desktopIntegrationLastError = undefined
+    broadcastDesktopIntegrationStatus()
+    return result
+  } catch (error) {
+    setDesktopIntegrationError(error)
+    throw error
+  }
+})
 
 function sendToSubscriber(message: unknown): void {
   if (ttsHostSubscriber && !ttsHostSubscriber.isDestroyed()) {
@@ -940,6 +1262,14 @@ function createWindow(): BrowserWindow {
     if (!IS_SMOKE || SHOW_SMOKE_WINDOW) win.show()
   })
 
+  win.webContents.once('did-finish-load', () => {
+    desktopIntegrationRendererReady = true
+    setTimeout(sendPendingDesktopIntegrationEvents, 100)
+  })
+  win.on('closed', () => {
+    if (BrowserWindow.getAllWindows().length === 0) desktopIntegrationRendererReady = false
+  })
+
   win.loadURL(IS_DEV ? DEV_URL! : `${APP_ORIGIN}/index.html`)
   return win
 }
@@ -969,9 +1299,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, rvc: !!window.betterttsPlatform.rvc, rvcWeights: !!window.betterttsPlatform.rvcWeights, openAiServer: !!window.betterttsPlatform.openAiServer }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, rvc: !!window.betterttsPlatform.rvc, rvcWeights: !!window.betterttsPlatform.rvcWeights, openAiServer: !!window.betterttsPlatform.openAiServer, desktopIntegrations: !!window.betterttsPlatform.desktopIntegrations }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean; desktopIntegrations: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -997,6 +1327,22 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         projectActions: Array.from(projectPanel?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
       }
     })()`)
+    result.desktopIntegrationsUi = await win.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector('[aria-label="Desktop workflow integrations"]')
+      panel?.scrollIntoView({ block: 'center' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const inputs = Array.from(panel?.querySelectorAll('input[type="checkbox"]') ?? [])
+      return {
+        panel: !!panel,
+        toggleCount: inputs.length,
+        disabledByDefault: inputs.length === 3 && inputs.every((input) => !input.checked),
+        ocrAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('OCR screen to script')),
+      }
+    })()`)
+    const desktopIntegrationsImage = await win.webContents.capturePage()
+    const desktopIntegrationsScreenshotPath = join(smokeOutputDirectory, 'desktop-integrations-smoke.png')
+    await writeFile(desktopIntegrationsScreenshotPath, desktopIntegrationsImage.toPNG())
+    result.desktopIntegrationsScreenshot = desktopIntegrationsScreenshotPath
     result.openAiUi = await win.webContents.executeJavaScript(`(async () => {
       const panel = document.querySelector('[aria-label="Local OpenAI-compatible TTS server"]')
       panel?.scrollIntoView({ block: 'center' })
@@ -1157,6 +1503,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&
       probe.platform?.openAiServer === true &&
+      probe.platform?.desktopIntegrations === true &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
       Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
@@ -1164,6 +1511,10 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
       Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
       Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
+      Boolean((result.desktopIntegrationsUi as { panel?: boolean; toggleCount?: number; disabledByDefault?: boolean; ocrAction?: boolean } | undefined)?.panel) &&
+      (result.desktopIntegrationsUi as { toggleCount?: number } | undefined)?.toggleCount === 3 &&
+      Boolean((result.desktopIntegrationsUi as { disabledByDefault?: boolean } | undefined)?.disabledByDefault) &&
+      Boolean((result.desktopIntegrationsUi as { ocrAction?: boolean } | undefined)?.ocrAction) &&
       Boolean((result.narratorUi as { toggle?: boolean; enabled?: boolean; narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.toggle) &&
       Boolean((result.narratorUi as { enabled?: boolean } | undefined)?.enabled) &&
       Boolean((result.narratorUi as { narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.narrationVoice) &&
@@ -1204,17 +1555,24 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
   app.exit(result.ok ? 0 : 1)
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (!HAS_SINGLE_INSTANCE_LOCK) return
+  await initializeDesktopIntegrations()
   if (IS_DEV) applyDevSecurityHeaders()
   else registerAppProtocol()
 
   const win = createWindow()
   configureUpdater()
   if (IS_SMOKE) void runSmoke(win)
+  if (initialExternalOpenPath) void queueExternalFile(initialExternalOpenPath)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('will-quit', () => {
+  if (desktopHotkeyRegistered) globalShortcut.unregister(DESKTOP_INTEGRATION_HOTKEY)
 })
 
 app.on('window-all-closed', () => {

@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-401%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-405%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -80,6 +80,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, durable resume, and previous/next sentence controls
 - **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis
+- **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer “Convert to audiobook” entries for TXT/EPUB/PDF/DOCX, and optional Tesseract screen OCR; all three integrations are independently disableable and the web/PWA build remains unchanged
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
 - **Voice preview** — one-click preview for each voice with session-cached audio
@@ -153,6 +154,8 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 The headless CLI is built by `npm run desktop:build` and runs the same verified Sherpa native host as the Windows app, but never opens a window. `bettertts synth --in book.epub --voice af_heart --m4b --out book.m4b` writes the audiobook plus sibling `book.srt` and `book.vtt` files; TXT input, WAV/MP3/Opus/FLAC formats, `--dry-run`, `--json`, `--force`, and `--no-captions` are also supported. Native model packs live in the user cache (override with `BETTERTTS_MODEL_CACHE`), and M4B output requires FFmpeg on `PATH` or `BETTERTTS_FFMPEG_PATH`.
 
 Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing.
+
+Desktop workflow integrations are available from **Voice chain -> Engine -> System & diagnostics** and are off by default. The read-selection hotkey reads the current clipboard after you copy a selection; it never injects keyboard input. The Explorer option registers per-user context-menu entries for TXT, EPUB, PDF, and DOCX and queues the imported file in BetterTTS. Screen OCR requires a local Tesseract installation or `BETTERTTS_TESSERACT_PATH`; capture runs only when you request it. Disable each option independently to remove its hotkey or Explorer registration and stop using OCR; web/PWA builds do not expose OS integrations.
 
 Qwen3-TTS is available only in the Windows desktop app. Select it under Voice chain -> Engine to inspect the sidecar status, then choose **Set up Qwen3-TTS** when the private Python 3.12 environment is not installed. Setup downloads `torch` and `qwen-tts` into the desktop user-data folder; the 0.6B model weights download on first synthesis into `models/qwen/` and are never bundled in the installer. A disposable worker isolates inference and reports setup, progress, cancellation, and crash recovery. The web/PWA build remains unchanged when the desktop bridge is absent.
 

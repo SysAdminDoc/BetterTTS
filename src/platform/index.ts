@@ -111,6 +111,36 @@ export type OpenAiTtsServerBridge = {
   stop: () => Promise<OpenAiTtsServerStatus>
 }
 
+export type DesktopIntegrationKind = 'hotkey' | 'explorer' | 'ocr'
+
+export type DesktopIntegrationStatus = {
+  hotkeyEnabled: boolean
+  explorerEnabled: boolean
+  ocrEnabled: boolean
+  hotkey: string
+  hotkeyRegistered: boolean
+  explorerRegistered: boolean
+  ocrAvailable: boolean
+  tesseractPath?: string
+  lastError?: string
+}
+
+export type DesktopExternalFile = {
+  name: string
+  type: string
+  bytes: Uint8Array
+}
+
+export type DesktopIntegrationsBridge = {
+  status: () => Promise<DesktopIntegrationStatus>
+  setEnabled: (kind: DesktopIntegrationKind, enabled: boolean) => Promise<DesktopIntegrationStatus>
+  ocr: () => Promise<{ text: string; tesseractPath?: string }>
+  onStatus: (listener: (status: DesktopIntegrationStatus) => void) => () => void
+  onText: (listener: (message: { text?: unknown; source?: unknown }) => void) => () => void
+  onFiles: (listener: (files: unknown) => void) => () => void
+  onError: (listener: (error: { message?: unknown }) => void) => () => void
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -125,6 +155,7 @@ export type DesktopBridge = {
   rvc?: RvcBridge
   rvcWeights?: RvcWeightsBridge
   openAiServer?: OpenAiTtsServerBridge
+  desktopIntegrations?: DesktopIntegrationsBridge
 }
 
 declare global {
@@ -198,4 +229,9 @@ export function getRvcBridge(): RvcBridge | null {
 export function getRvcWeightsBridge(): RvcWeightsBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.rvcWeights ?? null
+}
+
+export function getDesktopIntegrationsBridge(): DesktopIntegrationsBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.desktopIntegrations ?? null
 }

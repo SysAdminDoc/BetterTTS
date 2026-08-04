@@ -90,7 +90,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
+import { type DesktopExternalFile, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
 import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
@@ -419,6 +419,27 @@ function importSizeError(file: File): Toast | null {
     tone: 'warn',
     message: `${shortUiLabel(file.name, 56)} is ${formatBytes(file.size)}. Import files must be ${formatBytes(MAX_IMPORT_BYTES)} or smaller.`,
   }
+}
+
+function isDesktopIntegrationStatus(value: unknown): value is DesktopIntegrationStatus {
+  if (!value || typeof value !== 'object') return false
+  const status = value as Partial<DesktopIntegrationStatus>
+  return typeof status.hotkeyEnabled === 'boolean'
+    && typeof status.explorerEnabled === 'boolean'
+    && typeof status.ocrEnabled === 'boolean'
+    && typeof status.hotkey === 'string'
+    && typeof status.hotkeyRegistered === 'boolean'
+    && typeof status.explorerRegistered === 'boolean'
+    && typeof status.ocrAvailable === 'boolean'
+}
+
+function isDesktopExternalFile(value: unknown): value is DesktopExternalFile {
+  if (!value || typeof value !== 'object') return false
+  const file = value as Partial<DesktopExternalFile>
+  return typeof file.name === 'string'
+    && file.name.length > 0
+    && typeof file.type === 'string'
+    && file.bytes instanceof Uint8Array
 }
 
 async function prepareWhisperAudio(file: File): Promise<Uint8Array> {
@@ -1328,6 +1349,8 @@ function App() {
   const [openAiTtsPort, setOpenAiTtsPort] = useState(getInitialOpenAiTtsPort)
   const [openAiTtsStatus, setOpenAiTtsStatus] = useState<OpenAiTtsServerStatus | null>(null)
   const [openAiTtsAction, setOpenAiTtsAction] = useState<'start' | 'stop' | 'refresh' | null>(null)
+  const [desktopIntegrationStatus, setDesktopIntegrationStatus] = useState<DesktopIntegrationStatus | null>(null)
+  const [desktopIntegrationAction, setDesktopIntegrationAction] = useState<DesktopIntegrationKind | null>(null)
   const [loudnessNormalization, setLoudnessNormalization] = useState(false)
   const [m4bCoverFile, setM4bCoverFile] = useState<File | null>(null)
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
@@ -1421,6 +1444,7 @@ function App() {
   const captionAbortRef = useRef<AbortController | null>(null)
   const generatingRef = useRef(false)
   const captionUrlsRef = useRef<string[]>([])
+  const importedFileHandlerRef = useRef<((file: File, autoQueue?: boolean) => Promise<void>) | null>(null)
 
   // A run scheduled 700 ms after the previous one ends must not have its
   // progress bar wiped by the previous run's reset timer.
@@ -1465,6 +1489,16 @@ function App() {
   const desktopRvc = useMemo(() => rvcAvailable(), [])
   const desktopRvcWeights = useMemo(() => rvcWeightsAvailable(), [])
   const desktopOpenAiServer = useMemo(() => getOpenAiTtsServerBridge(), [])
+  const desktopIntegrations = useMemo(() => getDesktopIntegrationsBridge(), [])
+  const desktopIntegrationSnapshot: DesktopIntegrationStatus = desktopIntegrationStatus ?? {
+    hotkeyEnabled: false,
+    explorerEnabled: false,
+    ocrEnabled: false,
+    hotkey: 'CommandOrControl+Alt+B',
+    hotkeyRegistered: false,
+    explorerRegistered: false,
+    ocrAvailable: false,
+  }
   const openAiServerSupported = useMemo(() => openAiTtsServerAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
   const visibleQueueJobs = useMemo(() => normalizedProjectSearch
@@ -1824,6 +1858,54 @@ function App() {
       cancelled = true
     }
   }, [openAiServerSupported])
+
+  useEffect(() => {
+    if (!desktopIntegrations) return
+    let cancelled = false
+    const applyStatus = (value: unknown) => {
+      if (!cancelled && isDesktopIntegrationStatus(value)) setDesktopIntegrationStatus(value)
+    }
+    const unsubscribeStatus = desktopIntegrations.onStatus(applyStatus)
+    const unsubscribeText = desktopIntegrations.onText((message) => {
+      if (cancelled || typeof message.text !== 'string') return
+      const nextText = message.text.slice(0, MAX_TEXT_CHARS)
+      if (!nextText.trim()) return
+      setText(nextText)
+      showToast({ tone: 'ok', message: `Loaded ${typeof message.source === 'string' ? message.source : 'external text'} into the script.` })
+    })
+    const unsubscribeFiles = desktopIntegrations.onFiles((value) => {
+      if (cancelled || !Array.isArray(value)) return
+      const files = value.filter(isDesktopExternalFile).map((payload) => {
+        const bytes = new Uint8Array(payload.bytes.byteLength)
+        bytes.set(payload.bytes)
+        return new File([bytes.buffer], payload.name, { type: payload.type })
+      })
+      if (files.length === 0) return
+      const importFile = importedFileHandlerRef.current
+      if (!importFile) return
+      void files.reduce((promise, file) => promise.then(() => importFile(file, true)), Promise.resolve())
+    })
+    const unsubscribeError = desktopIntegrations.onError((error) => {
+      if (cancelled || typeof error.message !== 'string') return
+      recordDiagnosticEvent('warn', error.message, 'desktop.integration')
+      showToast({ tone: 'warn', message: error.message })
+    })
+    desktopIntegrations.status().then(applyStatus).catch((error: unknown) => {
+      if (cancelled) return
+      recordDiagnosticEvent('warn', error, 'desktop.integration.status')
+      showToast({ tone: 'warn', message: 'Desktop workflow integrations are unavailable in this session.' })
+    })
+    return () => {
+      cancelled = true
+      unsubscribeStatus()
+      unsubscribeText()
+      unsubscribeFiles()
+      unsubscribeError()
+    }
+    // The desktop bridge is stable for the lifetime of the renderer; event
+    // handlers intentionally close over the current editor/import callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopIntegrations])
 
   useEffect(() => {
     if (!desktopRvc) return
@@ -2477,6 +2559,41 @@ function App() {
       setToast((current) => (current?.message === nextToast.message ? null : current))
       toastTimerRef.current = null
     }, nextToast.action ? 8500 : 5500)
+  }
+
+  async function handleDesktopIntegrationToggle(kind: DesktopIntegrationKind, enabled: boolean) {
+    if (!desktopIntegrations || desktopIntegrationAction !== null) return
+    setDesktopIntegrationAction(kind)
+    try {
+      const next = await desktopIntegrations.setEnabled(kind, enabled)
+      if (isDesktopIntegrationStatus(next)) setDesktopIntegrationStatus(next)
+      showToast({
+        tone: 'ok',
+        message: `${kind === 'hotkey' ? 'Read-selection hotkey' : kind === 'explorer' ? 'Explorer context menu' : 'Screen OCR'} ${enabled ? 'enabled' : 'disabled'}.`,
+      })
+    } catch (error) {
+      showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Could not update the desktop integration.' })
+    } finally {
+      setDesktopIntegrationAction(null)
+    }
+  }
+
+  async function handleDesktopOcr() {
+    if (!desktopIntegrations || desktopIntegrationAction !== null) return
+    setDesktopIntegrationAction('ocr')
+    setStatus('Capturing screen text…')
+    try {
+      const result = await desktopIntegrations.ocr()
+      const nextText = typeof result.text === 'string' ? result.text.slice(0, MAX_TEXT_CHARS) : ''
+      if (!nextText.trim()) throw new Error('Screen OCR returned no readable text.')
+      setText(nextText)
+      showToast({ tone: 'ok', message: 'Screen text loaded into the script.' })
+    } catch (error) {
+      showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Screen OCR failed.' })
+    } finally {
+      setStatus('Ready')
+      setDesktopIntegrationAction(null)
+    }
   }
 
   async function handleQwenSetup() {
@@ -3790,9 +3907,10 @@ function App() {
     }
   }
 
-  async function queueCurrentText() {
-    if (!usableText.trim()) return
-    const sourceText = cleanupText(usableText, cleanup)
+  async function queueCurrentText(sourceOverride?: string, titleOverride?: string) {
+    const currentText = sourceOverride ?? usableText
+    if (!currentText.trim()) return
+    const sourceText = cleanupText(currentText, cleanup)
     const chunks: QueueSourceChunk[] = narratorMode
       ? splitNarratorText(sourceText).map((segment) => ({
         text: segment.text,
@@ -3803,7 +3921,7 @@ function App() {
       : splitInput(sourceText, separateLines).map((text) => ({ text }))
     if (chunks.length === 0) return
     const job = createQueueJob(
-      usableText.slice(0, 50).replace(/\s+/g, ' ').trim(),
+      titleOverride?.trim() || currentText.slice(0, 50).replace(/\s+/g, ' ').trim(),
       chunks,
     )
     if (!job) {
@@ -4381,7 +4499,7 @@ function App() {
     }
   }
 
-  async function handleDocumentImport(file: File) {
+  async function handleDocumentImport(file: File, autoQueue = false) {
     const sizeError = importSizeError(file)
     if (sizeError) {
       showToast(sizeError)
@@ -4415,6 +4533,7 @@ function App() {
           ? `${fileLabel} imported from ${imported.kind.toUpperCase()} and trimmed to ${MAX_TEXT_CHARS} characters; ${chunkCount} cleaned chunks ready.`
           : `${fileLabel} imported from ${imported.kind.toUpperCase()}; ${chunkCount} cleaned chunks ready.`,
       })
+      if (autoQueue) await queueCurrentText(trimmed, file.name.replace(/\.(?:pdf|docx)$/iu, ''))
     } catch (err) {
       showToast(err instanceof Error && err.name === 'AbortError'
         ? { tone: 'warn', message: 'Document import cancelled. The previous script was kept.' }
@@ -4427,14 +4546,7 @@ function App() {
     }
   }
 
-  function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-
-    if (!file) {
-      return
-    }
-
+  async function handleImportedFile(file: File, autoQueue = false) {
     const sizeError = importSizeError(file)
     if (sizeError) {
       showToast(sizeError)
@@ -4443,12 +4555,12 @@ function App() {
     const fileLabel = shortUiLabel(file.name, 72)
     const lowerName = file.name.toLowerCase()
     if (lowerName.endsWith('.epub')) {
-      handleEpubImport(file)
+      await handleEpubImport(file)
       return
     }
 
     if (lowerName.endsWith('.pdf') || lowerName.endsWith('.docx') || file.type === 'application/pdf' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      handleDocumentImport(file)
+      await handleDocumentImport(file, autoQueue)
       return
     }
 
@@ -4457,19 +4569,38 @@ function App() {
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      const raw = String(reader.result ?? '')
-      const truncated = raw.length > MAX_TEXT_CHARS
-      setText(raw.slice(0, MAX_TEXT_CHARS))
-      showToast(
-        truncated
-          ? { tone: 'warn', message: `${fileLabel} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters.` }
-          : { tone: 'ok', message: `${fileLabel} imported.` },
-      )
-    }
-    reader.onerror = () => showToast({ tone: 'error', message: `${fileLabel} import failed.` })
-    reader.readAsText(file)
+    await new Promise<void>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const raw = String(reader.result ?? '')
+        const truncated = raw.length > MAX_TEXT_CHARS
+        const trimmed = raw.slice(0, MAX_TEXT_CHARS)
+        setText(trimmed)
+        showToast(
+          truncated
+            ? { tone: 'warn', message: `${fileLabel} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters.` }
+            : { tone: 'ok', message: `${fileLabel} imported.` },
+        )
+        if (autoQueue) {
+          void queueCurrentText(trimmed, file.name.replace(/\.txt$/iu, '')).finally(resolve)
+        } else {
+          resolve()
+        }
+      }
+      reader.onerror = () => {
+        showToast({ tone: 'error', message: `${fileLabel} import failed.` })
+        resolve()
+      }
+      reader.readAsText(file)
+    })
+  }
+
+  importedFileHandlerRef.current = handleImportedFile
+
+  function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) void handleImportedFile(file)
   }
 
   function handleBgmFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -5334,6 +5465,70 @@ function App() {
                     <small>Opt in to local reference-voice cloning. Use only audio you own or have permission to use; clips are decoded in memory and never uploaded.</small>
                   </span>
                 </label>
+                {desktopIntegrations ? (
+                  <div className="diagnostics-panel desktop-integrations-panel" aria-label="Desktop workflow integrations">
+                    <div className="cache-manager-head">
+                      <span>
+                        <strong>Desktop workflow integrations</strong>
+                        <small>Windows-only helpers. Enable each here; web/PWA has no OS hooks.</small>
+                      </span>
+                      <span className={`openai-status ${desktopIntegrationStatus ? 'running' : ''}`} role="status">
+                        <span className="status-dot" aria-hidden="true" />
+                        {desktopIntegrationStatus ? 'Ready' : 'Checking'}
+                      </span>
+                    </div>
+                    <label className="toggle-row" htmlFor="desktop-read-selection-hotkey" aria-label="Read copied selection with a global hotkey">
+                      <input
+                        id="desktop-read-selection-hotkey"
+                        type="checkbox"
+                        checked={desktopIntegrationSnapshot.hotkeyEnabled}
+                        disabled={desktopIntegrationAction !== null}
+                        onChange={(event) => void handleDesktopIntegrationToggle('hotkey', event.target.checked)}
+                      />
+                      <span>
+                        <strong>Read copied selection with a global hotkey</strong>
+                        <small>{desktopIntegrationSnapshot.hotkey} · {desktopIntegrationSnapshot.hotkeyRegistered ? 'Registered' : desktopIntegrationSnapshot.hotkeyEnabled ? 'Not registered' : 'Disabled'}. Copy first; no input is injected.</small>
+                      </span>
+                    </label>
+                    <label className="toggle-row" htmlFor="desktop-explorer-menu" aria-label="Explorer Convert to audiobook menu">
+                      <input
+                        id="desktop-explorer-menu"
+                        type="checkbox"
+                        checked={desktopIntegrationSnapshot.explorerEnabled}
+                        disabled={desktopIntegrationAction !== null}
+                        onChange={(event) => void handleDesktopIntegrationToggle('explorer', event.target.checked)}
+                      />
+                      <span>
+                        <strong>Explorer “Convert to audiobook” menu</strong>
+                        <small>TXT, EPUB, PDF, DOCX · {desktopIntegrationSnapshot.explorerRegistered ? 'Registered' : desktopIntegrationSnapshot.explorerEnabled ? 'Not registered' : 'Disabled'}.</small>
+                      </span>
+                    </label>
+                    <label className="toggle-row" htmlFor="desktop-screen-ocr" aria-label="Screen OCR with Tesseract">
+                      <input
+                        id="desktop-screen-ocr"
+                        type="checkbox"
+                        checked={desktopIntegrationSnapshot.ocrEnabled}
+                        disabled={desktopIntegrationAction !== null}
+                        onChange={(event) => void handleDesktopIntegrationToggle('ocr', event.target.checked)}
+                      />
+                      <span>
+                        <strong>Screen OCR with Tesseract</strong>
+                        <small>{desktopIntegrationSnapshot.ocrAvailable ? 'Tesseract is available; capture runs only when requested.' : 'Install Tesseract OCR or set BETTERTTS_TESSERACT_PATH.'}</small>
+                      </span>
+                    </label>
+                    <div className="diagnostics-actions">
+                      <button
+                        type="button"
+                        onClick={() => void handleDesktopOcr()}
+                        disabled={!desktopIntegrationSnapshot.ocrEnabled || !desktopIntegrationSnapshot.ocrAvailable || desktopIntegrationAction !== null}
+                      >
+                        {desktopIntegrationAction === 'ocr' ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
+                        {desktopIntegrationAction === 'ocr' ? 'Reading screen…' : 'OCR screen to script'}
+                      </button>
+                    </div>
+                    {desktopIntegrationSnapshot.lastError ? <small className="openai-error">{shortUiLabel(desktopIntegrationSnapshot.lastError, 220)}</small> : null}
+                  </div>
+                ) : null}
                 <div className="diagnostics-panel byo-panel" aria-label="Bring-your-own non-commercial weights">
                   <div className="cache-manager-head">
                     <span>
@@ -6651,7 +6846,7 @@ function App() {
               <button
                 type="button"
                 className="secondary-action"
-                onClick={queueCurrentText}
+                onClick={() => void queueCurrentText()}
                 disabled={isGenerating || isImportingFile || importingUrl || queueDisabledReason !== null}
                 title={isImportingFile || importingUrl ? 'Finish or cancel the import before creating a queue job.' : queueDisabledReason ?? 'Queue current text for file export.'}
               >

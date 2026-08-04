@@ -11,6 +11,12 @@ const BYO_WEIGHTS_CHANNEL = 'bettertts:byo-weights'
 const RVC_CHANNEL = 'bettertts:rvc'
 const RVC_WEIGHTS_CHANNEL = 'bettertts:rvc-weights'
 const OPENAI_TTS_CHANNEL = 'bettertts:openai-tts'
+const DESKTOP_INTEGRATIONS_STATUS_CHANNEL = 'bettertts:desktop-integrations-status'
+const DESKTOP_INTEGRATIONS_TEXT_CHANNEL = 'bettertts:desktop-integrations-text'
+const DESKTOP_INTEGRATIONS_FILES_CHANNEL = 'bettertts:desktop-integrations-files'
+const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error'
+const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
+const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -133,6 +139,37 @@ const bridge = {
     },
     stop(): Promise<unknown> {
       return ipcRenderer.invoke(OPENAI_TTS_CHANNEL, { action: 'stop' })
+    },
+  },
+  desktopIntegrations: {
+    status(): Promise<unknown> {
+      return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_CHANNEL, { action: 'status' })
+    },
+    setEnabled(kind: 'hotkey' | 'explorer' | 'ocr', enabled: boolean): Promise<unknown> {
+      return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_CHANNEL, { action: 'set-enabled', kind, enabled })
+    },
+    ocr(): Promise<unknown> {
+      return ipcRenderer.invoke(DESKTOP_INTEGRATIONS_OCR_CHANNEL)
+    },
+    onStatus(listener: (status: unknown) => void): () => void {
+      const handler = (_event: unknown, status: unknown) => listener(status)
+      ipcRenderer.on(DESKTOP_INTEGRATIONS_STATUS_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(DESKTOP_INTEGRATIONS_STATUS_CHANNEL, handler)
+    },
+    onText(listener: (message: unknown) => void): () => void {
+      const handler = (_event: unknown, message: unknown) => listener(message)
+      ipcRenderer.on(DESKTOP_INTEGRATIONS_TEXT_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(DESKTOP_INTEGRATIONS_TEXT_CHANNEL, handler)
+    },
+    onFiles(listener: (files: unknown) => void): () => void {
+      const handler = (_event: unknown, files: unknown) => listener(files)
+      ipcRenderer.on(DESKTOP_INTEGRATIONS_FILES_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(DESKTOP_INTEGRATIONS_FILES_CHANNEL, handler)
+    },
+    onError(listener: (error: unknown) => void): () => void {
+      const handler = (_event: unknown, error: unknown) => listener(error)
+      ipcRenderer.on(DESKTOP_INTEGRATIONS_ERROR_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(DESKTOP_INTEGRATIONS_ERROR_CHANNEL, handler)
     },
   },
 }

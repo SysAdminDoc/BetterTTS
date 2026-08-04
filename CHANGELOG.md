@@ -20,6 +20,7 @@
 - Added an opt-in Windows-only RVC post-stage. Users can register consented local `.pth`/`.index` models with license and provenance, re-timbre a generated clip after TTS, optionally blend a second model through a bounded second inference pass, and retain the conversion metadata on the saved clip; the optional Python runtime is never bundled.
 - Added narrator mode for long-form scripts. Quote-aware and explicit-speaker parsing separates narration from dialogue, per-role voices persist on queue chunks, ZIP manifests retain the assignments, and chaptered M4B export uses the rendered role-specific audio.
 - Added a headless `bettertts synth` CLI that reuses the verified native Sherpa host for TXT/EPUB conversion, bounded chunking, WAV/MP3/Opus/FLAC/M4B export, SRT/VTT captions, JSON progress, dry runs, and scriptable exit codes without launching Electron.
+- Added opt-in Windows desktop workflow integrations: a clipboard-based global read-selection hotkey, per-user Explorer context-menu entries that queue TXT/EPUB/PDF/DOCX files, and optional Tesseract screen OCR. Each integration is independently disableable and the web/PWA bridge remains absent.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -47,6 +48,7 @@
 - Added RVC model metadata, consent, blend/provenance, conversion IPC/client, Python adapter protocol, missing-runtime/model recovery, and web-bridge isolation coverage.
 - Added narrator quote/speaker parsing, unmatched-quote fallback, queue role/voice migration, metadata preservation during regeneration, and packaged Narrator mode UI smoke coverage.
 - Added CLI argument/chunk/caption core coverage plus real native WAV/caption and FFmpeg M4B conversion probes.
+- Added desktop integration contract coverage for opt-in defaults, persisted-setting sanitization, supported external-file routing, MIME mapping, Explorer command construction, packaged UI controls, and disabled-by-default smoke behavior.
 
 ## v0.21.0 - 2026-07-29
 
