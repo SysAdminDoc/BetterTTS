@@ -197,7 +197,7 @@ import {
   synthesizeKitten,
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
-import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, parsePauseTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
+import { type CleanupOptions, DEFAULT_CLEANUP, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText, type NarratorRole, type NarratorSegment } from './lib/text.ts'
 import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting } from './lib/settings.ts'
 import {
   TECH_PRONUNCIATION_PACK,
@@ -213,6 +213,11 @@ import {
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
+import { dispatchGeneration } from './lib/generation-dispatcher.ts'
+import { useObjectUrls } from './lib/object-urls.ts'
+import { useGeneration } from './hooks/useGeneration.ts'
+import { useLibrary } from './hooks/useLibrary.ts'
+import { useQueue } from './hooks/useQueue.ts'
 import type { SentenceRetakeAudio } from './lib/sentence-retakes.ts'
 import {
   MAX_WHISPER_AUDIO_BYTES,
@@ -1467,9 +1472,6 @@ function App() {
   const [zipUrl, setZipUrl] = useState<string | null>(null)
   const [zipName, setZipName] = useState('bettertts-audio.zip')
   const [toast, setToast] = useState<Toast | null>(null)
-  const [progress, setProgress] = useState<number | null>(null)
-  const [status, setStatus] = useState('Ready')
-  const [isGenerating, setIsGenerating] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [pauseDuration, setPauseDuration] = useState(1)
   const [forceWasm, setForceWasm] = useState(() => {
@@ -1512,7 +1514,6 @@ function App() {
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([])
   const [browserVoiceUri, setBrowserVoiceUri] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null)
-  const [genStats, setGenStats] = useState<{ elapsed: number; chars: number; audioDuration: number; timeToFirstAudioMs: number | null } | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showSystemTools, setShowSystemTools] = useState(false)
   const [showPronunciations, setShowPronunciations] = useState(false)
@@ -1537,16 +1538,25 @@ function App() {
   const [captionResult, setCaptionResult] = useState<ImportedCaption | null>(null)
   const [isCaptioning, setIsCaptioning] = useState(false)
   const [captionProgress, setCaptionProgress] = useState<number | null>(null)
-  const [library, setLibrary] = useState<ClipRecord[]>([])
+  const { library, setLibrary } = useLibrary()
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
   const [persistenceOutcome, setPersistenceOutcome] = useState(getPersistenceOutcome)
-  const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
-  const [activeJobId, setActiveJobId] = useState<string | null>(null)
-  const [regeneratingChunkKey, setRegeneratingChunkKey] = useState<string | null>(null)
-  const [m4bExportingJobId, setM4bExportingJobId] = useState<string | null>(null)
-  const [zipExportingJobId, setZipExportingJobId] = useState<string | null>(null)
-  const [epubExportingJobId, setEpubExportingJobId] = useState<string | null>(null)
-  const [m4bCapability, setM4bCapability] = useState<M4bCapability | null>(null)
+  const {
+    queueJobs,
+    setQueueJobs,
+    activeJobId,
+    setActiveJobId,
+    regeneratingChunkKey,
+    setRegeneratingChunkKey,
+    m4bExportingJobId,
+    setM4bExportingJobId,
+    zipExportingJobId,
+    setZipExportingJobId,
+    epubExportingJobId,
+    setEpubExportingJobId,
+    m4bCapability,
+    setM4bCapability,
+  } = useQueue()
   const [webGpuDiagnostics, setWebGpuDiagnostics] = useState<WebGpuDiagnostics | null>(null)
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
@@ -1593,27 +1603,28 @@ function App() {
   const previewCacheRef = useRef<Map<string, string>>(new Map())
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const objectUrlsRef = useRef<string[]>([])
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
-  const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
-  const abortRef = useRef(false)
-  const generationAbortRef = useRef<AbortController | null>(null)
   const importAbortRef = useRef<AbortController | null>(null)
   const articleImportAbortRef = useRef<AbortController | null>(null)
   const captionAbortRef = useRef<AbortController | null>(null)
-  const generatingRef = useRef(false)
-  const captionUrlsRef = useRef<string[]>([])
+  const {
+    progress,
+    setProgress,
+    status,
+    setStatus,
+    isGenerating,
+    setIsGenerating,
+    genStats,
+    setGenStats,
+    progressTimerRef,
+    abortRef,
+    generationAbortRef,
+    generatingRef,
+    clearProgressResetTimer,
+  } = useGeneration()
+  const { rememberUrl, rememberCaptionUrl, clearOutputUrls, clearCaptionUrls } = useObjectUrls()
   const importedFileHandlerRef = useRef<((file: File, autoQueue?: boolean) => Promise<void>) | null>(null)
   const epubMappingApiRef = useRef<EpubMappingApi | null>(null)
-
-  // A run scheduled 700 ms after the previous one ends must not have its
-  // progress bar wiped by the previous run's reset timer.
-  function clearProgressResetTimer() {
-    if (progressTimerRef.current) {
-      clearTimeout(progressTimerRef.current)
-      progressTimerRef.current = null
-    }
-  }
 
   async function loadEpubMappingApi(): Promise<EpubMappingApi> {
     if (epubMappingApiRef.current) return epubMappingApiRef.current
@@ -1992,7 +2003,7 @@ function App() {
       unsubscribe()
       if (refreshTimer !== null) window.clearTimeout(refreshTimer)
     }
-  }, [])
+  }, [setLibrary, setQueueJobs])
 
   useEffect(() => {
     persistSetting('bettertts-pronunciations', serializePronunciationDictionary(pronunciations))
@@ -2200,7 +2211,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [setM4bCapability])
 
   useEffect(() => {
     if (!availableVoices.some((voice) => voice.id === voiceId)) {
@@ -2803,45 +2814,18 @@ function App() {
     }
   }, [desktopSidecar])
 
-  useEffect(() => {
-    const objectUrls = objectUrlsRef.current
-    const previewCache = previewCacheRef.current
-    const captionUrls = captionUrlsRef.current
-    return () => {
-      for (const url of objectUrls) {
-        URL.revokeObjectURL(url)
-      }
-      for (const url of captionUrls) {
-        URL.revokeObjectURL(url)
-      }
-      for (const url of previewCache.values()) {
-        URL.revokeObjectURL(url)
-      }
-      previewCache.clear()
-    }
+  useEffect(() => () => {
+    for (const url of previewCacheRef.current.values()) URL.revokeObjectURL(url)
+    previewCacheRef.current.clear()
   }, [])
 
-  function rememberUrl(url: string) {
-    objectUrlsRef.current.push(url)
-    return url
-  }
-
-  function rememberCaptionUrl(url: string) {
-    captionUrlsRef.current.push(url)
-    return url
-  }
-
   function clearCaptionResult() {
-    for (const url of captionUrlsRef.current) URL.revokeObjectURL(url)
-    captionUrlsRef.current = []
+    clearCaptionUrls()
     setCaptionResult(null)
   }
 
   function clearOutputs() {
-    for (const url of objectUrlsRef.current) {
-      URL.revokeObjectURL(url)
-    }
-    objectUrlsRef.current = []
+    clearOutputUrls()
     setResults([])
     setActiveOutputId(null)
     setZipUrl(null)
@@ -3545,99 +3529,54 @@ function App() {
     }
 
     try {
-    const jobPlans = jobs.map((job) => {
-      const segments = parsePauseTags(job.text)
-      return segments.map((seg) =>
-        seg.type === 'pause' ? seg : { ...seg, sentences: splitIntoSentences(seg.content) },
-      )
+    const dispatchResult = await dispatchGeneration(jobs, {
+      sampleRate: outputSampleRate,
+      speed,
+      requestStart,
+      signal: generationAbortRef.current?.signal,
+      isCancelled: () => abortRef.current,
+      applyPronunciations,
+      synthesize,
+      checkCompleteness: (sentence, durationSeconds, currentSpeed) => checkSynthesisCompleteness(sentence, durationSeconds, currentSpeed),
+      onProgress: (done, totalSentences) => {
+        if (totalSentences > 0) {
+          setProgress(35 + Math.round((done / totalSentences) * 55))
+          setStatus(`Generated ${done} / ${totalSentences}`)
+        }
+      },
+      onAudio: (audio) => {
+        if (!audioCtx) return
+        const buf = audioCtx.createBuffer(1, audio.samples.length, outputSampleRate)
+        buf.getChannelData(0).set(audio.samples)
+        const src = audioCtx.createBufferSource()
+        src.buffer = buf
+        src.connect(audioCtx.destination)
+        src.start(nextPlayTime)
+        nextPlayTime = Math.max(nextPlayTime, audioCtx.currentTime) + buf.duration
+      },
+      onSuspectAudio: (_sentence, completeness) => {
+        recordDiagnosticEvent(
+          'warn',
+          `Possible truncation: ${completeness.speakableChars} speakable chars produced ${completeness.durationSeconds.toFixed(1)}s of audio (floor ${completeness.minExpectedSeconds.toFixed(1)}s).`,
+          'synthesis.completeness',
+        )
+      },
+      onMissingAudio: (sentence) => {
+        recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence — it is missing from the output.`, 'synthesis.completeness')
+      },
     })
-    let totalSentences = 0
-    for (const plan of jobPlans) {
-      for (const seg of plan) if (seg.type === 'text') totalSentences += seg.sentences.length
-    }
-    let done = 0
-    let flaggedSentences = 0
+    timeToFirstAudioMs = dispatchResult.timeToFirstAudioMs
+    totalSamples = dispatchResult.totalSamples
+    totalChars = dispatchResult.totalChars
+    const flaggedSentences = dispatchResult.flaggedSentences
 
-    for (let index = 0; index < jobs.length; index += 1) {
-      if (abortRef.current) break
+    for (let index = 0; index < dispatchResult.jobs.length; index += 1) {
       const job = jobs[index]
-      const plan = jobPlans[index]
-      const audioParts: Float32Array[] = []
-      const cues: Cue[] = []
-      let sampleOffset = 0
-      let cueIndex = 1
+      const dispatched = dispatchResult.jobs[index]
+      const audioParts = dispatched.audioParts
+      const cues: Cue[] = dispatched.cues.map((cue, cueIndex) => ({ ...cue, index: cueIndex + 1 }))
 
-      for (const seg of plan) {
-        if (abortRef.current) break
-        if (seg.type === 'pause') {
-          const silence = new Float32Array(Math.round(seg.duration * outputSampleRate))
-          audioParts.push(silence)
-          totalSamples += silence.length
-          sampleOffset += silence.length
-          continue
-        }
-        for (const sentence of seg.sentences) {
-          if (abortRef.current) break
-          const audio = await synthesize(
-            applyPronunciations(sentence),
-            job.voice,
-            speed,
-            job.voiceBin,
-            generationAbortRef.current?.signal,
-          )
-          if (audio) {
-            if (audio.sampleRate !== outputSampleRate) throw new Error('Generated chunks used mixed sample rates.')
-            if (timeToFirstAudioMs === null && audio.samples.length > 0) {
-              timeToFirstAudioMs = performance.now() - requestStart
-            }
-            const completeness = checkSynthesisCompleteness(sentence, audio.samples.length / outputSampleRate, speed)
-            if (completeness.suspect) {
-              flaggedSentences += 1
-              recordDiagnosticEvent(
-                'warn',
-                `Possible truncation: ${completeness.speakableChars} speakable chars produced ${(audio.samples.length / outputSampleRate).toFixed(1)}s of audio (floor ${completeness.minExpectedSeconds.toFixed(1)}s).`,
-                'synthesis.completeness',
-              )
-            }
-            audioParts.push(audio.samples)
-            totalSamples += audio.samples.length
-            totalChars += sentence.length
-            const startSec = sampleOffset / outputSampleRate
-            sampleOffset += audio.samples.length
-            const endSec = sampleOffset / outputSampleRate
-            if (audio.wordCues?.length) {
-              for (const cue of audio.wordCues) {
-                const wordStart = Math.max(startSec, Math.min(endSec, startSec + cue.startSec))
-                const wordEnd = Math.max(wordStart, Math.min(endSec, startSec + cue.endSec))
-                if (wordEnd > wordStart) cues.push({ index: cueIndex++, startSec: wordStart, endSec: wordEnd, text: cue.text })
-              }
-            } else {
-              cues.push({ index: cueIndex++, startSec, endSec, text: sentence })
-            }
-            if (audioCtx) {
-              const buf = audioCtx.createBuffer(1, audio.samples.length, outputSampleRate)
-              buf.getChannelData(0).set(audio.samples)
-              const src = audioCtx.createBufferSource()
-              src.buffer = buf
-              src.connect(audioCtx.destination)
-              src.start(nextPlayTime)
-              nextPlayTime = Math.max(nextPlayTime, audioCtx.currentTime) + buf.duration
-            }
-          } else if (!abortRef.current) {
-            // A null return silently drops the sentence from the output — the
-            // exact truncation class the completeness check exists to catch.
-            flaggedSentences += 1
-            recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence — it is missing from the output.`, 'synthesis.completeness')
-          }
-          done++
-          if (totalSentences > 0) {
-            setProgress(35 + Math.round((done / totalSentences) * 55))
-            setStatus(`Generated ${done} / ${totalSentences}`)
-          }
-        }
-      }
-
-      if (abortRef.current && audioParts.length === 0) break
+      if (dispatchResult.cancelled && audioParts.length === 0) break
 
       if (!clearedPrevious) {
         clearOutputs()
