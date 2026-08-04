@@ -26,6 +26,7 @@
 - Added an opt-in Windows desktop Studio cleanup toggle. Native FFmpeg applies `afftdn` denoise plus conservative room-tail reduction after generation/imported-BGM mixing, retains a before-cleanup playback path for the session, and adds no model or installer dependency.
 - Added Reader mode for imported EPUBs, articles, PDFs, DOCX files, and text. The chapter-aware book view binds sentence and optional word cues to stable content IDs, supports paragraph-to-playback jumps, per-document local resume, and an optional line-focus presentation without relying on rendered layout coordinates.
 - Added EPUB3 Media Overlay export for completed EPUB queue jobs. The writer packages stable text IDs, SMIL sentence/word timing, per-overlay duration metadata, active highlight CSS, and EPUB-compatible audio; WAV queue audio is transcoded to MP3 before packaging.
+- Added a staged EPUB chapter-mapping review before queueing. Users can rename, split, merge, reorder, or exclude chapters, assign supported per-chapter voices, and configure weighted Kokoro blends; the persisted mapping flows through resumable synthesis, ZIP manifests, M4B chapters, and EPUB media-overlay exports. The lazy review surface keeps the initial shell within its performance budget, and “Queue with defaults” preserves the one-click import path.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -56,6 +57,7 @@
 - Added desktop integration contract coverage for opt-in defaults, persisted-setting sanitization, supported external-file routing, MIME mapping, Explorer command construction, packaged UI controls, and disabled-by-default smoke behavior.
 - Added Reader document-coordinate, sentence/word cue-binding, resume-persistence, queue source-identity, and browser smoke coverage for EPUB launch, chapter navigation, paragraph interaction, and line focus (419 tests across 71 files).
 - Added EPUB3 Media Overlay package tests, legacy cue fallback coverage, queue source-kind migration coverage, and smoke/EPUBCheck validation of the downloaded package.
+- Added immutable EPUB mapping tests for chapter edits and per-chapter blend editing, bounded queue blend migration coverage, and browser smoke assertions for the staged review, split action, voice controls, and defaults-preserving queue path (424 tests across 72 files).
 - Added FFmpeg cleanup filter contract coverage, native denoise/Studio/loudness probes, cleanup UI smoke assertions, and the packaged output before/after audit path.
 - Added MeloTTS model-pack validation, IPC/queue migration coverage, a real native Chinese + English host probe, packaged UI assertions for Melo and the new Kokoro languages, and headless real-engine synthesis checks for Japanese and Mandarin.
 

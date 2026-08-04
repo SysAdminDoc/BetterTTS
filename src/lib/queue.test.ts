@@ -230,6 +230,32 @@ describe('queue', () => {
     ])
   })
 
+  it('persists and sanitizes per-chapter voice blends', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('voice-mix', 1),
+      chunks: [{
+        index: 0,
+        text: 'Blended chapter.',
+        status: 'pending',
+        voiceMix: [
+          { voiceId: 'af_heart', weight: 2 },
+          { voiceId: 'af_bella', weight: 1 },
+          { voiceId: '../unsafe', weight: 1 },
+          { voiceId: 'af_nova', weight: Number.POSITIVE_INFINITY },
+        ],
+      }],
+    })
+
+    expect(migrated.chunks[0].voiceMix).toEqual([
+      { voiceId: 'af_heart', weight: 2 },
+      { voiceId: 'af_bella', weight: 1 },
+    ])
+    expect(migrateQueueJob({
+      ...makeJob('single-mix', 1),
+      chunks: [{ index: 0, text: 'Single.', status: 'pending', voiceMix: [{ voiceId: 'af_heart', weight: 1 }] }],
+    }).chunks[0].voiceMix).toBeUndefined()
+  })
+
   it('drops malformed narrator metadata during migration', () => {
     const migrated = migrateQueueJob({
       ...makeJob('bad-narrator', 1),

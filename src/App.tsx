@@ -77,6 +77,7 @@ import {
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
+import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
@@ -140,7 +141,7 @@ import {
   type ChatterboxModelVariant,
   type ChatterboxReference,
 } from './lib/chatterbox.ts'
-import { type QueueEngine, type QueueJob, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
+import { type QueueEngine, type QueueJob, type QueueVoiceMixEntry, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
   clearPlaybackState,
@@ -184,6 +185,7 @@ import {
 import { speakBrowser } from './lib/webspeech.ts'
 import { createReaderDocument, type ReaderDocument } from './lib/reader.ts'
 import type { ReaderAudioTrack } from './components/ReaderView.tsx'
+import type { EpubMappingVoiceOption } from './components/EpubMappingPanel.tsx'
 
 const APP_VERSION = '0.22.0'
 const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
@@ -197,6 +199,10 @@ const waveformCache = new Map<string, number[]>()
 const ReaderView = lazy(async () => {
   const module = await import('./components/ReaderView.tsx')
   return { default: module.ReaderView }
+})
+const EpubMappingPanel = lazy(async () => {
+  const module = await import('./components/EpubMappingPanel.tsx')
+  return { default: module.EpubMappingPanel }
 })
 
 type Engine = EngineId
@@ -226,6 +232,7 @@ type QueueSourceChunk = {
   speaker?: string
   chapterTitle?: string
   chapterIndex?: number
+  voiceMix?: QueueVoiceMixEntry[]
 }
 
 type AudioResult = {
@@ -263,6 +270,15 @@ type Toast = {
     run: () => void | Promise<void>
   }
 }
+
+type PendingEpubMapping = {
+  title: string
+  fileName: string
+  defaultChapters: EpubMappingChapter[]
+  chapters: EpubMappingChapter[]
+}
+
+type EpubMappingApi = typeof import('./lib/epub-mapping.ts')
 
 const STARTER_TEXT = `Welcome to BetterTTS — private text-to-speech that runs entirely on your device.
 
@@ -1326,6 +1342,7 @@ function App() {
   const [text, setText] = useState(STARTER_TEXT)
   const [readerDocument, setReaderDocument] = useState<ReaderDocument | null>(null)
   const [readerOpen, setReaderOpen] = useState(false)
+  const [pendingEpubMapping, setPendingEpubMapping] = useState<PendingEpubMapping | null>(null)
   const [results, setResults] = useState<AudioResult[]>([])
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null)
   const [zipUrl, setZipUrl] = useState<string | null>(null)
@@ -1465,6 +1482,7 @@ function App() {
   const generatingRef = useRef(false)
   const captionUrlsRef = useRef<string[]>([])
   const importedFileHandlerRef = useRef<((file: File, autoQueue?: boolean) => Promise<void>) | null>(null)
+  const epubMappingApiRef = useRef<EpubMappingApi | null>(null)
 
   // A run scheduled 700 ms after the previous one ends must not have its
   // progress bar wiped by the previous run's reset timer.
@@ -1475,7 +1493,22 @@ function App() {
     }
   }
 
+  async function loadEpubMappingApi(): Promise<EpubMappingApi> {
+    if (epubMappingApiRef.current) return epubMappingApiRef.current
+    const api = await import('./lib/epub-mapping.ts')
+    epubMappingApiRef.current = api
+    return api
+  }
+
   const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
+  const epubMappingVoiceOptions = useMemo<EpubMappingVoiceOption[]>(() => {
+    if (engine === 'kokoro') return availableVoices.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
+    if (engine === 'supertonic') return SUPERTONIC_VOICES.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
+    if (engine === 'kitten') return KITTEN_VOICES.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
+    return []
+  }, [availableVoices, engine])
+  const epubMappingSupportsVoice = engine === 'kokoro' || engine === 'supertonic' || engine === 'kitten'
+  const epubMappingSupportsBlend = engine === 'kokoro' && isEnglishKokoroLocale(locale)
   const selectedVoice = VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]
   const selectedSupertonicVoice = SUPERTONIC_VOICES.find((voice) => voice.id === supertonicVoiceId) ?? SUPERTONIC_VOICES[0]
   const selectedKittenVoice = KITTEN_VOICES.find((voice) => voice.id === kittenVoiceId) ?? KITTEN_VOICES[0]
@@ -2601,6 +2634,7 @@ function App() {
     if (!text || isGenerating || isImportingFile || importingUrl) return
     const previousText = text
     setText('')
+    setPendingEpubMapping(null)
     showToast({
       tone: 'ok',
       message: 'Script cleared.',
@@ -3940,6 +3974,7 @@ function App() {
       const truncated = textContent.length > MAX_TEXT_CHARS
       const title = shortUiLabel(article?.title ?? 'article')
       setText(textContent.slice(0, MAX_TEXT_CHARS))
+      setPendingEpubMapping(null)
       setReaderDocument(createReaderDocument({ kind: 'article', title, text: textContent }))
       setReaderOpen(true)
       setImportUrlValue('')
@@ -4020,6 +4055,7 @@ function App() {
         speaker: chunk.speaker,
         chapterTitle: chunk.chapterTitle,
         chapterIndex: chunk.chapterIndex,
+        voiceMix: chunk.voiceMix,
         status: 'pending',
       })),
     }
@@ -4058,12 +4094,123 @@ function App() {
     showToast({ tone: 'ok', message: `Queued "${job.title}" — ${job.chunks.length} chunks.` })
   }
 
+  function updatePendingEpubMapping(update: (api: EpubMappingApi, chapters: readonly EpubMappingChapter[]) => EpubMappingChapter[]) {
+    if (!pendingEpubMapping) return
+    const api = epubMappingApiRef.current
+    if (!api) return
+    const chapters = update(api, pendingEpubMapping.chapters)
+    const nextReader = createReaderDocument({
+      kind: 'epub',
+      title: pendingEpubMapping.title,
+      chapters: chapters
+        .filter((chapter) => chapter.included && chapter.text.trim())
+        .map((chapter) => ({ title: chapter.title, text: chapter.text })),
+    })
+    setPendingEpubMapping({ ...pendingEpubMapping, chapters })
+    setReaderDocument(nextReader)
+    setReaderOpen(true)
+  }
+
+  function mappingChapterVoice(chapter: EpubMappingChapter): string | undefined {
+    const voice = chapter.voice?.trim()
+    return voice && epubMappingVoiceOptions.some((option) => option.id === voice) ? voice : undefined
+  }
+
+  function mappingChapterVoiceMix(chapter: EpubMappingChapter): QueueVoiceMixEntry[] | undefined {
+    if (!epubMappingSupportsBlend || !chapter.voiceMix) return undefined
+    const allowed = new Set<string>(blendableVoices.map((voice) => voice.id))
+    const entries = chapter.voiceMix
+      .filter((entry) => allowed.has(entry.voiceId) && Number.isFinite(entry.weight) && entry.weight > 0)
+      .map((entry) => ({ voiceId: entry.voiceId, weight: entry.weight }))
+    return entries.length >= 2 ? entries : undefined
+  }
+
+  async function queueEpubMapping(useDefaults = false, pendingOverride?: PendingEpubMapping): Promise<boolean> {
+    const pending = pendingOverride ?? pendingEpubMapping
+    if (!pending) return false
+    const mapping = useDefaults ? pending.defaultChapters : pending.chapters
+    const mappedChapters = mapping.filter((chapter) => chapter.included && chapter.text.trim())
+    if (mappedChapters.length === 0) {
+      showToast({ tone: 'warn', message: 'Include at least one readable EPUB chapter before queueing.' })
+      return false
+    }
+    const reader = createReaderDocument({
+      kind: 'epub',
+      title: pending.title,
+      chapters: mappedChapters.map((chapter) => ({ title: chapter.title, text: chapter.text })),
+    })
+    const allChunks = buildEpubQueueChunks(
+      mappedChapters,
+      (chapterText) => cleanupText(chapterText, cleanup),
+      (cleaned) => splitInput(cleaned, false),
+    )
+    const queueChunks: QueueSourceChunk[] = narratorMode
+      ? allChunks.flatMap((chunk) => {
+        const chapter = mappedChapters[chunk.chapterIndex]
+        const chapterVoice = chapter ? mappingChapterVoice(chapter) : undefined
+        const chapterVoiceMix = chapter ? mappingChapterVoiceMix(chapter) : undefined
+        return splitNarratorText(chunk.text).map((segment) => ({
+          text: segment.text.slice(0, MAX_TEXT_CHARS),
+          voice: segment.role === 'narration'
+            ? chapterVoice ?? chapterVoiceMix?.[0]?.voiceId ?? voiceIdForNarratorRole('narration')
+            : voiceIdForNarratorRole('dialogue'),
+          role: segment.role,
+          speaker: segment.speaker,
+          chapterTitle: chunk.title,
+          chapterIndex: chunk.chapterIndex,
+          ...(segment.role === 'narration' && chapterVoiceMix ? { voiceMix: chapterVoiceMix } : {}),
+        }))
+      })
+      : allChunks.map((chunk) => {
+        const chapter = mappedChapters[chunk.chapterIndex]
+        const voiceMix = chapter ? mappingChapterVoiceMix(chapter) : undefined
+        return {
+          text: chunk.text.slice(0, MAX_TEXT_CHARS),
+          voice: chapter ? mappingChapterVoice(chapter) ?? voiceMix?.[0]?.voiceId : undefined,
+          chapterTitle: chunk.title,
+          chapterIndex: chunk.chapterIndex,
+          ...(voiceMix ? { voiceMix } : {}),
+        }
+      })
+    if (queueChunks.length === 0) {
+      showToast({ tone: 'warn', message: 'No readable text remains after cleanup.' })
+      return false
+    }
+    const job = createQueueJob(
+      pending.fileName.replace(/\.epub$/iu, '') || pending.title,
+      queueChunks,
+      reader.id,
+      'epub',
+    )
+    if (!job) {
+      showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot queue EPUB text for file export.' })
+      return false
+    }
+    try {
+      await saveJob(job)
+    } catch {
+      showToast({ tone: 'error', message: 'Could not save the EPUB job to the queue — storage may be full or blocked.' })
+      return false
+    }
+    setQueueJobs((prev) => [job, ...prev])
+    setPendingEpubMapping(null)
+    setReaderDocument(reader)
+    setReaderOpen(true)
+    const skipped = mapping.filter((chapter) => !chapter.included || !chapter.text.trim()).length
+    showToast({
+      tone: 'ok',
+      message: `Queued "${shortUiLabel(job.title)}" — ${mappedChapters.length} chapters, ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} excluded or empty.` : ''}`,
+    })
+    return true
+  }
+
   async function synthesizeQueueChunkBlob(
     job: QueueJob,
     text: string,
     synthesize: LoadedQueueEngine['synthesize'],
     sampleRate: number,
     voice = job.voice,
+    voiceBin?: Float32Array,
   ): Promise<{ blob: Blob; duration: string; cues?: Cue[]; warning?: string } | null> {
     const sentences = splitIntoSentences(applyPronunciations(text))
     const parts: Float32Array[] = []
@@ -4077,7 +4224,7 @@ function App() {
         aborted = true
         break
       }
-      const audio = await synthesize(sentence, voice, job.speed, undefined, generationAbortRef.current?.signal)
+      const audio = await synthesize(sentence, voice, job.speed, voiceBin, generationAbortRef.current?.signal)
       if (abortRef.current) {
         aborted = true
         break
@@ -4118,6 +4265,26 @@ function App() {
     }
   }
 
+  async function queueVoiceBin(
+    job: QueueJob,
+    chunk: QueueJob['chunks'][number],
+    cache: Map<string, Float32Array>,
+  ): Promise<Float32Array | undefined> {
+    if (!chunk.voiceMix || chunk.voiceMix.length < 2) return undefined
+    if (job.engine !== 'kokoro') throw new Error('Per-chapter voice blends require a Kokoro queue job.')
+    const key = chunk.voiceMix.map((entry) => `${entry.voiceId}:${entry.weight}`).join('|')
+    const cached = cache.get(key)
+    if (cached) return cached
+    setStatus(`Loading chapter blend ${formatMixFormula(chunk.voiceMix as VoiceMixEntry[])}`)
+    const bins = await Promise.all(chunk.voiceMix.map(async (entry) => ({
+      data: await fetchVoiceBin(entry.voiceId),
+      weight: entry.weight,
+    })))
+    const mixed = blendVoiceBins(bins)
+    cache.set(key, mixed)
+    return mixed
+  }
+
   async function resumeJob(jobId: string) {
     if (generatingRef.current) return
     const lease = await withJobLease(jobId, (leaseSignal) => resumeJobWithLease(jobId, leaseSignal))
@@ -4147,6 +4314,7 @@ function App() {
         if (info.status === 'ready') setStatus('Model ready')
       }
       const { synthesize, sampleRate } = await ensureQueueEngine(job, onProgress)
+      const voiceBinCache = new Map<string, Float32Array>()
 
       for (const chunk of job.chunks) {
         if (abortRef.current) break
@@ -4156,7 +4324,8 @@ function App() {
         setQueueJobs((prev) => prev.map((j) => (j.id === jobId ? { ...job } : j)))
 
         try {
-          const replacement = await synthesizeQueueChunkBlob(job, chunk.text, synthesize, sampleRate, chunk.voice ?? job.voice)
+          const voiceBin = await queueVoiceBin(job, chunk, voiceBinCache)
+          const replacement = await synthesizeQueueChunkBlob(job, chunk.text, synthesize, sampleRate, chunk.voice ?? job.voice, voiceBin)
           if (!replacement) {
             chunk.status = 'pending'
           } else {
@@ -4277,7 +4446,8 @@ function App() {
         if (info.status === 'ready') setStatus('Model ready')
       }
       const { synthesize, sampleRate } = await ensureQueueEngine(job, onProgress)
-      const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate, chunk.voice ?? job.voice)
+      const voiceBin = await queueVoiceBin(job, chunk, new Map<string, Float32Array>())
+      const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate, chunk.voice ?? job.voice, voiceBin)
       if (!replacement) {
         showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
         return false
@@ -4337,6 +4507,7 @@ function App() {
         speaker?: string
         chapterTitle?: string
         chapterIndex?: number
+        voiceMix?: QueueVoiceMixEntry[]
       }> = []
       const blobEntries: Array<{ filename: string; blob: Blob }> = []
       for (const chunk of doneChunks) {
@@ -4354,6 +4525,7 @@ function App() {
             speaker: chunk.speaker,
             chapterTitle: chunk.chapterTitle,
             chapterIndex: chunk.chapterIndex,
+            voiceMix: chunk.voiceMix,
           })
         }
       }
@@ -4607,7 +4779,7 @@ function App() {
     }
   }
 
-  async function handleEpubImport(file: File) {
+  async function handleEpubImport(file: File, autoQueue = false) {
     const sizeError = importSizeError(file)
     if (sizeError) {
       showToast(sizeError)
@@ -4626,49 +4798,29 @@ function App() {
       }, controller.signal)
       if (imported.kind !== 'epub') throw new Error('EPUB parser returned an unexpected document type.')
       const chapters = imported.chapters
+      const mappingApi = await loadEpubMappingApi()
       const importedReader = createReaderDocument({ kind: 'epub', title: imported.title, chapters })
+      const defaultMix = englishKokoro && voiceMixEnabled && voiceMixEntries.length >= 2
+        ? voiceMixEntries.map((entry) => ({ voiceId: entry.voiceId, weight: entry.weight }))
+        : undefined
+      const mapping = mappingApi.createEpubMapping(chapters, {
+        voice: voiceIdForNarratorRole('narration'),
+        voiceMix: defaultMix,
+      })
+      const pending: PendingEpubMapping = {
+        title: imported.title,
+        fileName: file.name,
+        defaultChapters: mapping.map((chapter) => ({ ...chapter, voiceMix: chapter.voiceMix?.map((entry) => ({ ...entry })) })),
+        chapters: mapping,
+      }
+      setPendingEpubMapping(pending)
       setReaderDocument(importedReader)
       setReaderOpen(true)
-      const allChunks = buildEpubQueueChunks(
-        chapters,
-        (chapterText) => cleanupText(chapterText, cleanup),
-        (cleaned) => splitInput(cleaned, false),
-      )
-      if (allChunks.length === 0) {
-        showToast({ tone: 'warn', message: 'No readable text found in this EPUB.' })
-        return
-      }
-      const queueChunks: QueueSourceChunk[] = narratorMode
-        ? allChunks.flatMap((chunk) => splitNarratorText(chunk.text).map((segment) => ({
-          text: segment.text.slice(0, MAX_TEXT_CHARS),
-          voice: voiceIdForNarratorRole(segment.role),
-          role: segment.role,
-          speaker: segment.speaker,
-          chapterTitle: chunk.title,
-          chapterIndex: chunk.chapterIndex,
-        })))
-        : allChunks.map((chunk) => ({
-          text: chunk.text.slice(0, MAX_TEXT_CHARS),
-          chapterTitle: chunk.title,
-          chapterIndex: chunk.chapterIndex,
-        }))
-      const job = createQueueJob(
-        file.name.replace(/\.epub$/i, ''),
-        queueChunks,
-        importedReader.id,
-        'epub',
-      )
-      if (!job) {
-        showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot queue EPUB text for file export.' })
-        return
-      }
-      await saveJob(job)
-      setQueueJobs((prev) => [job, ...prev])
-      const skipped = chapters.filter((ch) => !ch.text.trim()).length
       showToast({
         tone: 'ok',
-        message: `Imported "${shortUiLabel(job.title)}" — ${chapters.length} chapters, ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} empty chapters skipped.` : ''}`,
+        message: `Imported "${shortUiLabel(file.name.replace(/\.epub$/iu, ''))}" — ${chapters.length} chapters. Review the mapping before queueing.`,
       })
+      if (autoQueue) await queueEpubMapping(true, pending)
     } catch (err) {
       showToast(err instanceof Error && err.name === 'AbortError'
         ? { tone: 'warn', message: 'EPUB import cancelled. The previous script and queue were kept.' }
@@ -4709,6 +4861,7 @@ function App() {
       const trimmed = cleaned.slice(0, MAX_TEXT_CHARS)
       const chunkCount = splitInput(trimmed, false).length
       setText(trimmed)
+      setPendingEpubMapping(null)
       setReaderDocument(createReaderDocument({ kind: imported.kind, title: imported.title, text: cleaned }))
       setReaderOpen(true)
       showToast({
@@ -4739,7 +4892,7 @@ function App() {
     const fileLabel = shortUiLabel(file.name, 72)
     const lowerName = file.name.toLowerCase()
     if (lowerName.endsWith('.epub')) {
-      await handleEpubImport(file)
+      await handleEpubImport(file, autoQueue)
       return
     }
 
@@ -4760,6 +4913,7 @@ function App() {
         const truncated = raw.length > MAX_TEXT_CHARS
         const trimmed = raw.slice(0, MAX_TEXT_CHARS)
         setText(trimmed)
+        setPendingEpubMapping(null)
         setReaderDocument(createReaderDocument({ kind: 'text', title: file.name.replace(/\.txt$/iu, ''), text: raw }))
         setReaderOpen(true)
         showToast(
@@ -4999,6 +5153,40 @@ function App() {
                   document={readerDocument}
                   tracks={readerTracks}
                   onClose={() => setReaderOpen(false)}
+                />
+              </Suspense>
+            ) : null}
+            {pendingEpubMapping ? (
+              <Suspense fallback={<section className="epub-mapping-panel" aria-live="polite">Loading chapter mapping…</section>}>
+                <EpubMappingPanel
+                  title={pendingEpubMapping.title}
+                  chapters={pendingEpubMapping.chapters}
+                  defaultVoiceLabel={activeVoiceName}
+                  voiceOptions={epubMappingVoiceOptions}
+                  blendVoiceOptions={blendableVoices.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))}
+                  defaultMix={voiceMixEntries}
+                  supportsVoice={epubMappingSupportsVoice}
+                  supportsBlend={epubMappingSupportsBlend}
+                  onRename={(chapterId, chapterTitle) => updatePendingEpubMapping((api, chapters) => api.renameEpubChapter(chapters, chapterId, chapterTitle))}
+                  onInclude={(chapterId, included) => updatePendingEpubMapping((api, chapters) => api.setEpubChapterIncluded(chapters, chapterId, included))}
+                  onVoice={(chapterId, voice) => updatePendingEpubMapping((api, chapters) => api.setEpubChapterVoice(chapters, chapterId, voice))}
+                  onBlend={(chapterId, enabled) => updatePendingEpubMapping((api, chapters) => {
+                    const chapter = chapters.find((candidate) => candidate.id === chapterId)
+                    const nextMix = enabled
+                      ? chapter?.voiceMix ?? voiceMixEntries.map((entry) => ({ voiceId: entry.voiceId, weight: entry.weight }))
+                      : undefined
+                    return api.setEpubChapterVoiceMix(chapters, chapterId, nextMix)
+                  })}
+                  onMixVoice={(chapterId, entryIndex, voiceId) => updatePendingEpubMapping((api, chapters) => api.updateEpubChapterVoiceMixEntry(chapters, chapterId, entryIndex, { voiceId }))}
+                  onMixWeight={(chapterId, entryIndex, weight) => updatePendingEpubMapping((api, chapters) => api.updateEpubChapterVoiceMixEntry(chapters, chapterId, entryIndex, { weight }))}
+                  onAddMix={(chapterId) => updatePendingEpubMapping((api, chapters) => api.addEpubChapterVoiceMixEntry(chapters, chapterId, { voiceId: blendableVoices[0]?.id ?? 'af_heart', weight: 1 }))}
+                  onRemoveMix={(chapterId, entryIndex) => updatePendingEpubMapping((api, chapters) => api.removeEpubChapterVoiceMixEntry(chapters, chapterId, entryIndex))}
+                  onSplit={(chapterId) => updatePendingEpubMapping((api, chapters) => api.splitEpubChapter(chapters, chapterId))}
+                  onMerge={(chapterId) => updatePendingEpubMapping((api, chapters) => api.mergeEpubChapterWithNext(chapters, chapterId))}
+                  onMove={(chapterId, delta) => updatePendingEpubMapping((api, chapters) => api.reorderEpubChapter(chapters, chapterId, delta))}
+                  onQueue={() => void queueEpubMapping()}
+                  onQueueDefaults={() => void queueEpubMapping(true)}
+                  onCancel={() => setPendingEpubMapping(null)}
                 />
               </Suspense>
             ) : null}
@@ -7085,11 +7273,13 @@ function App() {
               )}
 
               <button
-                type="button"
-                className="secondary-action"
-                onClick={() => void queueCurrentText()}
+              type="button"
+              className="secondary-action"
+                onClick={() => void (pendingEpubMapping ? queueEpubMapping() : queueCurrentText())}
                 disabled={isGenerating || isImportingFile || importingUrl || queueDisabledReason !== null}
-                title={isImportingFile || importingUrl ? 'Finish or cancel the import before creating a queue job.' : queueDisabledReason ?? 'Queue current text for file export.'}
+                title={isImportingFile || importingUrl
+                  ? 'Finish or cancel the import before creating a queue job.'
+                  : queueDisabledReason ?? (pendingEpubMapping ? 'Queue the reviewed EPUB mapping for file export.' : 'Queue current text for file export.')}
               >
                 <FileText size={16} aria-hidden="true" />
                 Queue

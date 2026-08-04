@@ -7,6 +7,10 @@ import type { PiperPlusLanguage } from './piper-plus.ts'
 
 export type ChunkStatus = 'pending' | 'generating' | 'done' | 'failed'
 export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten' | 'piper' | 'melo'
+export type QueueVoiceMixEntry = {
+  voiceId: string
+  weight: number
+}
 
 export type QueueChunk = {
   index: number
@@ -17,6 +21,7 @@ export type QueueChunk = {
   speaker?: string
   chapterTitle?: string
   chapterIndex?: number
+  voiceMix?: QueueVoiceMixEntry[]
   duration?: string
   cues?: Cue[]
   blobKey?: string
@@ -325,6 +330,7 @@ function migrateQueueChunk(raw: unknown, index: number): QueueChunk {
   const voice = typeof chunk.voice === 'string' && chunk.voice.trim() && chunk.voice.length <= 200 ? chunk.voice.trim() : undefined
   const role: NarratorRole | undefined = chunk.role === 'narration' || chunk.role === 'dialogue' ? chunk.role : undefined
   const speaker = typeof chunk.speaker === 'string' && chunk.speaker.trim() && chunk.speaker.length <= 120 ? chunk.speaker.trim() : undefined
+  const voiceMix = migrateQueueVoiceMix(chunk.voiceMix)
   return {
     index: Number.isSafeInteger(chunk.index) && Number(chunk.index) >= 0 ? Number(chunk.index) : index,
     text: typeof chunk.text === 'string' ? chunk.text.slice(0, 10_000) : '',
@@ -334,12 +340,27 @@ function migrateQueueChunk(raw: unknown, index: number): QueueChunk {
     ...(speaker ? { speaker } : {}),
     chapterTitle: typeof chunk.chapterTitle === 'string' ? chunk.chapterTitle.slice(0, 500) : undefined,
     chapterIndex: Number.isSafeInteger(chunk.chapterIndex) && Number(chunk.chapterIndex) >= 0 ? Number(chunk.chapterIndex) : undefined,
+    ...(voiceMix ? { voiceMix } : {}),
     duration: typeof chunk.duration === 'string' ? chunk.duration.slice(0, 50) : undefined,
     cues: Array.isArray(chunk.cues) ? chunk.cues.filter(isCue) : undefined,
     blobKey: typeof chunk.blobKey === 'string' ? chunk.blobKey.slice(0, 500) : undefined,
     error: typeof chunk.error === 'string' ? chunk.error.slice(0, 1000) : undefined,
     warning: typeof chunk.warning === 'string' ? chunk.warning.slice(0, 1000) : undefined,
   }
+}
+
+function migrateQueueVoiceMix(raw: unknown): QueueVoiceMixEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const entries: QueueVoiceMixEntry[] = []
+  for (const value of raw.slice(0, 4)) {
+    if (!value || typeof value !== 'object') continue
+    const entry = value as Partial<QueueVoiceMixEntry>
+    const voiceId = typeof entry.voiceId === 'string' ? entry.voiceId.trim() : ''
+    const weight = Number(entry.weight)
+    if (!/^[a-z][a-z0-9_-]{0,63}$/iu.test(voiceId) || !Number.isFinite(weight) || weight <= 0) continue
+    entries.push({ voiceId, weight: Math.min(100, weight) })
+  }
+  return entries.length >= 2 ? entries : undefined
 }
 
 function isCue(value: unknown): value is Cue {

@@ -812,6 +812,13 @@ async function runSmoke() {
       desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
     ])
     if (epubImportResult !== 'ok') throw new Error(`EPUB worker import did not complete: ${epubImportResult}`)
+    const epubMapping = desktop.page.getByRole('region', { name: 'Review EPUB chapters' })
+    await epubMapping.waitFor({ timeout: 20000 })
+    await epubMapping.getByRole('combobox', { name: 'Voice for Chapter 1' }).waitFor({ timeout: 20000 })
+    await epubMapping.getByRole('checkbox', { name: 'Blend voices for Chapter 1' }).waitFor({ timeout: 20000 })
+    await epubMapping.getByRole('button', { name: 'Split', exact: true }).first().click()
+    await epubMapping.getByRole('textbox', { name: 'Title for Chapter 3' }).waitFor({ timeout: 20000 })
+    await epubMapping.getByRole('button', { name: 'Queue with defaults' }).click()
     await desktop.page.getByRole('heading', { name: 'worker-book' }).waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Line focus' }).click()
     await desktop.page.getByRole('button', { name: 'Exit focus' }).waitFor({ timeout: 20000 })
