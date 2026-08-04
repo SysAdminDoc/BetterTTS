@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-407%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-414%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -28,7 +28,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 | MP3 export | **Yes** | Yes | Yes | No |
 | Commercial use | **Yes (MIT)** | Paid only | With attribution | Yes |
 | Subtitle export | **SRT + VTT** | No | SRT (paid) | No |
-| Voice count | 41 | 30+ (free tier) | 300+ | 54 |
+| Voice count | 54 | 30+ (free tier) | 300+ | 54 |
 | Pitch control | **Yes** | Paid only | No | No |
 | Offline capable | **Yes (PWA)** | No | No | No |
 
@@ -67,6 +67,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
+- **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, and optional line focus
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
 - **Web Share** for sharing audio files directly from the app (Android Chrome)
 - **Native save dialog** via `showSaveFilePicker` on Chromium, with `<a download>` fallback
@@ -81,7 +82,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ### Studio Features
 - **Dialog mode** — `[speaker:Alice]` line prefixes map to different voices for multi-character scripts
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, durable resume, and previous/next sentence controls
-- **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis
+- **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis or Reader mode
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer “Convert to audiobook” entries for TXT/EPUB/PDF/DOCX, and optional Tesseract screen OCR; all three integrations are independently disableable and the web/PWA build remains unchanged
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, and normalize audiobook numbers/units before synthesis
@@ -199,7 +200,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (401 tests across 68 files) + Playwright smoke |
+| Testing | Vitest (414 tests across 70 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -220,6 +221,7 @@ src/
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
 │   ├── document-import.ts   # PDF/DOCX text extraction
+│   ├── reader.ts             # Stable document coordinates, cue binding, and resume state
 │   ├── playback.ts          # Read-along resume and sentence navigation
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser

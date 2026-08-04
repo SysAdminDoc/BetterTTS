@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  BookOpen,
   Captions,
   Check,
   ChevronDown,
@@ -26,7 +27,7 @@ import {
   Waves,
   X,
 } from 'lucide-react'
-import { Component, type ChangeEvent, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, lazy, Suspense, type ChangeEvent, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   collectDiagnostics,
@@ -181,6 +182,8 @@ import {
   type WhisperRuntimeStatus,
 } from './lib/whisper.ts'
 import { speakBrowser } from './lib/webspeech.ts'
+import { createReaderDocument, type ReaderDocument } from './lib/reader.ts'
+import type { ReaderAudioTrack } from './components/ReaderView.tsx'
 
 const APP_VERSION = '0.22.0'
 const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
@@ -191,6 +194,10 @@ const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15000
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 const waveformCache = new Map<string, number[]>()
+const ReaderView = lazy(async () => {
+  const module = await import('./components/ReaderView.tsx')
+  return { default: module.ReaderView }
+})
 
 type Engine = EngineId
 type Theme = 'dark' | 'light'
@@ -234,6 +241,8 @@ type AudioResult = {
   vttUrl?: string
   language?: string
   originalUrl?: string
+  sourceDocumentId?: string
+  sourceText?: string
 }
 
 type ImportedCaption = {
@@ -1315,6 +1324,8 @@ function App() {
     } catch { return DEFAULT_CLEANUP }
   })
   const [text, setText] = useState(STARTER_TEXT)
+  const [readerDocument, setReaderDocument] = useState<ReaderDocument | null>(null)
+  const [readerOpen, setReaderOpen] = useState(false)
   const [results, setResults] = useState<AudioResult[]>([])
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null)
   const [zipUrl, setZipUrl] = useState<string | null>(null)
@@ -1524,6 +1535,30 @@ function App() {
     )
     : library, [library, normalizedProjectSearch])
   const activeOutput = results.find((result) => result.id === activeOutputId) ?? results[0]
+  const readerTracks = useMemo<ReaderAudioTrack[]>(() => {
+    if (!readerDocument) return []
+    const directTracks = results
+      .filter((result) => result.sourceDocumentId === readerDocument.id && result.sourceText && result.url)
+      .map((result) => ({
+        id: `result:${result.id}`,
+        label: result.label,
+        sourceText: result.sourceText!,
+        cues: result.cues,
+        src: result.url,
+      }))
+    const queueTracks = queueJobs
+      .filter((job) => job.sourceDocumentId === readerDocument.id)
+      .flatMap((job) => job.chunks
+        .filter((chunk) => chunk.status === 'done')
+        .map((chunk) => ({
+          id: `queue:${job.id}:${chunk.index}`,
+          label: `${job.title} · ${chunk.chapterTitle ?? `Segment ${chunk.index + 1}`}`,
+          sourceText: chunk.text,
+          cues: chunk.cues,
+          load: () => getChunkBlob(job.id, chunk.index),
+        })))
+    return [...directTracks, ...queueTracks]
+  }, [queueJobs, readerDocument, results])
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
     : rvcSettings.enabled
@@ -3387,6 +3422,8 @@ function App() {
       if (abortRef.current) break
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
       const result = await buildResult(blob, job.label, filename)
+      if (readerDocument) result.sourceDocumentId = readerDocument.id
+      result.sourceText = job.text
       if (originalBlob) result.originalUrl = rememberUrl(URL.createObjectURL(originalBlob))
       if (cues.length > 0) {
         result.cues = cues
@@ -3900,9 +3937,11 @@ function App() {
       const textContent = (article?.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
       if (!textContent) throw new Error('No readable text found')
       const truncated = textContent.length > MAX_TEXT_CHARS
-      setText(textContent.slice(0, MAX_TEXT_CHARS))
-      setImportUrlValue('')
       const title = shortUiLabel(article?.title ?? 'article')
+      setText(textContent.slice(0, MAX_TEXT_CHARS))
+      setReaderDocument(createReaderDocument({ kind: 'article', title, text: textContent }))
+      setReaderOpen(true)
+      setImportUrlValue('')
       showToast(
         truncated
           ? { tone: 'warn', message: `Imported "${title}" — trimmed to ${MAX_TEXT_CHARS} characters.` }
@@ -3953,13 +3992,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function createQueueJob(title: string, chunks: QueueSourceChunk[]): QueueJob | null {
+  function createQueueJob(title: string, chunks: QueueSourceChunk[], sourceDocumentId?: string): QueueJob | null {
     if (!engineQueueable(engine)) return null
     const queueEngine = engine as QueueEngine
     return {
       schemaVersion: 2,
       id: crypto.randomUUID(),
       title,
+      ...(sourceDocumentId ? { sourceDocumentId } : {}),
       createdAt: Date.now(),
       engine: queueEngine,
       voice: voiceIdForNarratorRole('narration'),
@@ -3999,6 +4039,7 @@ function App() {
     const job = createQueueJob(
       titleOverride?.trim() || currentText.slice(0, 50).replace(/\s+/g, ' ').trim(),
       chunks,
+      readerDocument?.id,
     )
     if (!job) {
       showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot be queued for file export.' })
@@ -4525,6 +4566,9 @@ function App() {
       }, controller.signal)
       if (imported.kind !== 'epub') throw new Error('EPUB parser returned an unexpected document type.')
       const chapters = imported.chapters
+      const importedReader = createReaderDocument({ kind: 'epub', title: imported.title, chapters })
+      setReaderDocument(importedReader)
+      setReaderOpen(true)
       const allChunks = buildEpubQueueChunks(
         chapters,
         (chapterText) => cleanupText(chapterText, cleanup),
@@ -4551,6 +4595,7 @@ function App() {
       const job = createQueueJob(
         file.name.replace(/\.epub$/i, ''),
         queueChunks,
+        importedReader.id,
       )
       if (!job) {
         showToast({ tone: 'warn', message: queueDisabledReason ?? 'This engine cannot queue EPUB text for file export.' })
@@ -4603,6 +4648,8 @@ function App() {
       const trimmed = cleaned.slice(0, MAX_TEXT_CHARS)
       const chunkCount = splitInput(trimmed, false).length
       setText(trimmed)
+      setReaderDocument(createReaderDocument({ kind: imported.kind, title: imported.title, text: cleaned }))
+      setReaderOpen(true)
       showToast({
         tone: cleaned.length > MAX_TEXT_CHARS ? 'warn' : 'ok',
         message: cleaned.length > MAX_TEXT_CHARS
@@ -4652,6 +4699,8 @@ function App() {
         const truncated = raw.length > MAX_TEXT_CHARS
         const trimmed = raw.slice(0, MAX_TEXT_CHARS)
         setText(trimmed)
+        setReaderDocument(createReaderDocument({ kind: 'text', title: file.name.replace(/\.txt$/iu, ''), text: raw }))
+        setReaderOpen(true)
         showToast(
           truncated
             ? { tone: 'warn', message: `${fileLabel} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters.` }
@@ -4883,6 +4932,15 @@ function App() {
         <h1 id="app-title" className="sr-only">BetterTTS local speech studio</h1>
         <section className="studio-grid" id="studio" aria-labelledby="script-heading">
           <div className="studio-workbench">
+            {readerDocument && readerOpen ? (
+              <Suspense fallback={<section className="reader-panel" aria-live="polite">Loading Reader mode…</section>}>
+                <ReaderView
+                  document={readerDocument}
+                  tracks={readerTracks}
+                  onClose={() => setReaderOpen(false)}
+                />
+              </Suspense>
+            ) : null}
             <div className="editor-column">
               <div className="section-heading">
                 <h2 id="script-heading">Script</h2>
@@ -4923,6 +4981,12 @@ function App() {
                   onChange={handleFileUpload}
                   hidden
                 />
+                {readerDocument ? (
+                  <button type="button" onClick={() => setReaderOpen((current) => !current)} aria-pressed={readerOpen}>
+                    <BookOpen size={16} aria-hidden="true" />
+                    {readerOpen ? 'Hide reader' : 'Reader mode'}
+                  </button>
+                ) : null}
                 <select
                   className="pause-select"
                   value={pauseDuration}

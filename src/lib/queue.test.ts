@@ -182,6 +182,12 @@ describe('queue', () => {
     expect(migrated.speed).toBe(1)
   })
 
+  it('preserves the optional reader source identity across migration', () => {
+    const migrated = migrateQueueJob({ ...makeJob('reader-job', 1), sourceDocumentId: 'reader-deadbeef' })
+    expect(migrated.sourceDocumentId).toBe('reader-deadbeef')
+    expect(migrateQueueJob({ ...makeJob('reader-invalid', 1), sourceDocumentId: { unsafe: true } }).sourceDocumentId).toBeUndefined()
+  })
+
   it('migrates queue chunk playback metadata', () => {
     const migrated = migrateQueueJob({
       ...makeJob('playback', 1),

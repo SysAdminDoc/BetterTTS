@@ -24,6 +24,7 @@
 - Added a headless `bettertts synth` CLI that reuses the verified native Sherpa host for TXT/EPUB conversion, bounded chunking, WAV/MP3/Opus/FLAC/M4B export, SRT/VTT captions, JSON progress, dry runs, and scriptable exit codes without launching Electron.
 - Added opt-in Windows desktop workflow integrations: a clipboard-based global read-selection hotkey, per-user Explorer context-menu entries that queue TXT/EPUB/PDF/DOCX files, and optional Tesseract screen OCR. Each integration is independently disableable and the web/PWA bridge remains absent.
 - Added an opt-in Windows desktop Studio cleanup toggle. Native FFmpeg applies `afftdn` denoise plus conservative room-tail reduction after generation/imported-BGM mixing, retains a before-cleanup playback path for the session, and adds no model or installer dependency.
+- Added Reader mode for imported EPUBs, articles, PDFs, DOCX files, and text. The chapter-aware book view binds sentence and optional word cues to stable content IDs, supports paragraph-to-playback jumps, per-document local resume, and an optional line-focus presentation without relying on rendered layout coordinates.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -52,6 +53,7 @@
 - Added narrator quote/speaker parsing, unmatched-quote fallback, queue role/voice migration, metadata preservation during regeneration, and packaged Narrator mode UI smoke coverage.
 - Added CLI argument/chunk/caption core coverage plus real native WAV/caption and FFmpeg M4B conversion probes.
 - Added desktop integration contract coverage for opt-in defaults, persisted-setting sanitization, supported external-file routing, MIME mapping, Explorer command construction, packaged UI controls, and disabled-by-default smoke behavior.
+- Added Reader document-coordinate, sentence/word cue-binding, resume-persistence, queue source-identity, and browser smoke coverage for EPUB launch, chapter navigation, paragraph interaction, and line focus (414 tests across 70 files).
 - Added FFmpeg cleanup filter contract coverage, native denoise/Studio/loudness probes, cleanup UI smoke assertions, and the packaged output before/after audit path.
 - Added MeloTTS model-pack validation, IPC/queue migration coverage, a real native Chinese + English host probe, packaged UI assertions for Melo and the new Kokoro languages, and headless real-engine synthesis checks for Japanese and Mandarin.
 

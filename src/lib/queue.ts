@@ -29,6 +29,7 @@ export type QueueJob = {
   schemaVersion: 2
   id: string
   title: string
+  sourceDocumentId?: string
   createdAt: number
   engine: QueueEngine
   voice: VoiceId | string
@@ -293,6 +294,9 @@ export function migrateQueueJob(raw: unknown): QueueJob {
     schemaVersion: 2,
     id,
     title,
+    ...(typeof job.sourceDocumentId === 'string' && job.sourceDocumentId.trim() && job.sourceDocumentId.length <= 200
+      ? { sourceDocumentId: job.sourceDocumentId.trim() }
+      : {}),
     createdAt: Number.isFinite(job.createdAt) && Number(job.createdAt) >= 0 ? Number(job.createdAt) : Date.now(),
     engine,
     voice,
