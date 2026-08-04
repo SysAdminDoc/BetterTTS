@@ -18,6 +18,8 @@ const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error
 const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
 const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
 const DESKTOP_INTEGRATIONS_RENDER_CHANNEL = 'bettertts:desktop-integrations-render'
+const DESKTOP_DIAGNOSTICS_CHANNEL = 'bettertts:desktop-diagnostics'
+const DESKTOP_DIAGNOSTICS_LOG_CHANNEL = 'bettertts:desktop-diagnostics-log'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -177,6 +179,15 @@ const bridge = {
       const handler = (_event: unknown, error: unknown) => listener(error)
       ipcRenderer.on(DESKTOP_INTEGRATIONS_ERROR_CHANNEL, handler)
       return () => ipcRenderer.removeListener(DESKTOP_INTEGRATIONS_ERROR_CHANNEL, handler)
+    },
+  },
+  desktopDiagnostics: {
+    collect(input: unknown): Promise<unknown> {
+      const payload = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}
+      return ipcRenderer.invoke(DESKTOP_DIAGNOSTICS_CHANNEL, { action: 'collect', ...payload })
+    },
+    log(level: 'info' | 'warn' | 'error', source: string, message: unknown): void {
+      ipcRenderer.send(DESKTOP_DIAGNOSTICS_LOG_CHANNEL, { level, source, message })
     },
   },
 }

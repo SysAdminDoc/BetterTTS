@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-509%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-512%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -114,7 +114,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Content-Security-Policy** baked into production builds
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
 - **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
-- **Diagnostics export** — copy or download a local JSON support bundle with browser, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8
+- **Diagnostics export** — copy or download a local JSON support bundle with browser and native app/OS/runtime details, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, verified model-pack and FFmpeg status, sidecar stderr summaries, redacted paths, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8
 - **Media Session API** — lock-screen play/pause, seek, and sentence-skip controls for generated audio
 - **Audio output routing** — where the browser grants Audio Output Devices API support, choose a speaker or headset for every registered playback surface; unsupported browsers hide the picker
 - **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
@@ -164,7 +164,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 
 ## Troubleshooting
 
-Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, WebGPU adapter identity and denylist state, WebCodecs AAC/Opus support, the last generation's time to first audio, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, and recent sanitized warnings/errors. It does not include script text or imported article URLs. If a WebGPU clip is corrupted or produces screeching audio, choose **Report bad audio** in the WebGPU adapter panel; BetterTTS stores only the adapter fingerprint and uses WASM q8 for that adapter until you clear the report.
+Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, native runtime/provider state, verified model-pack and FFmpeg status, bounded sidecar/native stderr summaries, WebGPU adapter identity and denylist state, WebCodecs AAC/Opus support, the last generation's time to first audio, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, redacted path labels, and recent sanitized warnings/errors. It does not include script text or imported article URLs. If a WebGPU clip is corrupted or produces screeching audio, choose **Report bad audio** in the WebGPU adapter panel; BetterTTS stores only the adapter fingerprint and uses WASM q8 for that adapter until you clear the report.
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 

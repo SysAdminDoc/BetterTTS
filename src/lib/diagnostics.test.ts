@@ -107,7 +107,7 @@ describe('collectDiagnostics', () => {
     })
 
     expect(bundle.generatedAt).toBe('2026-07-09T00:00:00.000Z')
-    expect(bundle.schemaVersion).toBe(2)
+    expect(bundle.schemaVersion).toBe(3)
     expect(bundle.app.version).toBe('0.22.0')
     expect(bundle.app.location).toBe('https://example.test/BetterTTS/')
     expect(bundle.browser).toMatchObject({ userAgent: 'UnitTest', hardwareConcurrency: 8, deviceMemoryGb: 16 })
@@ -132,6 +132,17 @@ describe('sanitizeDiagnosticText', () => {
     expect(sanitizeDiagnosticText('https://x.test/token/abc123?password=hunter2 Authorization: Basic abc123')).toBe(
       'https://x.test/token/REDACTED?password=REDACTED Authorization: Basic REDACTED',
     )
+  })
+
+  it('redacts article URLs and subtitle text from source-specific events', () => {
+    recordDiagnosticEvent('warn', 'Could not fetch https://article.test/private?token=secret', 'article.import')
+    recordDiagnosticEvent('warn', 'Private subtitle sentence', 'subtitle.revoice.missing-audio')
+
+    const events = getRecentDiagnosticEvents()
+    expect(events[0].message).toContain('<url>')
+    expect(events[0].message).not.toContain('article.test')
+    expect(events[1].message).toBe('Subtitle audio was missing for one cue.')
+    expect(events[1].message).not.toContain('Private subtitle sentence')
   })
 })
 

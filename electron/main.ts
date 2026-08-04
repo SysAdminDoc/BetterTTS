@@ -22,6 +22,8 @@ import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
 import { resolveSmokeOutputDirectory } from './smoke-output.ts'
+import { buildDesktopDiagnostics, recordDesktopLog, type DesktopDiagnosticsRequest } from './desktop-diagnostics.ts'
+import { readSherpaPackStatus, SHERPA_KOKORO_PACK, SHERPA_MELO_PACK, SHERPA_PIPER_PACK, type SherpaModelPack } from './sherpa-models.ts'
 import {
   DEFAULT_DESKTOP_INTEGRATIONS,
   DESKTOP_INTEGRATION_HOTKEY,
@@ -202,6 +204,8 @@ const DESKTOP_INTEGRATIONS_ERROR_CHANNEL = 'bettertts:desktop-integrations-error
 const DESKTOP_INTEGRATIONS_CHANNEL = 'bettertts:desktop-integrations'
 const DESKTOP_INTEGRATIONS_OCR_CHANNEL = 'bettertts:desktop-integrations-ocr'
 const DESKTOP_INTEGRATIONS_RENDER_CHANNEL = 'bettertts:desktop-integrations-render'
+const DESKTOP_DIAGNOSTICS_CHANNEL = 'bettertts:desktop-diagnostics'
+const DESKTOP_DIAGNOSTICS_LOG_CHANNEL = 'bettertts:desktop-diagnostics-log'
 const MAX_EXTERNAL_FILE_BYTES = 25 * 1024 * 1024
 const MAX_EXTERNAL_TEXT_CHARS = 5_000
 const MAX_FOLDER_IMPORT_DIRECTORIES = 1_000
@@ -250,8 +254,26 @@ function broadcastDesktopIntegrationStatus(): void {
   }
 }
 
+function recordNativeHostMessage(source: string, message: unknown): void {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return
+  const candidate = message as { type?: unknown; message?: unknown; source?: unknown; status?: unknown; key?: unknown }
+  if (candidate.type === 'diagnostic') {
+    recordDesktopLog('warn', candidate.source ?? source, candidate.message)
+    return
+  }
+  if (candidate.type === 'status' && candidate.status && typeof candidate.status === 'object') {
+    const status = candidate.status as { available?: unknown; message?: unknown; recovery?: unknown }
+    if (status.available === false) recordDesktopLog('warn', `${source}.status`, status.message ?? status.recovery ?? 'Runtime unavailable')
+    return
+  }
+  if (candidate.type === 'error' || candidate.type === 'loadError' || candidate.type === 'generateError' || candidate.type === 'crashed') {
+    recordDesktopLog('error', `${source}.${String(candidate.type)}`, candidate.message ?? 'Native host error')
+  }
+}
+
 function setDesktopIntegrationError(error: unknown): void {
   desktopIntegrationLastError = (error instanceof Error ? error.message : String(error)).replaceAll(process.cwd(), '<app>').slice(0, 300)
+  recordDesktopLog('error', 'desktop.integration', desktopIntegrationLastError)
   broadcastDesktopIntegrationStatus()
 }
 
@@ -671,7 +693,71 @@ ipcMain.handle(DESKTOP_INTEGRATIONS_OCR_CHANNEL, async (event) => {
   }
 })
 
+async function readDesktopManifest(pack: SherpaModelPack): Promise<unknown> {
+  try {
+    return await readSherpaPackStatus(
+      process.env.BETTERTTS_MODEL_CACHE?.trim() || join(app.getPath('userData'), 'native-models'),
+      pack,
+      { deep: false },
+    )
+  } catch (error) {
+    return {
+      id: pack.id,
+      modelId: pack.modelId,
+      revision: pack.revision,
+      installed: false,
+      verified: false,
+      files: [],
+      totalBytes: 0,
+      expectedBytes: pack.archive.size,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+ipcMain.handle(DESKTOP_DIAGNOSTICS_CHANNEL, async (event, request: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid desktop diagnostics request.')
+  const message = request && typeof request === 'object' && !Array.isArray(request)
+    ? request as { action?: unknown; selection?: unknown; generation?: unknown; runtime?: unknown }
+    : {}
+  if (message.action !== 'collect') throw new Error('Unsupported desktop diagnostics request.')
+
+  const [kokoro, piper, melo, ffmpeg] = await Promise.all([
+    readDesktopManifest(SHERPA_KOKORO_PACK),
+    readDesktopManifest(SHERPA_PIPER_PACK),
+    readDesktopManifest(SHERPA_MELO_PACK),
+    probeFfmpeg(),
+  ])
+  recordDesktopLog('info', 'desktop.diagnostics', 'Collected a redacted native support snapshot.')
+  const diagnosticsRequest: DesktopDiagnosticsRequest = {
+    selection: message.selection,
+    generation: message.generation,
+    runtime: message.runtime,
+  }
+  return buildDesktopDiagnostics(diagnosticsRequest, {
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+    chromeVersion: process.versions.chrome,
+    nodeVersion: process.versions.node,
+    packaged: app.isPackaged,
+    userDataPath: app.getPath('userData'),
+    resourcesPath: process.resourcesPath,
+    modelCachePath: process.env.BETTERTTS_MODEL_CACHE?.trim() || join(app.getPath('userData'), 'native-models'),
+    nativeManifests: { kokoro, piper, melo },
+    ffmpeg,
+  })
+})
+
+ipcMain.on(DESKTOP_DIAGNOSTICS_LOG_CHANNEL, (event, request: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return
+  const message = request as { level?: unknown; source?: unknown; message?: unknown }
+  if (message.level !== 'info' && message.level !== 'warn' && message.level !== 'error') return
+  recordDesktopLog(message.level, message.source, message.message)
+})
+
 function sendToSubscriber(message: unknown): void {
+  recordNativeHostMessage('native', message)
   if (ttsHostSubscriber && !ttsHostSubscriber.isDestroyed()) {
     ttsHostSubscriber.send(NATIVE_TTS_CHANNEL, message)
   }
@@ -729,6 +815,7 @@ ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
 // native TTS. The host owns the optional whisper.cpp executable, the model
 // path, temporary audio files, and child-process cancellation.
 function sendToWhisperSubscriber(message: unknown): void {
+  recordNativeHostMessage('whisper', message)
   if (whisperHostSubscriber && !whisperHostSubscriber.isDestroyed()) {
     whisperHostSubscriber.send(WHISPER_CHANNEL, message)
   }
@@ -780,6 +867,8 @@ ipcMain.on(WHISPER_CHANNEL, (event, message: unknown) => {
 // installer carries only the small protocol script and requirements manifest;
 // torch, qwen-tts, and model weights are downloaded after install on request.
 function sendToSidecarSubscriber(message: unknown): void {
+  recordNativeHostMessage('qwen', message)
+  if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'diagnostic') return
   if (sidecarHostSubscriber && !sidecarHostSubscriber.isDestroyed()) {
     sidecarHostSubscriber.send(SIDECAR_CHANNEL, message)
   }
@@ -833,6 +922,8 @@ ipcMain.on(SIDECAR_CHANNEL, (event, message: unknown) => {
 // Optional RVC post-stage host (TF-120). Python, torch, and user-selected
 // weights stay outside the renderer and outside the installer payload.
 function sendToRvcSubscriber(message: unknown): void {
+  recordNativeHostMessage('rvc', message)
+  if (message && typeof message === 'object' && (message as { type?: unknown }).type === 'diagnostic') return
   if (rvcHostSubscriber && !rvcHostSubscriber.isDestroyed()) {
     rvcHostSubscriber.send(RVC_CHANNEL, message)
   }
@@ -1127,12 +1218,21 @@ ipcMain.handle(FFMPEG_CHANNEL, async (event, request: unknown) => {
     chunks?: Array<{ bytes: Uint8Array; title: string }>
     cover?: { bytes: Uint8Array }
   }
-  if (message.action === 'status') return probeFfmpeg()
-  if (message.action === 'transcode' && message.samples && message.sampleRate && message.format) {
-    return transcodePcm(message)
+  if (message.action === 'status') {
+    const status = await probeFfmpeg()
+    if (!status.available) recordDesktopLog('warn', 'ffmpeg.probe', status.message)
+    return status
   }
-  if (message.action === 'audiobook' && message.chunks) return buildM4bAudiobook(message)
-  throw new Error('Unsupported FFmpeg action.')
+  try {
+    if (message.action === 'transcode' && message.samples && message.sampleRate && message.format) {
+      return await transcodePcm(message)
+    }
+    if (message.action === 'audiobook' && message.chunks) return await buildM4bAudiobook(message)
+    throw new Error('Unsupported FFmpeg action.')
+  } catch (error) {
+    recordDesktopLog('error', 'ffmpeg', error)
+    throw error
+  }
 })
 
 // Ask the host for its runtime info without loading any model — used by the
@@ -1497,9 +1597,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, rvc: !!window.betterttsPlatform.rvc, rvcWeights: !!window.betterttsPlatform.rvcWeights, openAiServer: !!window.betterttsPlatform.openAiServer, desktopIntegrations: !!window.betterttsPlatform.desktopIntegrations }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, rvc: !!window.betterttsPlatform.rvc, rvcWeights: !!window.betterttsPlatform.rvcWeights, openAiServer: !!window.betterttsPlatform.openAiServer, desktopIntegrations: !!window.betterttsPlatform.desktopIntegrations, desktopDiagnostics: !!window.betterttsPlatform.desktopDiagnostics }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean; desktopIntegrations: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean; desktopIntegrations: boolean; desktopDiagnostics: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -1546,6 +1646,29 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
     const desktopIntegrationsScreenshotPath = join(smokeOutputDirectory, 'desktop-integrations-smoke.png')
     await writeFile(desktopIntegrationsScreenshotPath, desktopIntegrationsImage.toPNG())
     result.desktopIntegrationsScreenshot = desktopIntegrationsScreenshotPath
+    result.desktopDiagnostics = await win.webContents.executeJavaScript(`(async () => {
+      const bridge = window.betterttsPlatform?.desktopDiagnostics
+      if (!bridge) return { available: false }
+      const snapshot = await bridge.collect({
+        selection: {
+          engine: 'kokoro',
+          engineStatus: 'Smoke check',
+          runtime: 'sherpa-onnx-node',
+          selectedModel: 'smoke script text must not be forwarded',
+          modelRoutes: { importedArticle: 'https://article.test/private/story' },
+        },
+        runtime: { native: { modelCacheDir: 'C:\\\\Users\\\\smoke\\\\BetterTTS' } },
+      })
+      const serialized = JSON.stringify(snapshot)
+      return {
+        available: true,
+        schemaVersion: snapshot.schemaVersion,
+        hasManifest: !!snapshot.selection?.modelManifest,
+        hasFfmpeg: typeof snapshot.ffmpeg?.available === 'boolean',
+        hasLogs: Array.isArray(snapshot.recentLogs),
+        redacted: !serialized.includes('article.test') && !serialized.includes('smoke script text'),
+      }
+    })()`)
     result.openAiUi = await win.webContents.executeJavaScript(`(async () => {
       const panel = document.querySelector('[aria-label="Local OpenAI-compatible TTS server"]')
       panel?.scrollIntoView({ block: 'center' })
@@ -1726,6 +1849,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.platform?.ffmpeg === true &&
       probe.platform?.openAiServer === true &&
       probe.platform?.desktopIntegrations === true &&
+      probe.platform?.desktopDiagnostics === true &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
       Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
@@ -1738,6 +1862,12 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.desktopIntegrationsUi as { disabledByDefault?: boolean } | undefined)?.disabledByDefault) &&
       Boolean((result.desktopIntegrationsUi as { ocrAction?: boolean } | undefined)?.ocrAction) &&
       Boolean((result.desktopIntegrationsUi as { folderAction?: boolean } | undefined)?.folderAction) &&
+      Boolean((result.desktopDiagnostics as { available?: boolean; schemaVersion?: number; hasManifest?: boolean; hasFfmpeg?: boolean; hasLogs?: boolean; redacted?: boolean } | undefined)?.available) &&
+      (result.desktopDiagnostics as { schemaVersion?: number } | undefined)?.schemaVersion === 1 &&
+      Boolean((result.desktopDiagnostics as { hasManifest?: boolean; hasFfmpeg?: boolean; hasLogs?: boolean; redacted?: boolean } | undefined)?.hasManifest) &&
+      Boolean((result.desktopDiagnostics as { hasFfmpeg?: boolean } | undefined)?.hasFfmpeg) &&
+      Boolean((result.desktopDiagnostics as { hasLogs?: boolean } | undefined)?.hasLogs) &&
+      Boolean((result.desktopDiagnostics as { redacted?: boolean } | undefined)?.redacted) &&
       Boolean((result.narratorUi as { toggle?: boolean; enabled?: boolean; narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.toggle) &&
       Boolean((result.narratorUi as { enabled?: boolean } | undefined)?.enabled) &&
       Boolean((result.narratorUi as { narrationVoice?: boolean; dialogueVoice?: boolean } | undefined)?.narrationVoice) &&

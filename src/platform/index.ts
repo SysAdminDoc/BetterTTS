@@ -3,6 +3,8 @@
 // and, in later phases, will route synthesis/export/storage to native backends.
 // Keeping this indirection in one module lets `App.tsx` stay platform-agnostic.
 
+import type { DesktopDiagnosticsSnapshot } from '../lib/desktop-diagnostics.ts'
+
 export type PlatformKind = 'web' | 'desktop'
 
 export type NativeTtsBridge = {
@@ -167,6 +169,15 @@ export type DesktopIntegrationsBridge = {
   onError: (listener: (error: { message?: unknown }) => void) => () => void
 }
 
+export type DesktopDiagnosticsBridge = {
+  collect: (input: {
+    selection: unknown
+    generation?: unknown
+    runtime?: unknown
+  }) => Promise<DesktopDiagnosticsSnapshot>
+  log: (level: 'info' | 'warn' | 'error', source: string, message: unknown) => void
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -182,6 +193,7 @@ export type DesktopBridge = {
   rvcWeights?: RvcWeightsBridge
   openAiServer?: OpenAiTtsServerBridge
   desktopIntegrations?: DesktopIntegrationsBridge
+  desktopDiagnostics?: DesktopDiagnosticsBridge
 }
 
 declare global {
@@ -260,4 +272,9 @@ export function getRvcWeightsBridge(): RvcWeightsBridge | null {
 export function getDesktopIntegrationsBridge(): DesktopIntegrationsBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.desktopIntegrations ?? null
+}
+
+export function getDesktopDiagnosticsBridge(): DesktopDiagnosticsBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.desktopDiagnostics ?? null
 }

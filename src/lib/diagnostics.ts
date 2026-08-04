@@ -12,6 +12,9 @@ import {
   type TransformersUpgradeReadiness,
   type WebGpuAdapterInfo,
 } from './runtime-readiness.ts'
+import type { DesktopDiagnosticsSnapshot } from './desktop-diagnostics.ts'
+
+export type { DesktopDiagnosticsSnapshot, DesktopLogEntry } from './desktop-diagnostics.ts'
 
 export type DiagnosticLevel = 'warn' | 'error'
 
@@ -67,7 +70,7 @@ export type WebGpuDiagnostics = {
 }
 
 export type DiagnosticsBundle = {
-  schemaVersion: 2
+  schemaVersion: 3
   generatedAt: string
   app: {
     name: 'BetterTTS'
@@ -109,6 +112,7 @@ export type DiagnosticsBundle = {
     cache: ModelCacheSummary & { error?: string }
   }
   recentEvents: DiagnosticEvent[]
+  desktop?: DesktopDiagnosticsSnapshot
 }
 
 type NavigatorDiagnosticsLike = {
@@ -149,11 +153,12 @@ const recentEvents: DiagnosticEvent[] = []
 let captureInstalled = false
 
 export function recordDiagnosticEvent(level: DiagnosticLevel, message: unknown, source = 'app', now = new Date()): void {
+  const safeSource = sanitizeDiagnosticText(source).slice(0, 80)
   recentEvents.push({
     time: now.toISOString(),
     level,
-    source: sanitizeDiagnosticText(source).slice(0, 80),
-    message: sanitizeDiagnosticText(message),
+    source: safeSource,
+    message: sanitizeDiagnosticEventText(message, safeSource),
   })
   if (recentEvents.length > MAX_EVENTS) recentEvents.splice(0, recentEvents.length - MAX_EVENTS)
 }
@@ -191,6 +196,7 @@ export async function collectDiagnostics(
     appVersion: string
     selection: DiagnosticsSelection
     generation?: GenerationDiagnostics
+    desktop?: DesktopDiagnosticsSnapshot
   },
   probes: DiagnosticsProbes = {},
 ): Promise<DiagnosticsBundle> {
@@ -249,9 +255,12 @@ export async function collectDiagnostics(
     defaultFirstLoad: false,
     notes: ['Could not verify Piper-plus runtime support.'],
   } satisfies PiperPlusRuntimeSupport)
+  const desktop = input.desktop ?? (typeof window === 'undefined'
+    ? undefined
+    : await window.betterttsPlatform?.desktopDiagnostics?.collect({ selection: input.selection }))
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAt: now.toISOString(),
     app: {
       name: 'BetterTTS',
@@ -293,6 +302,7 @@ export async function collectDiagnostics(
       cache,
     },
     recentEvents: probes.recentEvents?.() ?? getRecentDiagnosticEvents(),
+    ...(desktop ? { desktop } : {}),
   }
 }
 
@@ -362,6 +372,17 @@ export function sanitizeDiagnosticText(value: unknown): string {
     .replace(/([?&](?:key|token|secret|password)=)[^&\s]+/gi, '$1REDACTED')
     .replace(/(\/(?:api[_-]?key|token|secret|password|passwd|pwd)\/)[^/?#\s]+/gi, '$1REDACTED')
     .slice(0, 700)
+}
+
+function sanitizeDiagnosticEventText(value: unknown, source: string): string {
+  const text = sanitizeDiagnosticText(value)
+  if (source === 'subtitle.revoice.missing-audio') return 'Subtitle audio was missing for one cue.'
+  if (/^(?:article|subtitle)\./u.test(source)) {
+    return text
+      .replace(/\bhttps?:\/\/[^\s<>"']+/giu, '<url>')
+      .replace(/(?<![A-Za-z])(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|tmp)\/)[^\s<>"']+/gu, '<path>')
+  }
+  return text
 }
 
 export function sanitizeDiagnosticLocation(href: string | undefined): string {

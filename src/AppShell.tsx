@@ -2557,9 +2557,10 @@ function App() {
   }
 
   async function buildDiagnosticsJson(): Promise<string> {
+    const selection = buildDiagnosticsSelection()
     const diagnostics = await collectDiagnostics({
       appVersion: APP_VERSION,
-      selection: buildDiagnosticsSelection(),
+      selection,
       generation: genStats
         ? {
           engine,
@@ -5664,7 +5665,7 @@ function App() {
           setStatus(`Re-voicing ${Math.min(parsed.cues.length, completed)} / ${parsed.cues.length} cues`)
         },
         onMissingAudio: (sentence) => {
-          recordDiagnosticEvent('warn', `Engine produced no audio for subtitle text: ${sentence.slice(0, 120)}`, 'subtitle.revoice.missing-audio')
+          recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-character subtitle cue.`, 'subtitle.revoice.missing-audio')
         },
         onSuspectAudio: (sentence, completeness) => {
           recordDiagnosticEvent(
@@ -7097,7 +7098,7 @@ function App() {
                 <div className="cache-manager-head">
                  <span>
                    <strong>Diagnostics</strong>
-                   <small>Local support bundle. No script text or imported URLs.</small>
+                   <small>Redacted bundle. No script or imported URLs.</small>
                  </span>
                 </div>
                 <Suspense fallback={null}>

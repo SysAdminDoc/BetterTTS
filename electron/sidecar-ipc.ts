@@ -111,4 +111,5 @@ export type SidecarHostMessage =
   | { type: 'progress'; id: number; progress: number; stage: string }
   | { type: 'generated'; id: number; samples: Float32Array; sampleRate: number }
   | { type: 'error'; id: number; code: 'missing-python' | 'missing-package' | 'missing-model' | 'cancelled' | 'failed' | 'crashed'; message: string }
+  | { type: 'diagnostic'; source: 'qwen.stderr'; message: string }
   | { type: 'crashed'; message: string }

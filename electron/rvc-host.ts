@@ -177,7 +177,11 @@ function runPythonOnce(input: Record<string, unknown>, id: number, onProgress?: 
       }
     })
     child.stderr.on('data', (chunk: Buffer | string) => {
-      stderr = `${stderr}${String(chunk)}`.slice(-2_000)
+      const text = String(chunk)
+      stderr = `${stderr}${text}`.slice(-2_000)
+      for (const line of text.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean).slice(-20)) {
+        port.post({ type: 'diagnostic', source: 'rvc.stderr', message: line.slice(0, 240) })
+      }
     })
     child.once('error', (error) => {
       tasks.delete(id)

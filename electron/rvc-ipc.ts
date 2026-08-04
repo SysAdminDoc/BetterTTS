@@ -47,6 +47,7 @@ export type RvcHostMessage =
   | { type: 'progress'; id: number; progress: number; stage: string }
   | { type: 'generated'; id: number; samples: Float32Array; sampleRate: number }
   | { type: 'error'; id: number; code: 'missing-python' | 'missing-package' | 'missing-model' | 'cancelled' | 'failed' | 'crashed'; message: string }
+  | { type: 'diagnostic'; source: 'rvc.stderr'; message: string }
   | { type: 'crashed'; message: string }
 
 const MAX_ID = Number.MAX_SAFE_INTEGER
