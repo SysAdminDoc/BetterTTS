@@ -98,6 +98,10 @@ describe('portable backup', () => {
     const backup = await createPortableBackup({
       settings: { 'bettertts-current-text': 'Draft project text' },
     })
+    const backupManifest = JSON.parse(new TextDecoder().decode(unzipSync(new Uint8Array(await backup.blob.arrayBuffer()))['manifest.json'])) as {
+      clips: Array<{ generationProvenance?: { schemaVersion?: number } }>
+    }
+    expect(backupManifest.clips[0]?.generationProvenance?.schemaVersion).toBe(1)
     expect(backup.preview).toMatchObject({ clips: 1, jobs: 1, settings: 2 })
     await clearLibrary()
     await deleteJob(job.id)

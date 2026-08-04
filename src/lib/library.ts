@@ -2,6 +2,7 @@ import type { Cue } from './subtitles.ts'
 import { publishStoreChange } from './coordination.ts'
 import type { RvcClipProvenance } from './rvc.ts'
 import type { VoiceProvenance } from './voice-lab.ts'
+import { migrateGenerationProvenance, type GenerationProvenanceManifest } from './provenance-migration.ts'
 
 export type ClipRecord = {
   id: string
@@ -15,6 +16,7 @@ export type ClipRecord = {
   cues?: Cue[]
   rvc?: RvcClipProvenance
   provenance?: VoiceProvenance
+  generationProvenance?: GenerationProvenanceManifest
 }
 
 export type ClipSnapshot = {
@@ -65,6 +67,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
       })
     : undefined
   const rvc = migrateRvcProvenance(record.rvc)
+  const generationProvenance = migrateGenerationProvenance(record.generationProvenance)
   return {
     id: record.id,
     filename: record.filename,
@@ -77,6 +80,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     cues,
     ...(rvc ? { rvc } : {}),
     provenance: record.provenance,
+    ...(generationProvenance ? { generationProvenance } : {}),
   }
 }
 

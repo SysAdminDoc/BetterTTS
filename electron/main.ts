@@ -1218,6 +1218,7 @@ ipcMain.handle(FFMPEG_CHANNEL, async (event, request: unknown) => {
     cleanupMode?: 'off' | 'denoise' | 'studio'
     chunks?: Array<{ bytes: Uint8Array; title: string }>
     cover?: { bytes: Uint8Array }
+    provenanceManifest?: unknown
   }
   if (message.action === 'status') {
     const status = await probeFfmpeg()

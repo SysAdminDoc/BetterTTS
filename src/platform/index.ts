@@ -4,6 +4,7 @@
 // Keeping this indirection in one module lets `App.tsx` stay platform-agnostic.
 
 import type { DesktopDiagnosticsSnapshot } from '../lib/desktop-diagnostics.ts'
+import type { GenerationProvenanceManifest } from '../lib/provenance.ts'
 
 export type PlatformKind = 'web' | 'desktop'
 
@@ -61,6 +62,7 @@ export type DesktopFfmpegBridge = {
     bitrate: number
     loudnessTarget?: number
     cover?: { bytes: Uint8Array }
+    provenanceManifest?: GenerationProvenanceManifest
   }) => Promise<{ bytes: Uint8Array; extension: '.m4b'; mime: 'audio/mp4'; chapterCount: number }>
 }
 

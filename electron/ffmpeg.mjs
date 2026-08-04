@@ -158,7 +158,7 @@ export async function transcodePcm({ samples, sampleRate, format, bitrate, title
   }
 }
 
-export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudnessTarget, cover }) {
+export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudnessTarget, cover, provenanceManifest }) {
   if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > 500) throw new Error('Native M4B needs between 1 and 500 audio chunks.')
   const total = chunks.reduce((sum, chunk) => sum + (chunk.bytes?.byteLength ?? 0), 0)
   if (total === 0 || total > MAX_PCM_BYTES) throw new Error('Native M4B inputs must total 512 MB or less.')
@@ -199,7 +199,7 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
     await run(concatArgs, 10 * 60 * 1000)
 
     const metadataPath = join(root, 'chapters.ffmeta')
-    await writeFile(metadataPath, buildChapterMetadata(title, chunks, durations))
+    await writeFile(metadataPath, buildChapterMetadata(title, chunks, durations, provenanceManifest))
     const output = join(root, 'output.m4b')
     const inputArgs = ['-hide_banner', '-nostdin', '-y', '-i', combined]
     const filter = loudnessTarget ? await measuredLoudnorm(inputArgs, loudnessTarget) : null
@@ -224,10 +224,14 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
   }
 }
 
-export function buildChapterMetadata(title, chunks, durations) {
+export function buildChapterMetadata(title, chunks, durations, provenanceManifest) {
   const escape = (value) => String(value).replaceAll('\\', '\\\\').replace(/([=;#\n])/g, '\\$1')
   let start = 0
   const lines = [';FFMETADATA1', `title=${escape(title)}`]
+  if (provenanceManifest !== undefined) {
+    const json = typeof provenanceManifest === 'string' ? provenanceManifest : JSON.stringify(provenanceManifest)
+    if (json) lines.push(`comment=${escape(json.slice(0, 64 * 1024))}`)
+  }
   for (let index = 0; index < chunks.length; index += 1) {
     const end = start + Math.max(1, Math.round(durations[index] * 1000))
     lines.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${start}`, `END=${end}`, `title=${escape(chunks[index].title || `Chapter ${index + 1}`)}`)

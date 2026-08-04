@@ -195,6 +195,7 @@ describe('buildM4bContainer', () => {
         { title: 'Middle', startSample: 1024 },
         { title: 'End', startSample: 2048 },
       ],
+      provenanceJson: '{"schemaVersion":1,"source":{"textHash":"private"}}',
     })
 
     expect(blob.type).toBe('audio/mp4')
@@ -203,6 +204,7 @@ describe('buildM4bContainer', () => {
     expect(findBox(boxes, ['ftyp'])).not.toBeNull()
     expect(readType(bytes, 8)).toBe('M4B ')
     expect(flatten(boxes).some((box) => box.type === 'chap')).toBe(true)
+    expect(new TextDecoder().decode(bytes)).toContain('"schemaVersion":1')
 
     const chpl = findBox(boxes, ['moov', 'udta', 'chpl'])
     expect(chpl).not.toBeNull()

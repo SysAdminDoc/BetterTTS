@@ -1,5 +1,5 @@
 import { zip } from 'fflate'
-import { clearLibrary, getClipBlob, listClips, restoreClipSnapshots, saveClip, type ClipRecord, type ClipSnapshot } from './library.ts'
+import { clearLibrary, getClipBlob, listClips, migrateClipRecord, restoreClipSnapshots, saveClip, type ClipRecord, type ClipSnapshot } from './library.ts'
 import { deleteJob, getChunkBlob, listJobs, migrateQueueJob, restoreQueueJob, type QueueJob, type QueueJobSnapshot } from './queue.ts'
 import {
   assertArchivePayloadSizes,
@@ -7,6 +7,7 @@ import {
   inspectZipArchive,
   type ArchiveBudget,
 } from './archive-budget.ts'
+import { createLegacyProvenanceManifest } from './provenance.ts'
 
 const BACKUP_SCHEMA_VERSION = 1
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024
@@ -172,11 +173,31 @@ export async function createPortableBackup(
   for (const record of await listClips()) {
     const blob = await getClipBlob(record.id)
     if (!blob) continue
-    clips.push({ ...record, size: blob.size })
+    clips.push({
+      ...record,
+      size: blob.size,
+      generationProvenance: record.generationProvenance ?? createLegacyProvenanceManifest({
+        createdAt: record.createdAt,
+        voice: record.voice,
+        speed: record.speed,
+        cueCount: record.cues?.length ?? 0,
+      }),
+    })
     await addAsset(files, assets, `library/${encodeURIComponent(record.id)}.bin`, blob, assetBudget)
   }
 
-  const jobs = await listJobs()
+  const jobs = (await listJobs()).map((job) => job.generationProvenance
+    ? job
+    : {
+      ...job,
+      generationProvenance: createLegacyProvenanceManifest({
+        createdAt: job.createdAt,
+        voice: job.voice,
+        speed: job.speed,
+        format: job.format,
+        cueCount: job.chunks.reduce((total, chunk) => total + (chunk.cues?.length ?? 0), 0),
+      }),
+    })
   for (const job of jobs) {
     for (const chunk of job.chunks) {
       const blob = await getChunkBlob(job.id, chunk.index)
@@ -404,7 +425,9 @@ async function applyPreparedBackup(prepared: PreparedBackup) {
     const asset = prepared.manifest.assets.find((entry) => entry.path === path)
     const bytes = prepared.files[path]
     if (!asset || !bytes) throw new Error(`Backup audio is missing for ${record.label || record.id}.`)
-    await saveClip(record, new Blob([bytesToBuffer(bytes)], { type: asset.type }))
+    const migrated = migrateClipRecord(record)
+    if (!migrated) throw new Error('Backup contains an invalid clip record.')
+    await saveClip(migrated, new Blob([bytesToBuffer(bytes)], { type: asset.type }))
   }
 
   for (const rawJob of prepared.manifest.jobs) {

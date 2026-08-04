@@ -1,3 +1,5 @@
+import type { GenerationProvenanceManifest } from './provenance.ts'
+
 export type M4bChunkSource = {
   blob: Blob
   text?: string
@@ -55,6 +57,7 @@ export type M4bContainerOptions = {
     title: string
     startSample: number
   }>
+  provenanceJson?: string
 }
 
 type DecodedChapter = {
@@ -175,6 +178,7 @@ export async function buildM4bFromBlobs(opts: {
   title: string
   chunks: M4bChunkSource[]
   bitrate?: number
+  provenanceManifest?: GenerationProvenanceManifest
   onProgress?: (progress: M4bProgress) => void
 }): Promise<{ blob: Blob; chapterCount: number }> {
   if (!m4bSupported()) {
@@ -201,6 +205,7 @@ export async function buildM4bFromBlobs(opts: {
     audioSpecificConfig: encoded.audioSpecificConfig,
     frames: encoded.frames,
     chapters: encoded.chapters,
+    provenanceJson: opts.provenanceManifest ? JSON.stringify(opts.provenanceManifest) : undefined,
   })
   opts.onProgress?.({ phase: 'mux', done: 1, total: 1 })
   return { blob, chapterCount: chapters.length }
@@ -462,7 +467,7 @@ function makeMoov(
     makeMvhd(movieDuration, 3),
     makeAudioTrack(opts, movieDuration, audioDuration, audioOffset),
     makeChapterTrack(movieDuration, chapterSamples, chapterOffset),
-    makeUdta(opts.title, chapterSamples),
+    makeUdta(opts.title, chapterSamples, opts.provenanceJson),
   )
 }
 
@@ -645,17 +650,23 @@ function makeGmhd(): Uint8Array {
   )
 }
 
-function makeUdta(title: string, chapters: Array<{ start100ns: bigint; title: string }>): Uint8Array {
-  return box('udta', makeMeta(title), makeChpl(chapters))
+function makeUdta(title: string, chapters: Array<{ start100ns: bigint; title: string }>, provenanceJson?: string): Uint8Array {
+  return box('udta', makeMeta(title, provenanceJson), makeChpl(chapters))
 }
 
-function makeMeta(title: string): Uint8Array {
+function makeMeta(title: string, provenanceJson?: string): Uint8Array {
+  const items = [
+    box([0xa9, 0x6e, 0x61, 0x6d], box('data', u32(1), u32(0), utf8(title))),
+    ...(provenanceJson
+      ? [box([0xa9, 0x63, 0x6d, 0x74], box('data', u32(1), u32(0), truncateUtf8(provenanceJson, 64 * 1024)))]
+      : []),
+  ]
   return fullBox(
     'meta',
     0,
     0,
     makeHdlr('mdir', 'appl'),
-    box('ilst', box([0xa9, 0x6e, 0x61, 0x6d], box('data', u32(1), u32(0), utf8(title)))),
+    box('ilst', ...items),
   )
 }
 

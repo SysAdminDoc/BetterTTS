@@ -166,6 +166,7 @@ describe('queue', () => {
     // A persisted 'generating' chunk is a zombie from a crashed session and
     // must come back resumable, not stuck on a perpetual "running" pill.
     expect(migrated.chunks[0].status).toBe('pending')
+    expect(migrated.generationProvenance).toBeUndefined()
   })
 
   it('migrates native Melo jobs as single-speaker queue records', () => {

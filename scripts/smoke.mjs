@@ -1144,7 +1144,7 @@ async function runSmoke() {
       throw new Error('Mobile editor-level Generate audio action is not visible')
     }
     await mobile.page.getByRole('tab', { name: /Queue/ }).click()
-    await mobile.page.locator('.capability-strip').waitFor({ state: 'visible', timeout: 20000 })
+    await mobile.page.locator('.queue-panel .capability-strip').waitFor({ state: 'visible', timeout: 20000 })
     await mobile.page.getByRole('button', { name: 'ZIP fallback' }).waitFor({ timeout: 20000 })
     const m4bButton = mobile.page.getByRole('button', { name: 'M4B' })
     if (!(await m4bButton.isDisabled())) throw new Error('M4B button should be disabled in unsupported AAC smoke state')

@@ -1,5 +1,5 @@
 import { opusSupported } from './encode.ts'
-import { checkM4bCapability, type M4bCapability } from './m4b.ts'
+import type { M4bCapability } from './m4b.ts'
 import { readModelCacheStatus, type ModelCacheSummary } from './model-cache.ts'
 import { getPersistenceOutcome, type PersistenceOutcome } from './persistence.ts'
 import { piperPlusRuntimeSupport, type PiperPlusRuntimeSupport } from './piper-plus.ts'
@@ -220,7 +220,7 @@ export async function collectDiagnostics(
       totalBytes: 0,
       unknownSizeCount: 0,
     }),
-    readSafely(probes.m4b ?? checkM4bCapability, {
+    readSafely(probes.m4b ?? (() => import('./m4b.ts').then(({ checkM4bCapability }) => checkM4bCapability())), {
       supported: false,
       reason: 'check-failed',
       message: 'Could not verify M4B AAC support.',

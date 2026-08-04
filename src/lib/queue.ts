@@ -4,6 +4,7 @@ import type { Cue } from './subtitles.ts'
 import type { NarratorRole } from './text.ts'
 import type { KokoroLocale, VoiceId } from './voices.ts'
 import type { PiperPlusLanguage } from './piper-plus.ts'
+import { migrateGenerationProvenance, type GenerationProvenanceManifest } from './provenance-migration.ts'
 
 export type ChunkStatus = 'pending' | 'generating' | 'done' | 'failed'
 export type QueueEngine = 'kokoro' | 'supertonic' | 'kitten' | 'piper' | 'melo'
@@ -46,6 +47,7 @@ export type QueueJob = {
   narratorMode?: boolean
   supertonicSteps?: number
   kittenModel?: 'nano' | 'micro' | 'mini'
+  generationProvenance?: GenerationProvenanceManifest
   chunks: QueueChunk[]
 }
 
@@ -296,6 +298,8 @@ export function migrateQueueJob(raw: unknown): QueueJob {
   const voice = typeof job.voice === 'string' && job.voice && job.voice.length <= 200 ? job.voice : 'af_heart'
   const language = typeof job.language === 'string' && job.language.length <= 50 ? job.language : undefined
   const narratorMode = job.narratorMode === true
+  const chunks = Array.isArray(job.chunks) ? job.chunks.map((chunk, index) => migrateQueueChunk(chunk, index)) : []
+  const generationProvenance = migrateGenerationProvenance(job.generationProvenance)
   return {
     schemaVersion: 2,
     id,
@@ -318,7 +322,8 @@ export function migrateQueueJob(raw: unknown): QueueJob {
     kittenModel: engine === 'kitten' && (job.kittenModel === 'micro' || job.kittenModel === 'mini')
       ? job.kittenModel
       : engine === 'kitten' ? 'nano' : undefined,
-    chunks: Array.isArray(job.chunks) ? job.chunks.map((chunk, index) => migrateQueueChunk(chunk, index)) : [],
+    ...(generationProvenance ? { generationProvenance } : {}),
+    chunks,
   }
 }
 

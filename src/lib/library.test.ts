@@ -34,6 +34,11 @@ describe('library', () => {
     expect(migrateClipRecord({ ...record('bad', 1), size: Number.NaN })).toBeNull()
   })
 
+  it('leaves clips without a manifest available for the legacy replay warning', () => {
+    const migrated = migrateClipRecord(record('legacy', 1))
+    expect(migrated?.generationProvenance).toBeUndefined()
+  })
+
   it('preserves valid RVC provenance and drops malformed provenance', () => {
     const valid = {
       ...record('rvc', 1),

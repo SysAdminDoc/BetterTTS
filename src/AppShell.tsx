@@ -129,7 +129,8 @@ import { cancelRvcGeneration, chooseRvcIndex, chooseRvcModel, convertRvcAudio, g
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import type { VoiceProvenance } from './lib/voice-lab.ts'
-import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
+import type { GenerationProvenanceManifest, ProvenanceCueTiming, ProvenanceReplayContext } from './lib/provenance.ts'
+import type { M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
   type ModelCacheEngineId,
@@ -351,6 +352,7 @@ type AudioResult = {
   sourceDocumentId?: string
   sourceText?: string
   loudness?: LoudnessMeasurement
+  provenanceManifest?: GenerationProvenanceManifest
 }
 
 type ImportedCaption = {
@@ -1203,6 +1205,7 @@ type LibraryClipRowProps = {
   clip: ClipRecord
   onDeleted: (snapshot: ClipSnapshot) => void
   onNotice: (toast: Toast) => void
+  replayContext?: ProvenanceReplayContext
 }
 
 function cueDataUrl(cues?: Cue[]): string | undefined {
@@ -1215,10 +1218,39 @@ function assDataUrl(cues: Cue[] | undefined, title: string, preset: AssCaptionPr
   return `data:text/plain;charset=utf-8,${encodeURIComponent(toASS(cues, { preset, title }))}`
 }
 
-function LibraryClipRow({ clip, onDeleted, onNotice }: LibraryClipRowProps) {
+function provenanceReplayWarning(manifest: GenerationProvenanceManifest | null | undefined, current?: ProvenanceReplayContext): string | null {
+  const engine = manifest?.engine
+  const sourceHash = manifest?.source?.textHash
+  if (!manifest || manifest.legacy || !engine || engine.id === 'unknown' || !sourceHash) {
+    return 'Replay may differ: this clip has incomplete generation provenance from an older runtime.'
+  }
+  if (!current) return null
+  if (engine.id !== current.engineId) return `Replay may differ: this clip used ${engine.id}, but the current engine is ${current.engineId}.`
+  if (current.modelId && (engine.modelId !== current.modelId || engine.modelRevision !== current.modelRevision)) {
+    return 'Replay may differ: the selected model revision does not match this clip.'
+  }
+  return manifest.runtime?.label === current.runtimeLabel
+    ? null
+    : 'Replay may differ: the selected runtime does not match this clip.'
+}
+
+function updateProvenanceCueSummary(manifest: GenerationProvenanceManifest, cueCount: number, timing: ProvenanceCueTiming): GenerationProvenanceManifest {
+  const count = Number(cueCount)
+  return {
+    ...manifest,
+    cues: {
+      schemaVersion: 1,
+      count: Math.round(Number.isFinite(count) ? Math.max(0, Math.min(1_000_000, count)) : 0),
+      timing: timing === 'word' || timing === 'sentence' ? timing : 'none',
+    },
+  }
+}
+
+function LibraryClipRow({ clip, onDeleted, onNotice, replayContext }: LibraryClipRowProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState<'load' | 'download' | 'delete' | null>(null)
   const vttUrl = useMemo(() => cueDataUrl(clip.cues), [clip.cues])
+  const replayWarning = provenanceReplayWarning(clip.generationProvenance, replayContext)
 
   useEffect(() => {
     return () => {
@@ -1287,6 +1319,12 @@ function LibraryClipRow({ clip, onDeleted, onNotice }: LibraryClipRowProps) {
         <span>{formatBytes(clip.size)}</span>
         {clip.cues?.length ? <span>{clip.cues.length} cues</span> : <span>time resume</span>}
       </div>
+      {replayWarning ? (
+        <div className="capability-strip warn" role="status">
+          <Info size={15} aria-hidden="true" />
+          <span>{replayWarning}</span>
+        </div>
+      ) : null}
       {url ? (
         <PlaybackAudio playbackKey={`clip:${clip.id}`} src={url} label={clip.filename} cues={clip.cues} vttUrl={vttUrl} />
       ) : null}
@@ -1922,6 +1960,75 @@ function App() {
     return voiceIdForNarratorRole('narration')
   }
 
+  function provenanceRuntime(): GenerationProvenanceManifest['runtime'] {
+    return {
+      target: nativeAvailable || desktopFfmpeg !== null ? 'desktop' : 'web',
+      label: runtimeLabel,
+      platform: typeof navigator !== 'undefined' ? navigator.platform || 'unknown' : 'unknown',
+    }
+  }
+
+  const currentReplayContext: ProvenanceReplayContext = {
+    engineId: engine,
+    modelId: '',
+    modelRevision: '',
+    runtimeLabel,
+  }
+
+  async function createCurrentProvenance(options: {
+    voiceId?: string
+    sourceText?: string
+    sampleRate: number
+    cueCount?: number
+    cueTiming?: ProvenanceCueTiming
+    engineId?: Engine
+    postProcessing?: boolean
+    speedOverride?: number
+    formatOverride?: AudioFormat
+    bitrateOverride?: number
+    loudnessPresetOverride?: LoudnessPresetId
+    source?: Partial<GenerationProvenanceManifest['source']>
+    rvc?: GenerationProvenanceManifest['rvc']
+  }): Promise<GenerationProvenanceManifest> {
+    const selectedEngine = options.engineId ?? engine
+    const { createGenerationProvenance, createProvenanceEncoder, createProvenanceEngine } = await import('./lib/provenance.ts')
+    return createGenerationProvenance({
+      appVersion: APP_VERSION,
+      runtime: provenanceRuntime(),
+      engine: createProvenanceEngine(selectedEngine, chatterboxModel),
+      voiceId: options.voiceId ?? 'unknown',
+      locale: selectedEngine === 'kokoro' ? locale : selectedEngine === 'piper' ? piperLanguage : selectedEngine === 'chatterbox' ? chatterboxLanguageId : undefined,
+      speed: options.speedOverride ?? speed,
+      pitchSemitones: selectedEngine === 'kokoro' && options.postProcessing !== false ? pitchSemitones : 0,
+      cleanup,
+      punctuationPauses,
+      audioCleanupMode: effectiveAudioCleanupMode,
+      pronunciations,
+      backgroundMusic: {
+        enabled: options.postProcessing !== false && selectedEngine === 'kokoro' && bgmFile !== null,
+        volume: bgmVolume,
+        duckEnabled: bgmDuckEnabled,
+        duckDepth: bgmDuckDepth,
+      },
+      encoder: createProvenanceEncoder(options.formatOverride ?? audioFormat, options.sampleRate, {
+        bitrate: options.bitrateOverride ?? mp3Bitrate,
+        loudnessPreset: options.loudnessPresetOverride ?? loudnessPreset,
+        native: desktopFfmpeg !== null && ffmpegStatus?.available === true,
+        ffmpegVersion: ffmpegStatus?.version,
+      }),
+      sourceText: options.sourceText,
+      source: {
+        kind: readerDocument?.kind ?? 'text',
+        documentId: readerDocument?.id,
+        title: readerDocument?.title,
+        ...options.source,
+      },
+      cueCount: options.cueCount,
+      cueTiming: options.cueTiming,
+      rvc: options.rvc,
+    })
+  }
+
   function setVoiceIdForNarratorRole(role: NarratorRole, value: string): void {
     if (role === 'narration') {
       if (engine === 'kokoro') setVoiceId(value)
@@ -2370,7 +2477,7 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
-    checkM4bCapability()
+    import('./lib/m4b.ts').then(({ checkM4bCapability }) => checkM4bCapability())
       .then((capability) => {
         if (!cancelled) setM4bCapability(capability)
       })
@@ -3765,6 +3872,7 @@ function App() {
           : KOKORO_SAMPLE_RATE
     let totalChars = 0
     const generated: AudioResult[] = []
+    const generatedProvenance: GenerationProvenanceManifest[] = []
     const zipFiles: Record<string, Blob> = {}
     let clearedPrevious = false
     let warnedBgmEmpty = false
@@ -3899,6 +4007,21 @@ function App() {
         result.vttUrl = rememberUrl(URL.createObjectURL(new Blob([toVTT(cues)], { type: 'text/vtt' })))
       }
 
+      const generationProvenance = await createCurrentProvenance({
+        voiceId: job.voice,
+        sourceText: job.text,
+        sampleRate: outputSampleRate,
+        cueCount: cues.length,
+        cueTiming: wordTimestamps && englishKokoro ? 'word' : cues.length > 0 ? 'sentence' : 'none',
+        rvc: rvcPlan ? {
+          enabled: true,
+          modelCount: rvcPlan.blend ? 2 : 1,
+          pitchSemitones: rvcPlan.pitchSemitones,
+          indexRate: rvcPlan.indexRate,
+        } : undefined,
+      })
+      result.provenanceManifest = generationProvenance
+
       const clipRecord: ClipRecord = {
         id: result.id,
         filename,
@@ -3911,6 +4034,7 @@ function App() {
         cues: result.cues,
         ...(rvcPlan ? { rvc: createRvcClipProvenance(rvcPlan) } : {}),
         provenance: voiceProvenance,
+        generationProvenance,
       }
       try {
         await saveClip(clipRecord, blob)
@@ -3949,6 +4073,7 @@ function App() {
       // Present the output only after its atomic library save has either
       // committed or returned a visible recovery error.
       generated.push(result)
+      generatedProvenance.push(generationProvenance)
       zipFiles[filename] = blob
       setResults([...generated])
     }
@@ -3963,6 +4088,11 @@ function App() {
       for (const [filename, blob] of Object.entries(zipFiles)) {
         entries[filename] = new Uint8Array(await blob.arrayBuffer())
       }
+      entries['provenance.json'] = new TextEncoder().encode(JSON.stringify({
+        schemaVersion: 1,
+        app: 'BetterTTS',
+        manifests: generatedProvenance,
+      }, null, 2))
       // level 0: WAV/MP3 payloads don't deflate; storing keeps exports instant.
       const zipped = await new Promise<Uint8Array>((resolve, reject) => {
         zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)))
@@ -4463,10 +4593,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function createQueueJob(title: string, chunks: QueueSourceChunk[], sourceDocumentId?: string, sourceKind?: 'epub'): QueueJob | null {
+  async function createQueueJob(title: string, chunks: QueueSourceChunk[], sourceDocumentId?: string, sourceKind?: 'epub'): Promise<QueueJob | null> {
     if (!engineQueueable(engine)) return null
     const queueEngine = engine as QueueEngine
-    return {
+    const job: QueueJob = {
       schemaVersion: 2,
       id: crypto.randomUUID(),
       title,
@@ -4494,6 +4624,23 @@ function App() {
         status: 'pending',
       })),
     }
+    job.generationProvenance = await createCurrentProvenance({
+      engineId: queueEngine,
+      voiceId: job.voice,
+      sourceText: chunks.map((chunk) => chunk.text).join('\n\n'),
+      sampleRate: outputSampleRateForEngine(queueEngine),
+      cueTiming: 'none',
+      postProcessing: false,
+      speedOverride: job.speed,
+      formatOverride: job.format,
+      bitrateOverride: job.bitrate,
+      source: {
+        kind: sourceKind === 'epub' ? 'epub' : readerDocument?.kind ?? 'text',
+        documentId: sourceDocumentId ?? readerDocument?.id,
+        title: readerDocument?.title,
+      },
+    })
+    return job
   }
 
   async function queueCurrentText(sourceOverride?: string, titleOverride?: string) {
@@ -4509,7 +4656,7 @@ function App() {
       }))
       : splitInput(sourceText, separateLines).map((text) => ({ text }))
     if (chunks.length === 0) return
-    const job = createQueueJob(
+    const job = await createQueueJob(
       titleOverride?.trim() || currentText.slice(0, 50).replace(/\s+/g, ' ').trim(),
       chunks,
       readerDocument?.id,
@@ -4611,7 +4758,7 @@ function App() {
       showToast({ tone: 'warn', message: 'No readable text remains after cleanup.' })
       return false
     }
-    const job = createQueueJob(
+    const job = await createQueueJob(
       pending.fileName.replace(/\.epub$/iu, '') || pending.title,
       queueChunks,
       reader.id,
@@ -4731,6 +4878,20 @@ function App() {
         if (info.status === 'ready') setStatus('Model ready')
       }
       const { synthesize, sampleRate } = await ensureQueueEngine(job, onProgress)
+      if (job.generationProvenance && !job.generationProvenance.legacy) {
+        const { createProvenanceEncoder } = await import('./lib/provenance.ts')
+        job.generationProvenance = {
+          ...job.generationProvenance,
+          runtime: provenanceRuntime(),
+          encoder: createProvenanceEncoder(job.format, sampleRate, {
+            bitrate: job.bitrate,
+            loudnessPreset,
+            native: desktopFfmpeg !== null && ffmpegStatus?.available === true,
+            ffmpegVersion: ffmpegStatus?.version,
+          }),
+        }
+        await saveJob(job)
+      }
       const voiceBinCache = new Map<string, Float32Array>()
 
       for (const chunk of job.chunks) {
@@ -4750,6 +4911,13 @@ function App() {
             chunk.cues = replacement.cues
             chunk.warning = replacement.warning
             chunk.status = 'done'
+            if (job.generationProvenance) {
+              job.generationProvenance = updateProvenanceCueSummary(
+                job.generationProvenance,
+                job.chunks.reduce((total, item) => total + (item.cues?.length ?? 0), 0),
+                job.chunks.some((item) => item.cues?.length) ? 'sentence' : 'none',
+              )
+            }
             await commitQueueChunk(job, chunk.index, replacement.blob)
           }
         } catch (err) {
@@ -4877,6 +5045,13 @@ function App() {
         duration: replacement.duration,
         cues: replacement.cues,
       })
+      if (nextJob.generationProvenance) {
+        nextJob.generationProvenance = updateProvenanceCueSummary(
+          nextJob.generationProvenance,
+          nextJob.chunks.reduce((total, item) => total + (item.cues?.length ?? 0), 0),
+          nextJob.chunks.some((item) => item.cues?.length) ? 'sentence' : 'none',
+        )
+      }
       await commitQueueChunk(nextJob, chunkIndex, replacement.blob)
       setQueueJobs((prev) => prev.map((item) => (item.id === jobId ? nextJob : item)))
       setProgress(100)
@@ -5118,6 +5293,20 @@ function App() {
         exportedAt: new Date().toISOString(),
         chunks: manifestChunks,
       }, null, 2))
+      const provenanceManifest = job.generationProvenance
+        ? updateProvenanceCueSummary(
+          job.generationProvenance,
+          doneChunks.reduce((total, chunk) => total + (chunk.cues?.length ?? 0), 0),
+          doneChunks.some((chunk) => chunk.cues?.length) ? 'sentence' : 'none',
+        )
+        : null
+      if (provenanceManifest) {
+        entries['provenance.json'] = new TextEncoder().encode(JSON.stringify({
+          schemaVersion: 1,
+          app: 'BetterTTS',
+          manifest: provenanceManifest,
+        }, null, 2))
+      }
       const zipped = await new Promise<Uint8Array>((resolve, reject) => {
         zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)))
       })
@@ -5164,6 +5353,13 @@ function App() {
           bitrate: Math.max(64, Math.min(192, job.bitrate)),
           loudnessTarget: loudnessTargetForPreset(loudnessPreset),
           cover: m4bCoverFile ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()) } : undefined,
+          provenanceManifest: job.generationProvenance
+            ? updateProvenanceCueSummary(
+              job.generationProvenance,
+              job.chunks.reduce((total, chunk) => total + (chunk.cues?.length ?? 0), 0),
+              job.chunks.some((chunk) => chunk.cues?.length) ? 'sentence' : 'none',
+            )
+            : undefined,
         })
         const url = URL.createObjectURL(new Blob([result.bytes as Uint8Array<ArrayBuffer>], { type: result.mime }))
         const a = document.createElement('a')
@@ -5181,8 +5377,9 @@ function App() {
       return
     }
     let capability = m4bCapability
+    const m4bModule = import('./lib/m4b.ts')
     if (capability == null) {
-      capability = await checkM4bCapability()
+      capability = await (await m4bModule).checkM4bCapability()
       setM4bCapability(capability)
     }
     if (!capability.supported) {
@@ -5212,10 +5409,18 @@ function App() {
         return
       }
 
+      const { buildM4bFromBlobs } = await m4bModule
       const { blob, chapterCount } = await buildM4bFromBlobs({
         title: job.title,
         chunks,
         bitrate: Math.max(64, Math.min(192, job.bitrate)) * 1000,
+        provenanceManifest: job.generationProvenance
+          ? updateProvenanceCueSummary(
+            job.generationProvenance,
+            job.chunks.reduce((total, chunk) => total + (chunk.cues?.length ?? 0), 0),
+            job.chunks.some((chunk) => chunk.cues?.length) ? 'sentence' : 'none',
+          )
+          : undefined,
         onProgress(info) {
           const phaseBase = info.phase === 'decode' ? 5 : info.phase === 'encode' ? 35 : 90
           const phaseSpan = info.phase === 'decode' ? 30 : info.phase === 'encode' ? 55 : 10
@@ -6464,6 +6669,7 @@ function App() {
                           })
                         }}
                         onNotice={showToast}
+                        replayContext={currentReplayContext}
                       />
                     </li>
                   ))}

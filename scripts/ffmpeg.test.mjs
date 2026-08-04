@@ -37,6 +37,11 @@ describe('FFmpeg export arguments', () => {
     expect(metadata).toContain('START=1250\nEND=3250\ntitle=Two\\=End')
   })
 
+  it('embeds the optional provenance manifest as audiobook metadata', () => {
+    const metadata = buildChapterMetadata('Book', [{ title: 'One' }], [1.25], { schemaVersion: 1, source: { textHash: 'private' } })
+    expect(metadata).toContain('comment={"schemaVersion":1,"source":{"textHash":"private"}}')
+  })
+
   it('preflights decoded duration, temporary bytes, and free space', () => {
     const plan = buildExportResourcePlan({
       label: 'M4B test',
