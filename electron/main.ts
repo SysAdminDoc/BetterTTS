@@ -10,6 +10,7 @@ import {
 } from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 import { validateNativeTtsRequest } from './native-ipc.ts'
+import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
 import { resolveSmokeOutputDirectory } from './smoke-output.ts'
@@ -131,6 +132,8 @@ let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
 let whisperHost: UtilityProcess | null = null
 let whisperHostSubscriber: WebContents | null = null
+let sidecarHost: UtilityProcess | null = null
+let sidecarHostSubscriber: WebContents | null = null
 let activeProjectPath: string | null = null
 let activeProjectIdentity: {
   revision: string
@@ -241,6 +244,61 @@ ipcMain.on(WHISPER_CHANNEL, (event, message: unknown) => {
   }
   whisperHostSubscriber = event.sender
   ensureWhisperHost().postMessage(request)
+})
+
+// --- Optional Qwen3-TTS Python sidecar (TF-118) -----------------------------
+// The Python environment and model cache live under Electron userData. The
+// installer carries only the small protocol script and requirements manifest;
+// torch, qwen-tts, and model weights are downloaded after install on request.
+function sendToSidecarSubscriber(message: unknown): void {
+  if (sidecarHostSubscriber && !sidecarHostSubscriber.isDestroyed()) {
+    sidecarHostSubscriber.send(SIDECAR_CHANNEL, message)
+  }
+}
+
+function ensureSidecarHost(): UtilityProcess {
+  if (sidecarHost) return sidecarHost
+  const packagedSidecarRoot = app.isPackaged ? join(process.resourcesPath, 'sidecar') : join(__dirname, '..', 'sidecar')
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    BETTERTTS_SIDECAR_DIR: join(app.getPath('userData'), 'sidecar'),
+    BETTERTTS_SIDECAR_MODEL_DIR: join(app.getPath('userData'), 'models', 'qwen'),
+    BETTERTTS_SIDECAR_SCRIPT: join(packagedSidecarRoot, 'bettertts_sidecar.py'),
+    BETTERTTS_SIDECAR_REQUIREMENTS: join(packagedSidecarRoot, 'requirements-qwen.txt'),
+  }
+  delete env.ELECTRON_RUN_AS_NODE
+  const host = utilityProcess.fork(join(__dirname, 'sidecar-host.mjs'), [], {
+    serviceName: 'BetterTTS Qwen3-TTS sidecar',
+    env: env as Record<string, string>,
+  })
+  host.on('message', (message) => sendToSidecarSubscriber(message))
+  host.on('exit', () => {
+    if (sidecarHost === host) {
+      sidecarHost = null
+      sendToSidecarSubscriber({ type: 'crashed', message: 'The Qwen3-TTS sidecar host stopped. Try again to restart it.' })
+    }
+  })
+  sidecarHost = host
+  return host
+}
+
+ipcMain.on(SIDECAR_CHANNEL, (event, message: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  const request = validateSidecarRequest(message)
+  const candidate = message as { id?: unknown }
+  if (!request) {
+    if (Number.isSafeInteger(candidate?.id) && Number(candidate.id) >= 0) {
+      event.sender.send(SIDECAR_CHANNEL, {
+        type: 'error',
+        id: Number(candidate.id),
+        code: 'failed',
+        message: 'Invalid Qwen3-TTS sidecar request.',
+      })
+    }
+    return
+  }
+  sidecarHostSubscriber = event.sender
+  ensureSidecarHost().postMessage(request)
 })
 
 type UpdateStatus = {
@@ -479,6 +537,27 @@ function probeWhisperHostStatus(timeoutMs = 8000): Promise<unknown> {
   })
 }
 
+function probeSidecarHostStatus(timeoutMs = 8000): Promise<unknown> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const host = ensureSidecarHost()
+    const id = 92002
+    const timer = setTimeout(() => {
+      host.removeListener('message', onMessage)
+      rejectPromise(new Error('Qwen3-TTS sidecar status timeout'))
+    }, timeoutMs)
+    const onMessage = (message: unknown) => {
+      if (!message || typeof message !== 'object') return
+      const response = message as { type?: string; id?: number; status?: unknown }
+      if (response.type !== 'status' || response.id !== id) return
+      clearTimeout(timer)
+      host.removeListener('message', onMessage)
+      resolvePromise(response.status)
+    }
+    host.on('message', onMessage)
+    host.postMessage({ type: 'status', id })
+  })
+}
+
 function probeTtsHostLoad(timeoutMs = 180000): Promise<unknown> {
   return new Promise((resolvePromise, rejectPromise) => {
     const host = ensureTtsHost()
@@ -648,9 +727,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -739,12 +818,19 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       result.whisperStatusError = err instanceof Error ? err.message : String(err)
     }
 
+    try {
+      result.sidecarStatus = await probeSidecarHostStatus()
+    } catch (err) {
+      result.sidecarStatusError = err instanceof Error ? err.message : String(err)
+    }
+
     result.ok =
       probe.brand === 'BetterTTS' &&
       probe.railItems >= 5 &&
       probe.generate &&
       Boolean(probe.platform) &&
       probe.platform?.whisper === true &&
+      probe.platform?.sidecar === true &&
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&
@@ -761,6 +847,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       )) &&
       Boolean(result.nativeHost) &&
       Boolean(result.whisperStatus) &&
+      Boolean(result.sidecarStatus) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)
         && Boolean((result.nativeCancellation as { ok?: boolean } | undefined)?.ok)

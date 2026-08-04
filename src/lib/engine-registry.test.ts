@@ -15,6 +15,7 @@ describe('engine registry', () => {
 
     expect(visibleEngineDescriptors({ piperPlus: true }).map((engine) => engine.id)).toContain('piper')
     expect(visibleEngineDescriptors({ piperPlus: true, chatterbox: true }).map((engine) => engine.id)).toContain('chatterbox')
+    expect(visibleEngineDescriptors({ piperPlus: true, qwen: true }).map((engine) => engine.id)).toContain('qwen')
   })
 
   it('makes Piper-plus queueable when its platform flag exposes it', () => {

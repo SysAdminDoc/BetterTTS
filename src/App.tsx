@@ -59,6 +59,7 @@ import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker }
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
+import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesizeQwen, QWEN_LANGUAGES, QWEN_MODEL_ID, QWEN_SPEAKERS, type QwenLanguage, type QwenSpeaker, type SidecarStatus } from './platform/qwen.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -228,6 +229,7 @@ const MODEL_ROWS = [
   ['KittenTTS', 'WebGPU shaders', '15M / 40M / 80M', 'English lightweight engine', 'Ready'],
   ['Chatterbox', 'Transformers.js v4', '0.5B', 'English + 23 languages', 'Opt-in'],
   ['Piper-plus', 'WASM + ONNX Runtime', 'Tsukuyomi-chan', 'JA / EN / ZH / KO / ES / FR / PT / SV', 'Experimental'],
+  ['Qwen3-TTS', 'Python sidecar', '0.6B', '10 multilingual languages + style instruction', 'Desktop opt-in'],
   ['Kokoro multilingual', 'ephone + HF voice bins', '82M', 'ES / FR / HI / IT / PT', 'Ready'],
   ['Browser voices', 'Web Speech', 'Native', 'Device voices', 'Fallback'],
 ]
@@ -243,6 +245,7 @@ const RUNTIME_LICENSE_ROWS = [
   ['sherpa-onnx-node, sherpa-onnx-win-x64', 'Apache-2.0', 'Windows native Kokoro and English Piper CPU utility process'],
   ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
   ['Sherpa Piper Cori pack', 'Public-domain source data', 'Pinned English native Piper archive; downloaded and verified on first use'],
+  ['qwen-tts / Qwen3-TTS', 'Apache-2.0', 'Optional desktop Python sidecar; torch/runtime and model weights are user-managed and never bundled'],
   ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
   ['lamejs MP3 encoder', 'LGPL-3.0', 'MP3 export path'],
   ['pdfjs-dist', 'Apache-2.0', 'Local PDF text extraction'],
@@ -1125,6 +1128,12 @@ function App() {
   const [chatterboxLanguageId, setChatterboxLanguageId] = useState<ChatterboxLanguageId>('en')
   const [chatterboxExaggeration, setChatterboxExaggeration] = useState(CHATTERBOX_DEFAULT_EXAGGERATION)
   const [chatterboxReference, setChatterboxReference] = useState<ChatterboxReference | null>(null)
+  const [qwenLanguage, setQwenLanguage] = useState<QwenLanguage>('English')
+  const [qwenSpeaker, setQwenSpeaker] = useState<QwenSpeaker>('Vivian')
+  const [qwenInstruction, setQwenInstruction] = useState('')
+  const [qwenStatus, setQwenStatus] = useState<SidecarStatus | null>(null)
+  const [qwenSetupBusy, setQwenSetupBusy] = useState(false)
+  const [qwenSetupProgress, setQwenSetupProgress] = useState(0)
   const [speed, setSpeed] = useState(1)
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
@@ -1312,6 +1321,7 @@ function App() {
   const desktopUpdater = useMemo(() => getDesktopUpdaterBridge(), [])
   const desktopProjects = useMemo(() => getDesktopProjectBridge(), [])
   const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
+  const desktopSidecar = useMemo(() => qwenSidecarAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
   const visibleQueueJobs = useMemo(() => normalizedProjectSearch
     ? queueJobs.filter((job) =>
@@ -1330,6 +1340,8 @@ function App() {
     ? 'Queue export is unavailable for Browser voices.'
     : engine === 'chatterbox'
       ? 'Chatterbox voice-cloning is direct-only; use Generate audio.'
+      : engine === 'qwen'
+        ? 'Qwen3-TTS sidecar generation is direct-only; use Generate audio.'
       : !usableText.trim()
         ? 'Enter text before queueing.'
         : null
@@ -1348,7 +1360,11 @@ function App() {
                 : `${chatterboxModelLabel(chatterboxModel)} - ${chatterboxLanguageLabel(chatterboxLanguageId)} - GPU preferred; CPU is slow`
             : engine === 'piper'
               ? `${PIPER_PLUS_MODEL_LABEL} - ${selectedPiperLanguage.label} - experimental lazy engine`
-            : 'Device-native speech playback'
+              : engine === 'qwen'
+                ? qwenStatus?.available
+                  ? `Qwen3-TTS 0.6B - ${qwenStatus.modelReady ? 'weights cached' : 'weights download on first use'}`
+                  : qwenStatus?.message ?? 'Optional Python sidecar status pending'
+              : 'Device-native speech playback'
   const activeEngineName =
     engine === 'kokoro'
       ? 'Kokoro 82M'
@@ -1360,6 +1376,8 @@ function App() {
             ? 'Chatterbox'
             : engine === 'piper'
               ? 'Piper-plus'
+              : engine === 'qwen'
+                ? 'Qwen3-TTS'
               : 'Browser voices'
   const activeVoiceName =
     engine === 'kokoro'
@@ -1370,16 +1388,20 @@ function App() {
         ? selectedKittenVoice.name
           : engine === 'chatterbox'
             ? chatterboxReference?.name ?? 'Reference clip required'
-            : engine === 'piper'
+          : engine === 'piper'
               ? selectedPiperLanguage.label
+              : engine === 'qwen'
+                ? qwenSpeaker
               : browserVoices.find((voice) => voice.voiceURI === browserVoiceUri)?.name ?? 'Default voice'
   const activeSampleRate =
     engine === 'supertonic'
       ? `${(SUPERTONIC_SAMPLE_RATE / 1000).toFixed(1)} kHz`
     : engine === 'chatterbox'
       ? `${(CHATTERBOX_SAMPLE_RATE / 1000).toFixed(0)} kHz`
-      : engine === 'piper'
+    : engine === 'piper'
         ? `${(PIPER_PLUS_SAMPLE_RATE / 1000).toFixed(2)} kHz`
+        : engine === 'qwen'
+          ? '24.0 kHz'
         : `${(KOKORO_SAMPLE_RATE / 1000).toFixed(0)} kHz`
   const outputFormatLabel =
     engine === 'browser'
@@ -1402,7 +1424,11 @@ function App() {
     : 'No queued jobs'
   const librarySummaryLabel = library.length > 0 ? `${library.length} saved clip${library.length === 1 ? '' : 's'}` : 'No saved clips'
   const cleanupSummary = Object.values(cleanup).some(Boolean) ? 'Cleanup on' : 'Cleanup off'
-  const engineStatusTone = (engine === 'kitten' && !kittenRuntimeReady) || (engine === 'chatterbox' && chatterboxNeedsSetup) ? 'warn' : 'ok'
+  const engineStatusTone = (engine === 'kitten' && !kittenRuntimeReady)
+    || (engine === 'chatterbox' && chatterboxNeedsSetup)
+    || (engine === 'qwen' && !qwenStatus?.available)
+    ? 'warn'
+    : 'ok'
   // Pitch shift only ever applies to the Kokoro export path — never promise it
   // for other engines.
   const speedSummary = engine === 'chatterbox'
@@ -1664,6 +1690,12 @@ function App() {
       modelRoutes.chatterboxReference = chatterboxReference ? 'loaded in memory' : 'not selected'
     }
     if (engine === 'piper') modelRoutes.piperPlusLanguage = piperLanguage
+    if (engine === 'qwen') {
+      modelRoutes.qwenModel = QWEN_MODEL_ID
+      modelRoutes.qwenLanguage = qwenLanguage
+      modelRoutes.qwenSpeaker = qwenSpeaker
+      modelRoutes.qwenSidecar = qwenStatus?.available ? 'ready' : 'not ready'
+    }
 
     const nativeRuntime = nativeAvailable ? getNativeRuntimeInfo() : null
     if (nativeRuntime) {
@@ -1695,8 +1727,10 @@ function App() {
               ? chatterboxReference ? 'reference-clip-loaded' : 'reference-required'
             : engine === 'piper'
               ? PIPER_PLUS_MODEL_LABEL
+              : engine === 'qwen'
+                ? QWEN_MODEL_ID
               : browserVoiceUri || 'browser-default',
-      language: engine === 'kokoro' ? locale : engine === 'chatterbox' ? chatterboxLanguageId : engine === 'piper' ? piperLanguage : undefined,
+      language: engine === 'kokoro' ? locale : engine === 'chatterbox' ? chatterboxLanguageId : engine === 'piper' ? piperLanguage : engine === 'qwen' ? qwenLanguage : undefined,
       format: audioFormat,
       bitrate: mp3Bitrate,
       speed,
@@ -1710,6 +1744,8 @@ function App() {
             ? `${chatterboxModelId(chatterboxModel)} (${chatterboxLanguageId})`
           : engine === 'piper'
               ? `${PIPER_PLUS_MODEL_ID} via piper-plus ${PIPER_PLUS_PACKAGE_VERSION}`
+          : engine === 'qwen'
+              ? QWEN_MODEL_ID
               : 'Web Speech API',
       modelRoutes,
     }
@@ -2035,6 +2071,31 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!desktopSidecar) return
+    let cancelled = false
+    getQwenSidecarStatus()
+      .then((next) => {
+        if (!cancelled) setQwenStatus(next)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setQwenStatus({
+            available: false,
+            qwenInstalled: false,
+            torchInstalled: false,
+            modelReady: false,
+            modelId: QWEN_MODEL_ID,
+            message: error instanceof Error ? error.message : 'Qwen3-TTS status is unavailable.',
+            recovery: 'Restart the desktop app to restart the isolated Python host.',
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [desktopSidecar])
+
+  useEffect(() => {
     const objectUrls = objectUrlsRef.current
     const previewCache = previewCacheRef.current
     const captionUrls = captionUrlsRef.current
@@ -2114,6 +2175,39 @@ function App() {
       setToast((current) => (current?.message === nextToast.message ? null : current))
       toastTimerRef.current = null
     }, nextToast.action ? 8500 : 5500)
+  }
+
+  async function handleQwenSetup() {
+    if (!desktopSidecar || qwenSetupBusy) return
+    setQwenSetupBusy(true)
+    setQwenSetupProgress(0.02)
+    setStatus('Preparing the optional Python sidecar')
+    try {
+      const status = await setupQwenSidecar((progress, stage) => {
+        setQwenSetupProgress(Math.min(1, Math.max(0, progress)))
+        setStatus(stage)
+      })
+      setQwenStatus(status)
+      showToast({
+        tone: status.available ? 'ok' : 'warn',
+        message: status.available ? 'Qwen3-TTS sidecar is ready. Model weights download on first use.' : status.message,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Qwen3-TTS setup failed.'
+      showToast({ tone: 'error', message })
+      setQwenStatus((current) => current ?? {
+        available: false,
+        qwenInstalled: false,
+        torchInstalled: false,
+        modelReady: false,
+        modelId: QWEN_MODEL_ID,
+        message,
+        recovery: 'Check the desktop diagnostics panel and Python 3.12 installation before retrying.',
+      })
+    } finally {
+      setQwenSetupBusy(false)
+      setQwenSetupProgress(0)
+    }
   }
 
   function openWorkspacePanel(target: typeof WORKSPACE_TABS[number][0]) {
@@ -2308,6 +2402,28 @@ function App() {
         }, signal),
       }
     }
+    if (engine === 'qwen') {
+      const status = await getQwenSidecarStatus()
+      setQwenStatus(status)
+      if (!status.available) throw new Error(`${status.message} ${status.recovery}`)
+      setRuntimeLabel(`Qwen3-TTS 0.6B · ${status.modelReady ? 'weights cached' : 'weights download on first use'}`)
+      return {
+        synthesize: (text, _voice, spd, _bin, signal) => synthesizeQwen(
+          text,
+          {
+            language: qwenLanguage,
+            speaker: qwenSpeaker,
+            ...(qwenInstruction.trim() ? { instruct: qwenInstruction.trim() } : {}),
+            speed: spd,
+          },
+          signal,
+          (progress, stage) => {
+            setStatus(stage)
+            setProgress(Math.min(92, Math.max(36, 36 + Math.round(progress * 56))))
+          },
+        ),
+      }
+    }
     if (engine === 'piper') {
       if (forceNative && nativeAvailable && piperLanguage === 'en') {
         const runtime = await loadNativePiper(onProgress)
@@ -2386,6 +2502,8 @@ function App() {
         ? 'Loading KittenTTS model'
         : engine === 'chatterbox'
           ? 'Loading Chatterbox voice lab'
+        : engine === 'qwen'
+          ? 'Loading Qwen3-TTS sidecar'
         : engine === 'piper'
           ? 'Loading Piper-plus model'
           : 'Loading Kokoro model'
@@ -2436,6 +2554,8 @@ function App() {
         ? KITTEN_SAMPLE_RATE
         : engine === 'chatterbox'
           ? CHATTERBOX_SAMPLE_RATE
+        : engine === 'qwen'
+          ? 24_000
         : engine === 'piper'
           ? PIPER_PLUS_SAMPLE_RATE
           : KOKORO_SAMPLE_RATE
@@ -4518,6 +4638,18 @@ function App() {
                     <small>{chatterboxModelLabel(chatterboxModel)}. Reference-voice cloning, GPU preferred, PerTh watermark.</small>
                   </button>
                 ) : null}
+                {desktopSidecar ? (
+                  <button
+                    type="button"
+                    className={engine === 'qwen' ? 'engine-card selected' : 'engine-card'}
+                    onClick={() => setEngine('qwen')}
+                    aria-pressed={engine === 'qwen'}
+                  >
+                    <span>{engine === 'qwen' ? <Check size={17} aria-hidden="true" /> : null}</span>
+                    <strong>Qwen3-TTS</strong>
+                    <small>Optional 0.6B CustomVoice Python engine. Torch/runtime and model weights stay outside the installer.</small>
+                  </button>
+                ) : null}
                 {experimentalPiperEnabled ? (
                   <button
                     type="button"
@@ -4545,6 +4677,43 @@ function App() {
                 <span className="status-dot" aria-hidden="true" />
                 <span>{engineStatus}</span>
               </div>
+              {engine === 'qwen' ? (
+                <div className="qwen-engine-controls" aria-label="Qwen3-TTS controls">
+                  <label>
+                    Language
+                    <select value={qwenLanguage} onChange={(event) => setQwenLanguage(event.target.value as QwenLanguage)}>
+                      {QWEN_LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    Speaker
+                    <select value={qwenSpeaker} onChange={(event) => setQwenSpeaker(event.target.value as QwenSpeaker)}>
+                      {QWEN_SPEAKERS.map((speaker) => <option key={speaker} value={speaker}>{speaker.replaceAll('_', ' ')}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    Style instruction <span className="field-hint">optional</span>
+                    <input
+                      value={qwenInstruction}
+                      maxLength={500}
+                      onChange={(event) => setQwenInstruction(event.target.value)}
+                      placeholder="Warm, clear, conversational"
+                    />
+                  </label>
+                  {qwenStatus?.available ? (
+                    <small className="qwen-engine-note">The {qwenStatus.modelReady ? 'cached' : 'first-use'} model download is stored in the desktop user-data folder.</small>
+                  ) : (
+                    <div className="qwen-setup-row">
+                      <button type="button" onClick={() => void handleQwenSetup()} disabled={qwenSetupBusy}>
+                        {qwenSetupBusy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+                        {qwenSetupBusy ? 'Setting up…' : 'Set up Qwen3-TTS'}
+                      </button>
+                      <small>{qwenStatus?.recovery ?? 'Creates a private Python 3.12 environment and downloads torch/qwen-tts after install.'}</small>
+                    </div>
+                  )}
+                  {qwenSetupBusy ? <progress value={qwenSetupProgress} max={1} aria-label="Qwen3-TTS setup progress" /> : null}
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="advanced-toggle system-tools-toggle"

@@ -14,6 +14,7 @@
 - Windows native inference now uses the Apache-2.0 `sherpa-onnx-node` 1.13.4 utility-process runtime. Kokoro int8 and English Piper Cori archives are pinned, resumable, SHA-256 verified, traversal-checked, and extracted atomically; diagnostics expose the active engine, native addon, sample rate, and pack provenance. English Piper uses Sherpa only when the desktop native backend is selected; the browser path is unchanged.
 - Added an explicit opt-in Chatterbox voice lab. English and 23-language multilingual ONNX variants run in a dedicated lazy worker, accept a bounded in-memory reference clip, reuse its speaker embedding across sentences, expose the emotion exaggeration control, prefer WebGPU with a visible CPU-slow fallback, and disclose the model's retained PerTh watermark. Chatterbox remains direct-only and never enters the persistent queue.
 - Added desktop imported-audio captioning through a pinned whisper.cpp v1.9.1 Windows x64 runtime. The isolated host converts bounded audio to temporary 16 kHz mono WAV, creates multilingual word cues with `-ml 1 -sow`, exposes synchronized playback, and downloads SRT/VTT; missing runtime/model recovery is explicit and model weights stay user-managed.
+- Added an optional Windows-only Qwen3-TTS 0.6B CustomVoice engine through an isolated Python sidecar. The desktop UI can provision a private Python 3.12 environment, then lazily download `torch`, `qwen-tts`, and model weights into user data; sidecar setup, progress, cancellation, and crash recovery stay on the same bounded desktop bridge while web/PWA mode remains unchanged.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -35,6 +36,7 @@
 - Added Sherpa pack validation, immutable archive metadata, native engine IPC routing, and real Windows x64 host probes for Kokoro and Piper synthesis.
 - Added Chatterbox language/model selection, reference-clip bounds, prompt-prefix, resampling, cache classification, consent visibility, and non-queueable engine coverage.
 - Added whisper.cpp JSON word-cue, timestamp, language, resampling, runtime-guidance, and bounded IPC coverage, plus Electron smoke status for the caption host.
+- Added Qwen sidecar IPC/client coverage and Python protocol tests for bounds, deterministic test-mode audio, cancellation, progress, and status recovery.
 
 ## v0.21.0 - 2026-07-29
 

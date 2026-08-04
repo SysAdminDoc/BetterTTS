@@ -37,6 +37,12 @@ await Promise.all([
     entryPoints: ['electron/whisper-host.ts'],
     outfile: 'dist-electron/whisper-host.mjs',
   }),
+  build({
+    ...common,
+    format: 'esm',
+    entryPoints: ['electron/sidecar-host.ts'],
+    outfile: 'dist-electron/sidecar-host.mjs',
+  }),
 ])
 
 console.log('Built Electron main + preload + tts-host → dist-electron/')

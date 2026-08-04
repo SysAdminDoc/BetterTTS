@@ -64,6 +64,11 @@ export type WhisperBridge = {
   onMessage: (listener: (message: unknown) => void) => () => void
 }
 
+export type SidecarBridge = {
+  post: (message: unknown) => void
+  onMessage: (listener: (message: unknown) => void) => () => void
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -73,6 +78,7 @@ export type DesktopBridge = {
   projects?: DesktopProjectBridge
   ffmpeg?: DesktopFfmpegBridge
   whisper?: WhisperBridge
+  sidecar?: SidecarBridge
 }
 
 declare global {
@@ -121,4 +127,9 @@ export function getDesktopFfmpegBridge(): DesktopFfmpegBridge | null {
 export function getWhisperBridge(): WhisperBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.whisper ?? null
+}
+
+export function getSidecarBridge(): SidecarBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.sidecar ?? null
 }
