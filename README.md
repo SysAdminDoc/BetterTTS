@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-536%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-540%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.22.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 536 tests across 92 test files
+- **Tests:** 540 tests across 93 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -150,6 +150,9 @@ npm test
 # Verify runtime license coverage
 npm run license:runtime
 
+# Validate the software/model SBOM inventory
+npm run sbom:check
+
 # Validate generated capability facts and test totals
 npm run capabilities:check
 
@@ -238,7 +241,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (536 tests across 92 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (540 tests across 93 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -358,9 +361,9 @@ This project does not use GitHub Actions. Build and publish locally:
 npm run deploy
 ```
 
-The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Publishing requires a clean checkout plus an annotated `v<version>` tag at the exact source commit, and the deployed `release.json` records that commit for rollback/debugging. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
+The deploy script builds `dist/`, syncs the Pages-hosted Kokoro q8 model assets and experimental Piper-plus Tsukuyomi-chan assets into `dist/models/`, emits `bettertts-sbom.cdx.json` as a validated CycloneDX 1.7 software/model inventory, and force-pushes it to the `gh-pages` branch from a disposable git worktree, so your working tree is never modified. Publishing requires a clean checkout plus an annotated `v<version>` tag at the exact source commit, and the deployed `release.json` records that commit for rollback/debugging. Diagnostics links to this same-origin SBOM on Pages. Then in repository settings: **Pages** -> Source: `gh-pages` branch, folder: `/`.
 
-To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`. The command verifies the installer checksum, refuses to upload into an existing release associated with another source commit, uploads the installer and blockmap to the versioned GitHub Release, and publishes source-stamped `latest.yml` under the static `/updates/` feed. This split keeps the 200+ MB binary outside GitHub Pages' 100 MB per-file limit.
+To rebuild and publish the unsigned Windows update, run `npm run deploy:updates`. The command verifies the installer checksum, validates the release SBOM, refuses to upload into an existing release associated with another source commit, uploads the installer, blockmap, and `BetterTTS-<version>.cdx.json` SBOM to the versioned GitHub Release, and publishes source-stamped `latest.yml` under the static `/updates/` feed. Desktop diagnostics links to that immutable versioned SBOM asset. This split keeps the 200+ MB binary outside GitHub Pages' 100 MB per-file limit.
 
 ## Voice Catalog
 

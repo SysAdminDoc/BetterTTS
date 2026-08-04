@@ -70,6 +70,14 @@ export type WebGpuDiagnostics = {
   error?: string
 }
 
+export type DiagnosticsSbomLink = {
+  format: 'CycloneDX'
+  specVersion: '1.7'
+  artifactName: string
+  url: string
+  distributionRoute: 'github-pages' | 'github-release'
+}
+
 export type DiagnosticsBundle = {
   schemaVersion: 3
   generatedAt: string
@@ -78,6 +86,7 @@ export type DiagnosticsBundle = {
     version: string
     location: string
   }
+  sbom: DiagnosticsSbomLink
   browser: {
     userAgent: string
     platform: string
@@ -151,6 +160,8 @@ export type WebGpuBadAudioReport = {
 }
 
 const MAX_EVENTS = 20
+const RELEASE_REPOSITORY = 'SysAdminDoc/BetterTTS'
+const RELEASE_VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u
 const recentEvents: DiagnosticEvent[] = []
 let captureInstalled = false
 
@@ -171,6 +182,33 @@ export function getRecentDiagnosticEvents(): DiagnosticEvent[] {
 
 export function clearDiagnosticEvents(): void {
   recentEvents.splice(0, recentEvents.length)
+}
+
+export function getSbomArtifactLink(appVersion: string, href?: string): DiagnosticsSbomLink {
+  const version = RELEASE_VERSION_RE.test(appVersion) ? appVersion : 'unknown'
+  const releaseArtifactName = `BetterTTS-${version}.cdx.json`
+  const releaseUrl = `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${encodeURIComponent(version)}/${encodeURIComponent(releaseArtifactName)}`
+  try {
+    const locationUrl = new URL(href ?? '')
+    if (locationUrl.hostname === 'sysadmindoc.github.io' && /^\/BetterTTS(?:\/|$)/u.test(locationUrl.pathname)) {
+      return {
+        format: 'CycloneDX',
+        specVersion: '1.7',
+        artifactName: 'bettertts-sbom.cdx.json',
+        url: new URL('bettertts-sbom.cdx.json', locationUrl).toString(),
+        distributionRoute: 'github-pages',
+      }
+    }
+  } catch {
+    /* Fall back to the immutable versioned GitHub Release asset. */
+  }
+  return {
+    format: 'CycloneDX',
+    specVersion: '1.7',
+    artifactName: releaseArtifactName,
+    url: releaseUrl,
+    distributionRoute: 'github-release',
+  }
 }
 
 export function installGlobalDiagnosticsCapture(): () => void {
@@ -270,6 +308,7 @@ export async function collectDiagnostics(
       version: input.appVersion,
       location: sanitizeDiagnosticLocation(locationLike?.href),
     },
+    sbom: getSbomArtifactLink(input.appVersion, locationLike?.href),
     browser: {
       userAgent: navigatorLike?.userAgent ?? 'unknown',
       platform: navigatorLike?.platform ?? 'unknown',

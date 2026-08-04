@@ -26,6 +26,7 @@ if (stageUpdatesOnly) {
 run('npm run build')
 run('node scripts/sync-kokoro-assets.mjs')
 run('node scripts/sync-piper-assets.mjs')
+run('node scripts/generate-sbom.mjs --out dist/bettertts-sbom.cdx.json')
 if (includeUpdates) stageDesktopUpdates()
 
 writePagesReleaseManifest(distDir, identity)
@@ -89,6 +90,7 @@ async function verifyLiveDeploy(releaseIdentity) {
   const entryChunk = assets.find((name) => /^index-.*\.js$/.test(name))
   if (entryChunk) probes.push(`assets/${entryChunk}`)
   probes.push(`release.json?v=${Date.now()}`)
+  probes.push(`bettertts-sbom.cdx.json?v=${Date.now()}`)
   if (includeUpdates) probes.push(`updates/latest.yml?v=${Date.now()}`)
 
   const deadline = Date.now() + 4 * 60 * 1000
@@ -105,6 +107,13 @@ async function verifyLiveDeploy(releaseIdentity) {
         const manifest = await res.json().catch(() => null)
         if (!manifest || manifest.sourceSha !== releaseIdentity.sourceSha || manifest.tag !== releaseIdentity.tag) {
           lastFailure = `${probe} → source identity mismatch`
+          break
+        }
+      }
+      if (probe.startsWith('bettertts-sbom')) {
+        const bom = await res.json().catch(() => null)
+        if (!bom || bom.bomFormat !== 'CycloneDX' || bom.specVersion !== '1.7' || bom.metadata?.component?.name !== 'BetterTTS') {
+          lastFailure = `${probe} → invalid CycloneDX SBOM`
           break
         }
       }

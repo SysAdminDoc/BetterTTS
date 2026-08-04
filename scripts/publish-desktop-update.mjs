@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { buildStaticUpdateMetadata, readDesktopUpdateArtifacts, verifyMetadataChecksum } from './desktop-update-feed.mjs'
+import { readSbom } from './generate-sbom.mjs'
 import { assertRemoteReleaseTag, readReleaseIdentity } from './release-identity.mjs'
 
 const repoRoot = process.cwd()
 const identity = readReleaseIdentity(repoRoot)
 assertRemoteReleaseTag(repoRoot, identity)
-const artifacts = readDesktopUpdateArtifacts(repoRoot)
+const artifacts = readDesktopUpdateArtifacts(repoRoot, { requireSbom: true })
 await verifyMetadataChecksum(artifacts.metadata, artifacts.installerPath)
+readSbom(artifacts.sbomPath, { root: repoRoot })
 const staticMetadata = buildStaticUpdateMetadata(artifacts.metadata, { ...artifacts, ...identity })
 
 const existingRelease = (() => {
@@ -32,7 +34,7 @@ if (existingRelease) {
   }
 }
 
-const assetPaths = [artifacts.installerPath, artifacts.blockmapPath]
+const assetPaths = [artifacts.installerPath, artifacts.blockmapPath, artifacts.sbomPath]
 if (existingRelease) {
   execFileSync('gh', ['release', 'upload', artifacts.tag, ...assetPaths, '--clobber'], {
     cwd: repoRoot,
@@ -47,7 +49,7 @@ if (existingRelease) {
     '--title',
     `BetterTTS ${artifacts.tag}`,
     '--notes',
-    `BetterTTS source SHA: ${identity.sourceSha}\nBetterTTS release tag: ${identity.tag}\n\nUnsigned Windows update artifacts for BetterTTS ${artifacts.packageVersion}.`,
+    `BetterTTS source SHA: ${identity.sourceSha}\nBetterTTS release tag: ${identity.tag}\n\nUnsigned Windows update artifacts plus a validated CycloneDX software/model SBOM for BetterTTS ${artifacts.packageVersion}.`,
     '--verify-tag',
   ], { cwd: repoRoot, stdio: 'inherit' })
 }

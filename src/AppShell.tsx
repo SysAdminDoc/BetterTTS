@@ -33,6 +33,7 @@ import { APP_VERSION } from './lib/capabilities-core.ts'
 import type { CapabilityLicenseRow, CapabilityManifest } from './lib/capabilities.ts'
 import {
   collectDiagnostics,
+  getSbomArtifactLink,
   installGlobalDiagnosticsCapture,
   recordDiagnosticEvent,
   readWebGpuDiagnostics,
@@ -6122,6 +6123,8 @@ function App() {
     }
   }
 
+  const sbomArtifact = getSbomArtifactLink(APP_VERSION, typeof location === 'undefined' ? undefined : location.href)
+
   return (
       <div className="app-shell">
         <a className="skip-link" href="#script-editor">Skip to script editor</a>
@@ -7410,6 +7413,12 @@ function App() {
                     Storage isolation: {crossOriginStorage.message} Transformers upgrade: {transformersReadiness.readyToSwitch ? 'ready for 4.3.' : 'holding current runtime.'} Piper-plus: {piperPlusSupport.notes.join(' ')}
                   </small>
                 </details>
+                <small className="diagnostics-detail">
+                  <a href={sbomArtifact.url} target="_blank" rel="noreferrer">
+                    {sbomArtifact.format} {sbomArtifact.specVersion} SBOM
+                  </a>{' '}
+                  <span>({sbomArtifact.artifactName})</span>
+                </small>
                 <div className="diagnostics-actions">
                   <button type="button" onClick={handleCopyDiagnostics} disabled={diagnosticsAction !== null}>
                     {diagnosticsAction === 'copy' ? <Loader2 size={13} aria-hidden="true" /> : <SquareCode size={13} aria-hidden="true" />}

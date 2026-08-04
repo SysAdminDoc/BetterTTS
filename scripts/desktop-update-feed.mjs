@@ -6,7 +6,7 @@ export const RELEASE_REPOSITORY = 'SysAdminDoc/BetterTTS'
 
 const SOURCE_SHA_RE = /^[a-f0-9]{40}$/i
 
-export function readDesktopUpdateArtifacts(repoRoot) {
+export function readDesktopUpdateArtifacts(repoRoot, { requireSbom = false } = {}) {
   const releaseDir = join(repoRoot, 'release')
   const metadataPath = join(releaseDir, 'latest.yml')
   if (!existsSync(metadataPath)) {
@@ -26,9 +26,12 @@ export function readDesktopUpdateArtifacts(repoRoot) {
 
   const installerPath = join(releaseDir, installerName)
   const blockmapPath = `${installerPath}.blockmap`
+  const sbomName = `BetterTTS-${packageVersion}.cdx.json`
+  const sbomPath = join(releaseDir, sbomName)
   for (const path of [installerPath, blockmapPath]) {
     if (!existsSync(path)) throw new Error(`Required update artifact is missing: ${path}`)
   }
+  if (requireSbom && !existsSync(sbomPath)) throw new Error(`Required release SBOM is missing: ${sbomPath}`)
 
   return {
     blockmapPath,
@@ -37,6 +40,8 @@ export function readDesktopUpdateArtifacts(repoRoot) {
     metadata,
     metadataPath,
     packageVersion,
+    sbomName,
+    sbomPath,
     tag: `v${packageVersion}`,
   }
 }

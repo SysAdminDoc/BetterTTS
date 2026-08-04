@@ -44,6 +44,12 @@ describe('desktop update feed', () => {
     writeFileSync(join(root, 'package.json'), '{"version":"0.20.0"}')
     writeFileSync(join(root, 'release', 'latest.yml'), metadata.replaceAll('BetterTTS Setup 0.20.0.exe', '../escape.exe'))
     expect(() => readDesktopUpdateArtifacts(root)).toThrow('safe Windows installer path')
+    writeFileSync(join(root, 'release', 'latest.yml'), metadata)
+    writeFileSync(join(root, 'release', 'BetterTTS Setup 0.20.0.exe'), 'installer')
+    writeFileSync(join(root, 'release', 'BetterTTS Setup 0.20.0.exe.blockmap'), 'blockmap')
+    expect(() => readDesktopUpdateArtifacts(root, { requireSbom: true })).toThrow('release SBOM')
+    writeFileSync(join(root, 'release', 'BetterTTS-0.20.0.cdx.json'), '{}')
+    expect(readDesktopUpdateArtifacts(root, { requireSbom: true }).sbomName).toBe('BetterTTS-0.20.0.cdx.json')
   })
 
   it('verifies the installer checksum before upload', async () => {
