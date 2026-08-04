@@ -926,6 +926,7 @@ ipcMain.handle(FFMPEG_CHANNEL, async (event, request: unknown) => {
     bitrate?: number
     title?: string
     loudnessTarget?: number
+    cleanupMode?: 'off' | 'denoise' | 'studio'
     chunks?: Array<{ bytes: Uint8Array; title: string }>
     cover?: { bytes: Uint8Array }
   }
@@ -1420,7 +1421,16 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       const samples = new Float32Array(2400)
       for (let i = 0; i < samples.length; i++) samples[i] = Math.sin(i * Math.PI / 12) * 0.1
       const output = await bridge.transcode({ samples, sampleRate: 24000, format: 'flac', bitrate: 128, title: 'Smoke' })
-      return { ...status, outputBytes: output.bytes.byteLength, extension: output.extension }
+      const cleanup = await bridge.transcode({ samples, sampleRate: 24000, format: 'wav', bitrate: 128, title: 'Smoke cleanup', cleanupMode: 'denoise' })
+      const studio = await bridge.transcode({ samples, sampleRate: 24000, format: 'wav', bitrate: 128, title: 'Smoke studio', cleanupMode: 'studio' })
+      return { ...status, outputBytes: output.bytes.byteLength, extension: output.extension, cleanupOutputBytes: cleanup.bytes.byteLength, studioOutputBytes: studio.bytes.byteLength }
+    })()`)
+    result.audioCleanupUi = await win.webContents.executeJavaScript(`(() => {
+      const toggle = document.querySelector('#audio-cleanup')
+      return {
+        control: toggle?.getAttribute('type') === 'checkbox',
+        disabledByDefault: toggle?.getAttribute('aria-checked') !== 'true' && toggle?.checked === false,
+      }
     })()`)
     result.openAiServer = await probeOpenAiTtsServer()
 
@@ -1529,7 +1539,11 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       (!((result.ffmpeg as { available?: boolean } | undefined)?.available) || (
         ((result.ffmpeg as { outputBytes?: number } | undefined)?.outputBytes ?? 0) > 0
         && (result.ffmpeg as { extension?: string } | undefined)?.extension === '.flac'
+        && ((result.ffmpeg as { cleanupOutputBytes?: number } | undefined)?.cleanupOutputBytes ?? 0) > 0
+        && ((result.ffmpeg as { studioOutputBytes?: number } | undefined)?.studioOutputBytes ?? 0) > 0
       )) &&
+      Boolean((result.audioCleanupUi as { control?: boolean; disabledByDefault?: boolean } | undefined)?.control) &&
+      Boolean((result.audioCleanupUi as { disabledByDefault?: boolean } | undefined)?.disabledByDefault) &&
       Boolean(result.nativeHost) &&
       Boolean(result.whisperStatus) &&
       Boolean(result.sidecarStatus) &&

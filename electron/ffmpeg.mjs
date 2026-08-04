@@ -18,6 +18,19 @@ const FORMAT_ARGS = {
 }
 const EXTENSIONS = { wav: '.wav', mp3: '.mp3', opus: '.opus', flac: '.flac', m4b: '.m4b' }
 const MIMES = { wav: 'audio/wav', mp3: 'audio/mpeg', opus: 'audio/ogg;codecs=opus', flac: 'audio/flac', m4b: 'audio/mp4' }
+const AUDIO_CLEANUP_FILTERS = {
+  denoise: 'afftdn=nr=12:nf=-50:tn=1',
+  studio: 'afftdn=nr=16:nf=-50:tn=1,agate=threshold=0.02:ratio=4:attack=20:release=250:range=0.2',
+}
+
+export function audioCleanupFilter(mode = 'off') {
+  if (mode === 'off' || mode === undefined || mode === null) return null
+  const filter = typeof mode === 'string' && Object.prototype.hasOwnProperty.call(AUDIO_CLEANUP_FILTERS, mode)
+    ? AUDIO_CLEANUP_FILTERS[mode]
+    : null
+  if (!filter) throw new Error(`Unsupported audio cleanup mode: ${String(mode)}`)
+  return filter
+}
 
 export function ffmpegExecutable() {
   return process.env.BETTERTTS_FFMPEG_PATH || 'ffmpeg'
@@ -110,7 +123,7 @@ async function cleanupOperationRoot(root, prefix) {
   await rm(root, { recursive: true, force: true })
 }
 
-export async function transcodePcm({ samples, sampleRate, format, bitrate, title, loudnessTarget }) {
+export async function transcodePcm({ samples, sampleRate, format, bitrate, title, loudnessTarget, cleanupMode }) {
   const pcm = samples instanceof Float32Array ? samples : new Float32Array(samples)
   if (pcm.byteLength === 0 || pcm.byteLength > MAX_PCM_BYTES) throw new Error('Native export PCM must be between 1 byte and 512 MB.')
   if (!Number.isInteger(sampleRate) || sampleRate < 8000 || sampleRate > 192000) throw new Error('Native export sample rate is invalid.')
@@ -131,7 +144,10 @@ export async function transcodePcm({ samples, sampleRate, format, bitrate, title
   try {
     await writeFile(input, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength))
     const inputArgs = ['-hide_banner', '-nostdin', '-y', '-f', 'f32le', '-ar', String(sampleRate), '-ac', '1', '-i', input]
-    const filter = loudnessTarget ? await measuredLoudnorm(inputArgs, loudnessTarget) : null
+    const cleanupFilter = audioCleanupFilter(cleanupMode)
+    const filter = loudnessTarget
+      ? await measuredLoudnorm(inputArgs, loudnessTarget, cleanupFilter)
+      : cleanupFilter
     const args = [...inputArgs]
     if (filter) args.push('-af', filter)
     args.push(...outputArguments(format, bitrate, title), output)
@@ -245,14 +261,15 @@ async function probeAudio(path) {
   }
 }
 
-async function measuredLoudnorm(inputArgs, target) {
+async function measuredLoudnorm(inputArgs, target, preFilter) {
   const integrated = Math.max(-24, Math.min(-9, Number(target)))
   const filter = `loudnorm=I=${integrated}:TP=-1.5:LRA=11:print_format=json`
-  const { stderr } = await run([...inputArgs, '-af', filter, '-f', 'null', 'NUL'], 5 * 60 * 1000, true)
+  const analysisFilter = [preFilter, filter].filter(Boolean).join(',')
+  const { stderr } = await run([...inputArgs, '-af', analysisFilter, '-f', 'null', 'NUL'], 5 * 60 * 1000, true)
   const json = stderr.match(/\{\s*"input_i"[\s\S]*?\}/)?.[0]
   if (!json) throw new Error('FFmpeg loudness analysis did not return measurements.')
   const measured = JSON.parse(json)
-  return [
+  const measuredFilter = [
     `loudnorm=I=${integrated}:TP=-1.5:LRA=11`,
     `measured_I=${measured.input_i}`,
     `measured_TP=${measured.input_tp}`,
@@ -261,6 +278,7 @@ async function measuredLoudnorm(inputArgs, target) {
     `offset=${measured.target_offset}`,
     'linear=true:print_format=summary',
   ].join(':')
+  return [preFilter, measuredFilter].filter(Boolean).join(',')
 }
 
 async function run(args, timeout, allowFailure = false) {

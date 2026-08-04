@@ -90,7 +90,7 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { type DesktopExternalFile, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
+import { type AudioCleanupMode, type DesktopExternalFile, type DesktopIntegrationKind, type DesktopIntegrationStatus, type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopIntegrationsBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
 import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
@@ -230,6 +230,7 @@ type AudioResult = {
   srtUrl?: string
   vttUrl?: string
   language?: string
+  originalUrl?: string
 }
 
 type ImportedCaption = {
@@ -942,9 +943,8 @@ function ResultRow({ result, selected, isSpeaking, onSelect, onReplay, onShare, 
           <span>{result.size}</span>
         </div>
       </button>
-      {result.url ? (
-        <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} />
-      ) : null}
+      {result.url ? <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} /> : null}
+      {result.originalUrl ? <PlaybackAudio playbackKey={`clip:${result.id}:before`} src={result.originalUrl} label={`${result.filename} before cleanup`} cues={cues} vttUrl={result.vttUrl} /> : null}
       <div className="result-actions">
         {result.replayText ? (
           <button type="button" onClick={() => onReplay(result.replayText!)} disabled={isSpeaking}>
@@ -1346,6 +1346,7 @@ function App() {
   const [projectDirty, setProjectDirty] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; version?: string; message?: string } | null>(null)
+  const [audioCleanupEnabled, setAudioCleanupEnabled] = useState(false)
   const [openAiTtsPort, setOpenAiTtsPort] = useState(getInitialOpenAiTtsPort)
   const [openAiTtsStatus, setOpenAiTtsStatus] = useState<OpenAiTtsServerStatus | null>(null)
   const [openAiTtsAction, setOpenAiTtsAction] = useState<'start' | 'stop' | 'refresh' | null>(null)
@@ -1484,6 +1485,8 @@ function App() {
   const desktopUpdater = useMemo(() => getDesktopUpdaterBridge(), [])
   const desktopProjects = useMemo(() => getDesktopProjectBridge(), [])
   const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
+  const nativeCleanupAvailable = desktopFfmpeg !== null && ffmpegStatus?.available === true
+  const effectiveAudioCleanupMode: AudioCleanupMode = nativeCleanupAvailable && audioCleanupEnabled ? 'studio' : 'off'
   const desktopSidecar = useMemo(() => qwenSidecarAvailable(), [])
   const desktopByoWeights = useMemo(() => byoWeightsAvailable(), [])
   const desktopRvc = useMemo(() => rvcAvailable(), [])
@@ -2257,6 +2260,7 @@ function App() {
         bitrate,
         title,
         loudnessTarget: loudnessNormalization ? -16 : undefined,
+        cleanupMode: effectiveAudioCleanupMode,
       })
       return {
         blob: new Blob([encoded.bytes as Uint8Array<ArrayBuffer>], { type: encoded.mime }),
@@ -3324,9 +3328,13 @@ function App() {
       }
       const encoded = await encodeOutput(processed, outputSampleRate, audioFormat, mp3Bitrate, job.label)
       const { blob, extension: ext } = encoded
+      const originalBlob = effectiveAudioCleanupMode === 'off'
+        ? undefined
+        : new Blob([encodeWav(processed, outputSampleRate)], { type: 'audio/wav' })
       if (abortRef.current) break
       const filename = `${job.filenamePrefix}-${timestamp()}${ext}`
       const result = await buildResult(blob, job.label, filename)
+      if (originalBlob) result.originalUrl = rememberUrl(URL.createObjectURL(originalBlob))
       if (cues.length > 0) {
         result.cues = cues
         result.srtUrl = rememberUrl(URL.createObjectURL(new Blob([toSRT(cues)], { type: 'text/plain' })))
@@ -3374,7 +3382,7 @@ function App() {
       }
 
       if (abortRef.current) {
-        for (const url of [result.url, result.srtUrl, result.vttUrl]) {
+        for (const url of [result.url, result.originalUrl, result.srtUrl, result.vttUrl]) {
           if (url) URL.revokeObjectURL(url)
         }
         break
@@ -6395,6 +6403,19 @@ function App() {
                           <span>
                             Two-pass loudness
                             <small>{ffmpegStatus?.available ? 'Normalize to -16 LUFS / -1.5 dBTP with measured EBU R128 values.' : ffmpegStatus?.message ?? 'Checking FFmpeg…'}</small>
+                          </span>
+                        </label>
+                        <label className="toggle-row">
+                          <input
+                            id="audio-cleanup"
+                            type="checkbox"
+                            checked={audioCleanupEnabled}
+                            disabled={!nativeCleanupAvailable || isGenerating}
+                            onChange={(event) => setAudioCleanupEnabled(event.target.checked)}
+                          />
+                          <span>
+                            Studio cleanup
+                            <small>{nativeCleanupAvailable ? 'FFmpeg denoise + room-tail reduction. Before/after stays available.' : ffmpegStatus?.message ?? 'Checking FFmpeg…'}</small>
                           </span>
                         </label>
                         <label className="cover-art-control">

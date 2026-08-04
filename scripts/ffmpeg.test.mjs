@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   assertExportResourcePlan,
+  audioCleanupFilter,
   buildChapterMetadata,
   buildExportResourcePlan,
   outputArguments,
@@ -12,6 +13,13 @@ afterEach(() => {
 })
 
 describe('FFmpeg export arguments', () => {
+  it('builds dependency-free cleanup filters and rejects unknown modes', () => {
+    expect(audioCleanupFilter()).toBeNull()
+    expect(audioCleanupFilter('denoise')).toBe('afftdn=nr=12:nf=-50:tn=1')
+    expect(audioCleanupFilter('studio')).toContain('agate=threshold=0.02')
+    expect(() => audioCleanupFilter('neural')).toThrow('Unsupported audio cleanup mode')
+  })
+
   it('uses bounded bitrate and sanitized metadata without a shell', () => {
     expect(outputArguments('mp3', 999, 'Book\r\nTitle')).toEqual([
       '-c:a', 'libmp3lame', '-b:a', '320k', '-metadata', 'title=Book  Title',

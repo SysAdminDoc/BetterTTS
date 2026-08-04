@@ -40,6 +40,8 @@ export type DesktopProjectBridge = {
 
 export type NativeAudioFormat = 'wav' | 'mp3' | 'opus' | 'flac' | 'm4b'
 
+export type AudioCleanupMode = 'off' | 'denoise' | 'studio'
+
 export type DesktopFfmpegBridge = {
   status: () => Promise<{ available: boolean; version?: string; message?: string }>
   transcode: (request: {
@@ -49,6 +51,7 @@ export type DesktopFfmpegBridge = {
     bitrate: number
     title: string
     loudnessTarget?: number
+    cleanupMode?: AudioCleanupMode
   }) => Promise<{ bytes: Uint8Array; extension: string; mime: string }>
   audiobook: (request: {
     chunks: Array<{ bytes: Uint8Array; title: string }>
