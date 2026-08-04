@@ -12,7 +12,7 @@ import {
 } from './provenance.ts'
 
 const input = {
-  appVersion: '0.22.0',
+  appVersion: '0.23.0',
   runtime: { target: 'desktop' as const, label: 'Sherpa-ONNX CPU', platform: 'Windows' },
   engine: { id: 'kokoro', modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX', modelRevision: 'revision-a' },
   voiceId: 'af_heart',
@@ -46,7 +46,7 @@ describe('generation provenance', () => {
 
     expect(manifest).toMatchObject({
       schemaVersion: PROVENANCE_SCHEMA_VERSION,
-      app: { name: 'BetterTTS', version: '0.22.0' },
+      app: { name: 'BetterTTS', version: '0.23.0' },
       runtime: { target: 'desktop', label: 'Sherpa-ONNX CPU' },
       engine: { id: 'kokoro', modelRevision: 'revision-a' },
       voice: { id: 'af_heart', locale: 'en-us' },

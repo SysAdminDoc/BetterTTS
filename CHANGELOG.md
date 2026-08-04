@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.23.0 - 2026-08-03
+
+### Added
+- Completed the roadmap release drain with native diagnostics and accessibility smoke coverage, resilient PWA/CSP handling, generation provenance, reversible normalization, searchable clip-library views, generated capability facts, a deterministic CycloneDX SBOM, and a reviewed-English UI locale boundary that keeps synthesis languages engine-specific (542 tests across 94 files).
+
 ## v0.22.0 - 2026-07-29
 
 ### Security

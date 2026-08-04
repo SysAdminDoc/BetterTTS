@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Listen in BetterTTS",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Send the current selection or page text to the local BetterTTS studio.",
   "permissions": [
     "activeTab",

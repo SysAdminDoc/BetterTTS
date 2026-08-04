@@ -1,6 +1,6 @@
 # BetterTTS
 
-[![Version](https://img.shields.io/badge/version-0.22.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.23.0-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
@@ -8,7 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-542%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
-- **Application:** BetterTTS v0.22.0 · Web + Windows
+- **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
