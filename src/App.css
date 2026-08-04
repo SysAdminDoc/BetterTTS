@@ -1718,6 +1718,56 @@ ul.queue-chunk-list > li {
   background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
 }
 
+.rvc-panel,
+.rvc-registry-panel {
+  background: color-mix(in srgb, var(--warning) 4%, var(--surface-1));
+}
+
+.rvc-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rvc-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.rvc-controls select {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.rvc-controls select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rvc-panel > .byo-note,
+.rvc-panel > .openai-error,
+.rvc-registry-panel > .byo-note,
+.rvc-registry-panel > .openai-error {
+  display: block;
+  margin-top: 8px;
+}
+
+.rvc-registry-panel progress {
+  width: 100%;
+  height: 5px;
+  margin-top: 8px;
+  accent-color: var(--accent);
+}
+
 .openai-status {
   display: inline-flex;
   align-items: center;

@@ -34,6 +34,21 @@ describe('library', () => {
     expect(migrateClipRecord({ ...record('bad', 1), size: Number.NaN })).toBeNull()
   })
 
+  it('preserves valid RVC provenance and drops malformed provenance', () => {
+    const valid = {
+      ...record('rvc', 1),
+      rvc: {
+        stage: 'rvc' as const,
+        appliedAt: '2026-08-03T12:00:00.000Z',
+        models: [{ id: 'model-a', name: 'Voice A', license: 'MIT', provenance: 'Local' }],
+        pitchSemitones: 2,
+        indexRate: 0.5,
+      },
+    }
+    expect(migrateClipRecord(valid)?.rvc).toEqual(valid.rvc)
+    expect(migrateClipRecord({ ...valid, rvc: { stage: 'rvc' } })).not.toHaveProperty('rvc')
+  })
+
   it('round-trips the audio blob', async () => {
     await saveClip(record('x', 1), new Blob(['payload'], { type: 'audio/wav' }))
     const blob = await getClipBlob('x')

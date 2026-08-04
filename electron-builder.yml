@@ -67,6 +67,8 @@ extraResources:
     filter:
       - bettertts_sidecar.py
       - requirements-qwen.txt
+      - bettertts_rvc.py
+      - requirements-rvc.txt
 
 win:
   icon: build/icon.ico

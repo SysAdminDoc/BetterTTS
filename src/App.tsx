@@ -38,6 +38,7 @@ import {
   EXPERIMENTAL_CHATTERBOX_STORAGE_KEY,
   EXPERIMENTAL_PIPER_STORAGE_KEY,
   engineQueueable,
+  engineSupportsPostStage,
   visibleUserSuppliedEngines,
   type EngineId,
 } from './lib/engine-registry.ts'
@@ -54,6 +55,24 @@ import {
   type ByoModelOptionId,
   type ByoModelRecord,
 } from './lib/byo-models.ts'
+import {
+  DEFAULT_RVC_SETTINGS,
+  RVC_CONSENT_STORAGE_KEY,
+  RVC_MODELS_STORAGE_KEY,
+  RVC_SETTINGS_STORAGE_KEY,
+  createRvcClipProvenance,
+  createRvcModelRecord,
+  parseRvcConsent,
+  parseRvcModelRecords,
+  parseRvcSettings,
+  removeRvcModelRecord,
+  resolveRvcInferencePlan,
+  serializeRvcModelRecords,
+  serializeRvcSettings,
+  upsertRvcModelRecord,
+  type RvcModelRecord,
+  type RvcSettings,
+} from './lib/rvc.ts'
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
@@ -76,6 +95,7 @@ import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
 import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesizeQwen, QWEN_LANGUAGES, QWEN_MODEL_ID, QWEN_SPEAKERS, type QwenLanguage, type QwenSpeaker, type SidecarStatus } from './platform/qwen.ts'
+import { cancelRvcGeneration, chooseRvcIndex, chooseRvcModel, convertRvcAudio, getRvcRuntimeStatus, rvcAvailable, rvcWeightsAvailable, setupRvcRuntime, type RvcRuntimeStatus } from './platform/rvc.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, deleteClipWithSnapshot, enforceLibraryCap, freeLibrarySpace, getClipBlob, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import { buildM4bFromBlobs, checkM4bCapability, type M4bCapability } from './lib/m4b.ts'
@@ -180,6 +200,15 @@ type ByoDraft = {
   sourceUrl: string
 }
 
+type RvcDraft = {
+  modelName: string
+  license: string
+  provenance: string
+  sourceUrl: string
+  modelPath: string
+  indexPath: string
+}
+
 type QueueSourceChunk = {
   text: string
   chapterTitle?: string
@@ -269,6 +298,7 @@ const RUNTIME_LICENSE_ROWS = [
   ['Sherpa Kokoro int8 pack', 'Apache-2.0', 'Pinned native Kokoro archive; downloaded and verified on first use'],
   ['Sherpa Piper Cori pack', 'Public-domain source data', 'Pinned English native Piper archive; downloaded and verified on first use'],
   ['qwen-tts / Qwen3-TTS', 'Apache-2.0', 'Optional desktop Python sidecar; torch/runtime and model weights are user-managed and never bundled'],
+  ['rvc-python (optional user-managed)', 'MIT', 'Optional Windows RVC post-stage; installed into user data only after explicit setup'],
   ['Supertonic ONNX model', 'OpenRAIL', 'HF-hosted English speed engine'],
   ['lamejs MP3 encoder', 'LGPL-3.0', 'MP3 export path'],
   ['pdfjs-dist', 'Apache-2.0', 'Local PDF text extraction'],
@@ -322,6 +352,33 @@ function getInitialByoModels(): ByoModelRecord[] {
     return parseByoModelRecords(window.localStorage.getItem(BYO_MODELS_STORAGE_KEY))
   } catch {
     return []
+  }
+}
+
+function getInitialRvcConsent(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return parseRvcConsent(window.localStorage.getItem(RVC_CONSENT_STORAGE_KEY))
+  } catch {
+    return false
+  }
+}
+
+function getInitialRvcModels(): RvcModelRecord[] {
+  if (typeof window === 'undefined') return []
+  try {
+    return parseRvcModelRecords(window.localStorage.getItem(RVC_MODELS_STORAGE_KEY))
+  } catch {
+    return []
+  }
+}
+
+function getInitialRvcSettings(): RvcSettings {
+  if (typeof window === 'undefined') return { ...DEFAULT_RVC_SETTINGS }
+  try {
+    return parseRvcSettings(window.localStorage.getItem(RVC_SETTINGS_STORAGE_KEY))
+  } catch {
+    return { ...DEFAULT_RVC_SETTINGS }
   }
 }
 
@@ -1181,6 +1238,13 @@ function App() {
   const [byoModels, setByoModels] = useState<ByoModelRecord[]>(getInitialByoModels)
   const [byoDraft, setByoDraft] = useState<ByoDraft | null>(null)
   const [byoAction, setByoAction] = useState<string | null>(null)
+  const [rvcConsent, setRvcConsent] = useState(getInitialRvcConsent)
+  const [rvcModels, setRvcModels] = useState<RvcModelRecord[]>(getInitialRvcModels)
+  const [rvcSettings, setRvcSettings] = useState<RvcSettings>(getInitialRvcSettings)
+  const [rvcDraft, setRvcDraft] = useState<RvcDraft | null>(null)
+  const [rvcAction, setRvcAction] = useState<'model' | 'index' | 'setup' | null>(null)
+  const [rvcStatus, setRvcStatus] = useState<RvcRuntimeStatus | null>(null)
+  const [rvcSetupProgress, setRvcSetupProgress] = useState(0)
   const [chatterboxModel, setChatterboxModel] = useState<ChatterboxModelVariant>('multilingual')
   const [chatterboxLanguageId, setChatterboxLanguageId] = useState<ChatterboxLanguageId>('en')
   const [chatterboxExaggeration, setChatterboxExaggeration] = useState(CHATTERBOX_DEFAULT_EXAGGERATION)
@@ -1385,6 +1449,8 @@ function App() {
   const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
   const desktopSidecar = useMemo(() => qwenSidecarAvailable(), [])
   const desktopByoWeights = useMemo(() => byoWeightsAvailable(), [])
+  const desktopRvc = useMemo(() => rvcAvailable(), [])
+  const desktopRvcWeights = useMemo(() => rvcWeightsAvailable(), [])
   const desktopOpenAiServer = useMemo(() => getOpenAiTtsServerBridge(), [])
   const openAiServerSupported = useMemo(() => openAiTtsServerAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
@@ -1403,6 +1469,8 @@ function App() {
   const activeOutput = results.find((result) => result.id === activeOutputId) ?? results[0]
   const queueDisabledReason = engine === 'browser'
     ? 'Queue export is unavailable for Browser voices.'
+    : rvcSettings.enabled
+      ? 'RVC post-processing is direct-only; disable it before creating a resumable queue job.'
     : engine === 'chatterbox'
       ? 'Chatterbox voice-cloning is direct-only; use Generate audio.'
       : engine === 'qwen'
@@ -1625,6 +1693,27 @@ function App() {
   }, [byoModels])
 
   useEffect(() => {
+    persistSetting(RVC_CONSENT_STORAGE_KEY, rvcConsent ? '1' : '0')
+    if (!rvcConsent) {
+      setRvcDraft(null)
+      setRvcSettings((current) => current.enabled ? { ...current, enabled: false } : current)
+    }
+  }, [rvcConsent])
+
+  useEffect(() => {
+    persistSetting(RVC_MODELS_STORAGE_KEY, serializeRvcModelRecords(rvcModels))
+    setRvcSettings((current) => current.modelId && !rvcModels.some((model) => model.id === current.modelId)
+      ? { ...current, modelId: null, enabled: false }
+      : current.modelId && current.blendModelId && !rvcModels.some((model) => model.id === current.blendModelId)
+        ? { ...current, blendModelId: null }
+        : current)
+  }, [rvcModels])
+
+  useEffect(() => {
+    persistSetting(RVC_SETTINGS_STORAGE_KEY, serializeRvcSettings(rvcSettings))
+  }, [rvcSettings])
+
+  useEffect(() => {
     persistSetting(OPENAI_TTS_PORT_STORAGE_KEY, String(openAiTtsPort))
   }, [openAiTtsPort])
 
@@ -1651,6 +1740,27 @@ function App() {
       cancelled = true
     }
   }, [openAiServerSupported])
+
+  useEffect(() => {
+    if (!desktopRvc) return
+    let cancelled = false
+    getRvcRuntimeStatus()
+      .then((status) => {
+        if (!cancelled) setRvcStatus(status)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setRvcStatus({
+          available: false,
+          rvcInstalled: false,
+          torchInstalled: false,
+          message: error instanceof Error ? error.message : 'Could not inspect the RVC runtime.',
+          recovery: 'Restart BetterTTS and inspect the optional RVC runtime setup.',
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [desktopRvc])
 
   useEffect(() => {
     if (forceNative) {
@@ -2398,6 +2508,106 @@ function App() {
     showToast({ tone: 'ok', message: 'Self-supplied weight registration removed. The original files were not changed.' })
   }
 
+  async function handleChooseRvcModel() {
+    if (!rvcDraft || rvcAction !== null || !rvcConsent || !desktopRvcWeights) return
+    setRvcAction('model')
+    try {
+      const selection = await chooseRvcModel()
+      if (selection.canceled || !selection.path) return
+      setRvcDraft((current) => current ? {
+        ...current,
+        modelPath: selection.path!,
+        modelName: current.modelName.trim() || selection.name?.replace(/\.pth$/iu, '') || 'RVC model',
+      } : current)
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not choose the RVC model file.' })
+    } finally {
+      setRvcAction(null)
+    }
+  }
+
+  async function handleChooseRvcIndex() {
+    if (!rvcDraft || rvcAction !== null || !rvcConsent || !desktopRvcWeights) return
+    setRvcAction('index')
+    try {
+      const selection = await chooseRvcIndex()
+      if (selection.canceled || !selection.path) return
+      setRvcDraft((current) => current ? { ...current, indexPath: selection.path! } : current)
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not choose the optional RVC index file.' })
+    } finally {
+      setRvcAction(null)
+    }
+  }
+
+  async function handleRegisterRvcModel() {
+    if (!rvcDraft || rvcAction !== null || !rvcConsent) return
+    const modelPath = rvcDraft.modelPath.trim()
+    const license = rvcDraft.license.trim()
+    const provenance = rvcDraft.provenance.trim()
+    if (!modelPath || !license || !provenance) {
+      showToast({ tone: 'warn', message: 'Choose the .pth file and record its exact license and provenance before registering it.' })
+      return
+    }
+    try {
+      const record = createRvcModelRecord({
+        modelName: rvcDraft.modelName.trim(),
+        modelPath,
+        indexPath: rvcDraft.indexPath.trim() || undefined,
+        license,
+        provenance,
+        sourceUrl: rvcDraft.sourceUrl.trim(),
+        acknowledgedAt: new Date().toISOString(),
+      })
+      setRvcModels((current) => upsertRvcModelRecord(current, record))
+      setRvcSettings((current) => ({ ...current, modelId: current.modelId ?? record.id }))
+      setRvcDraft(null)
+      showToast({ tone: 'ok', message: `${record.modelName} is registered for optional local RVC conversion. The files were not copied.` })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not register the selected RVC model.' })
+    }
+  }
+
+  function handleRemoveRvcModel(recordId: string) {
+    if (rvcAction !== null) return
+    setRvcModels((current) => removeRvcModelRecord(current, recordId))
+    setRvcSettings((current) => ({
+      ...current,
+      ...(current.modelId === recordId ? { modelId: null, enabled: false } : {}),
+      ...(current.blendModelId === recordId ? { blendModelId: null } : {}),
+    }))
+    showToast({ tone: 'ok', message: 'RVC model registration removed. The original files were not changed.' })
+  }
+
+  async function handleSetupRvc() {
+    if (!desktopRvc || rvcAction !== null) return
+    setRvcAction('setup')
+    setRvcSetupProgress(0.02)
+    setStatus('Preparing the optional RVC runtime')
+    try {
+      const status = await setupRvcRuntime((progress, stage) => {
+        setRvcSetupProgress(Math.min(1, Math.max(0, progress)))
+        setStatus(stage)
+      })
+      setRvcStatus(status)
+      showToast({ tone: status.available ? 'ok' : 'warn', message: status.available ? 'RVC runtime is ready. Register a local .pth model to use it.' : status.message })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'RVC runtime setup failed.'
+      showToast({ tone: 'error', message })
+      setRvcStatus((current) => current ?? {
+        available: false,
+        rvcInstalled: false,
+        torchInstalled: false,
+        message,
+        recovery: 'Install Python 3.10 and retry RVC runtime setup.',
+      })
+    } finally {
+      setRvcAction(null)
+      setRvcSetupProgress(0)
+      setStatus('Ready')
+    }
+  }
+
   function openWorkspacePanel(target: typeof WORKSPACE_TABS[number][0]) {
     setActiveWorkspaceHash(target)
     setActiveNavSection('studio')
@@ -2684,6 +2894,13 @@ function App() {
   }
 
   async function runSynthesis(jobs: SynthJob[], opts: { zipPrefix: string; successMessage?: string }) {
+    const rvcPlan = resolveRvcInferencePlan(rvcSettings, rvcModels, rvcConsent)
+    if (rvcPlan) {
+      if (!engineSupportsPostStage(engine, 'rvc')) throw new Error('RVC post-processing requires an exported audio engine, not Browser playback.')
+      const status = rvcStatus ?? await getRvcRuntimeStatus()
+      setRvcStatus(status)
+      if (!status.available) throw new Error(`${status.message} ${status.recovery}`)
+    }
     const loadingLabel = engine === 'supertonic'
       ? 'Loading Supertonic model'
       : engine === 'kitten'
@@ -2756,7 +2973,7 @@ function App() {
 
     let audioCtx: AudioContext | null = null
     let nextPlayTime = 0
-    if (streamPlay) {
+    if (streamPlay && !rvcPlan) {
       audioCtx = new AudioContext({ sampleRate: outputSampleRate })
       nextPlayTime = audioCtx.currentTime + 0.05
     }
@@ -2873,7 +3090,21 @@ function App() {
       }
 
       const raw = concatFloat32Arrays(audioParts)
-      let processed = engine === 'kokoro' && pitchSemitones !== 0 ? await shiftPitch(raw, pitchSemitones, outputSampleRate) : raw
+      let processed = raw
+      if (rvcPlan) {
+        setStatus(`Converting voice with ${rvcPlan.primary.modelName}`)
+        const converted = await convertRvcAudio(
+          raw,
+          outputSampleRate,
+          rvcPlan,
+          generationAbortRef.current?.signal,
+          (next, stage) => setStatus(`${stage} (${Math.round(next * 100)}%)`),
+        )
+        if (converted.sampleRate !== outputSampleRate) throw new Error(`RVC returned ${converted.sampleRate} Hz audio; expected ${outputSampleRate} Hz.`)
+        processed = converted.samples
+        totalSamples += processed.length - raw.length
+      }
+      if (engine === 'kokoro' && pitchSemitones !== 0) processed = await shiftPitch(processed, pitchSemitones, outputSampleRate)
       if (engine === 'kokoro' && bgmFile) {
         const { mixed, bgmEmpty } = await mixBgm(processed, bgmFile, bgmVolume, outputSampleRate)
         processed = mixed
@@ -2893,7 +3124,18 @@ function App() {
         result.vttUrl = rememberUrl(URL.createObjectURL(new Blob([toVTT(cues)], { type: 'text/vtt' })))
       }
 
-      const clipRecord: ClipRecord = { id: result.id, filename, label: result.label, voice: job.voice, speed, createdAt: Date.now(), size: blob.size, duration: result.duration, cues: result.cues }
+      const clipRecord: ClipRecord = {
+        id: result.id,
+        filename,
+        label: result.label,
+        voice: job.voice,
+        speed,
+        createdAt: Date.now(),
+        size: blob.size,
+        duration: result.duration,
+        cues: result.cues,
+        ...(rvcPlan ? { rvc: createRvcClipProvenance(rvcPlan) } : {}),
+      }
       try {
         await saveClip(clipRecord, blob)
         await enforceLibraryCap()
@@ -3121,6 +3363,10 @@ function App() {
 
   async function handleGenerate() {
     if (generatingRef.current) return
+    if (rvcSettings.enabled && !engineSupportsPostStage(engine, 'rvc')) {
+      showToast({ tone: 'warn', message: 'RVC post-processing requires an exported audio engine; Browser playback cannot be converted.' })
+      return
+    }
     if (engine === 'chatterbox' && chatterboxNeedsSetup) {
       showToast({
         tone: 'warn',
@@ -3204,6 +3450,7 @@ function App() {
     generationAbortRef.current?.abort()
     cancelWorkerGeneration()
     if (nativeAvailable) cancelNativeGeneration()
+    cancelRvcGeneration()
     resetKokoroSession()
     resetTimestampedKokoroSession()
     resetSupertonicSession()
@@ -5046,6 +5293,94 @@ function App() {
                     <small className="byo-note">The restricted model catalog and all registered locations stay inactive until this acknowledgement is enabled.</small>
                   )}
                 </div>
+                <div className="diagnostics-panel rvc-registry-panel" aria-label="RVC model registry">
+                  <div className="cache-manager-head">
+                    <span>
+                      <strong>RVC model registry</strong>
+                      <small>Register local .pth weights and an optional .index file. BetterTTS stores metadata and paths only; it does not copy or download them.</small>
+                    </span>
+                  </div>
+                  <label className="toggle-row experimental-engine-toggle" htmlFor="rvc-consent" aria-label="I own or have permission to use RVC voices">
+                    <input id="rvc-consent" type="checkbox" checked={rvcConsent} onChange={(event) => setRvcConsent(event.target.checked)} />
+                    <span>
+                      <strong>I own or have permission to use these voices</strong>
+                      <small>RVC can imitate a real speaker. Use only models and source material whose terms and consent you can document.</small>
+                    </span>
+                  </label>
+                  {rvcConsent ? (
+                    <>
+                      {!desktopRvcWeights ? <p className="byo-note">Local model selection and conversion are available in the Windows desktop app. The web/PWA build keeps this registry inactive.</p> : null}
+                      <div className="diagnostics-actions">
+                        <button type="button" onClick={() => setRvcDraft({ modelName: '', license: '', provenance: '', sourceUrl: '', modelPath: '', indexPath: '' })} disabled={!desktopRvcWeights || rvcAction !== null}>
+                          <Upload size={13} aria-hidden="true" />
+                          Register RVC model
+                        </button>
+                        {desktopRvc ? (
+                          <button type="button" onClick={() => void handleSetupRvc()} disabled={rvcAction !== null || rvcStatus?.available === true}>
+                            {rvcAction === 'setup' ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+                            {rvcAction === 'setup' ? 'Setting up…' : 'Set up RVC runtime'}
+                          </button>
+                        ) : null}
+                      </div>
+                      {rvcDraft ? (
+                        <div className="byo-draft" aria-label="Register RVC model">
+                          <strong>Record provenance before activating the model</strong>
+                          <label>
+                            Model name
+                            <input value={rvcDraft.modelName} maxLength={120} placeholder="Example: Studio voice" onChange={(event) => setRvcDraft((current) => current ? { ...current, modelName: event.target.value } : current)} />
+                          </label>
+                          <label>
+                            Exact license or terms
+                            <input value={rvcDraft.license} maxLength={200} placeholder="Example: CC-BY-4.0; verify the model release" onChange={(event) => setRvcDraft((current) => current ? { ...current, license: event.target.value } : current)} />
+                          </label>
+                          <label>
+                            Provenance note
+                            <textarea value={rvcDraft.provenance} maxLength={600} rows={2} placeholder="Upstream URL, release or commit, and why you are allowed to use these weights" onChange={(event) => setRvcDraft((current) => current ? { ...current, provenance: event.target.value } : current)} />
+                          </label>
+                          <label>
+                            Source URL <span className="field-hint">optional</span>
+                            <input type="url" value={rvcDraft.sourceUrl} maxLength={2048} placeholder="https://…" onChange={(event) => setRvcDraft((current) => current ? { ...current, sourceUrl: event.target.value } : current)} />
+                          </label>
+                          <div className="diagnostics-actions">
+                            <button type="button" onClick={() => void handleChooseRvcModel()} disabled={rvcAction !== null || !desktopRvcWeights}>
+                              {rvcAction === 'model' ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <Upload size={13} aria-hidden="true" />}
+                              {rvcDraft.modelPath ? shortUiLabel(rvcDraft.modelPath, 42) : 'Choose .pth model'}
+                            </button>
+                            <button type="button" onClick={() => void handleChooseRvcIndex()} disabled={rvcAction !== null || !desktopRvcWeights || !rvcDraft.modelPath}>
+                              {rvcAction === 'index' ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <Upload size={13} aria-hidden="true" />}
+                              {rvcDraft.indexPath ? shortUiLabel(rvcDraft.indexPath, 42) : 'Choose .index (optional)'}
+                            </button>
+                          </div>
+                          <div className="diagnostics-actions">
+                            <button type="button" onClick={() => void handleRegisterRvcModel()} disabled={rvcAction !== null || !rvcDraft.modelPath || !rvcDraft.license.trim() || !rvcDraft.provenance.trim()}>Register</button>
+                            <button type="button" onClick={() => setRvcDraft(null)} disabled={rvcAction !== null}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {rvcModels.length > 0 ? (
+                        <div className="byo-records" aria-label="Registered RVC models">
+                          <strong>Registered models</strong>
+                          {rvcModels.map((model) => (
+                            <div className="byo-record" key={model.id}>
+                              <span>
+                                <strong>{model.modelName}</strong>
+                                <small>License: {model.license}</small>
+                                <small>Provenance: {model.provenance}</small>
+                                <small>Model: {shortUiLabel(model.modelPath, 110)}{model.indexPath ? ` · index ${shortUiLabel(model.indexPath, 80)}` : ''}</small>
+                                {model.sourceUrl ? <small>Source: {shortUiLabel(model.sourceUrl, 110)}</small> : null}
+                              </span>
+                              <button type="button" onClick={() => handleRemoveRvcModel(model.id)} disabled={rvcAction !== null}>Remove</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {rvcAction === 'setup' ? <progress value={rvcSetupProgress} max={1} aria-label="RVC runtime setup progress" /> : null}
+                      {rvcStatus ? <small className={rvcStatus.available ? 'byo-note' : 'openai-error'}>{rvcStatus.message} {rvcStatus.available ? '' : rvcStatus.recovery}</small> : null}
+                    </>
+                  ) : (
+                    <small className="byo-note">The RVC registry and runtime stay inactive until this acknowledgement is enabled.</small>
+                  )}
+                </div>
                 {desktopOpenAiServer ? (
                   <div className="diagnostics-panel openai-panel" aria-label="Local OpenAI-compatible TTS server">
                     <div className="cache-manager-head">
@@ -5606,6 +5941,82 @@ function App() {
                   </div>
                 ) : null}
 
+                <div className="diagnostics-panel rvc-panel" aria-label="RVC voice conversion post-stage">
+                  <div className="cache-manager-head">
+                    <span>
+                      <strong>RVC voice conversion</strong>
+                      <small>Re-timbre exported TTS locally after synthesis. The optional two-model blend mixes two RVC inference passes.</small>
+                    </span>
+                    <span className={`openai-status ${rvcStatus?.available ? 'running' : ''}`} role="status">
+                      <span className="status-dot" aria-hidden="true" />
+                      {!desktopRvc ? 'Desktop only' : rvcStatus === null ? 'Checking' : rvcStatus.available ? 'Ready' : 'Unavailable'}
+                    </span>
+                  </div>
+                  <label className="toggle-row" htmlFor="rvc-enabled" aria-label="Apply RVC after TTS">
+                    <input
+                      id="rvc-enabled"
+                      type="checkbox"
+                      checked={rvcSettings.enabled}
+                      disabled={!desktopRvc || !rvcConsent || rvcModels.length === 0 || !engineSupportsPostStage(engine, 'rvc')}
+                      onChange={(event) => {
+                        if (event.target.checked && (!rvcConsent || !desktopRvc || rvcModels.length === 0)) {
+                          showToast({ tone: 'warn', message: 'Acknowledge the RVC consent gate and register a local .pth model in System & diagnostics first.' })
+                          return
+                        }
+                        setRvcSettings((current) => ({ ...current, enabled: event.target.checked }))
+                      }}
+                    />
+                    <span>
+                      <strong>Apply RVC after TTS</strong>
+                      <small>{rvcSettings.enabled ? 'Streaming playback is paused until the converted clip is ready.' : 'Off by default; model files are never downloaded or copied.'}</small>
+                    </span>
+                  </label>
+                  {rvcModels.length > 0 ? (
+                    <div className="rvc-controls">
+                      <label>
+                        Model
+                        <select
+                          value={rvcSettings.modelId ?? ''}
+                          onChange={(event) => setRvcSettings((current) => ({ ...current, modelId: event.target.value || null, enabled: Boolean(event.target.value) && current.enabled }))}
+                        >
+                          <option value="">Choose a registered model</option>
+                          {rvcModels.map((model) => <option key={model.id} value={model.id}>{model.modelName}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Blend model <span className="field-hint">optional</span>
+                        <select
+                          value={rvcSettings.blendModelId ?? ''}
+                          onChange={(event) => setRvcSettings((current) => ({ ...current, blendModelId: event.target.value || null }))}
+                        >
+                          <option value="">Single model</option>
+                          {rvcModels.filter((model) => model.id !== rvcSettings.modelId).map((model) => <option key={model.id} value={model.id}>{model.modelName}</option>)}
+                        </select>
+                      </label>
+                      {rvcSettings.blendModelId ? (
+                        <div className="range-row">
+                          <label htmlFor="rvc-blend-ratio">Blend ratio</label>
+                          <span>{Math.round(rvcSettings.blendRatio * 100)}% model B</span>
+                          <input id="rvc-blend-ratio" type="range" min="0" max="1" step="0.01" value={rvcSettings.blendRatio} onChange={(event) => setRvcSettings((current) => ({ ...current, blendRatio: Number(event.target.value) }))} />
+                        </div>
+                      ) : null}
+                      <div className="range-row">
+                        <label htmlFor="rvc-pitch">RVC pitch</label>
+                        <span>{rvcSettings.pitchSemitones > 0 ? `+${rvcSettings.pitchSemitones}` : rvcSettings.pitchSemitones} st</span>
+                        <input id="rvc-pitch" type="range" min="-12" max="12" step="1" value={rvcSettings.pitchSemitones} onChange={(event) => setRvcSettings((current) => ({ ...current, pitchSemitones: Number(event.target.value) }))} />
+                      </div>
+                      <div className="range-row">
+                        <label htmlFor="rvc-index-rate">Index rate</label>
+                        <span>{Math.round(rvcSettings.indexRate * 100)}%</span>
+                        <input id="rvc-index-rate" type="range" min="0" max="1" step="0.01" value={rvcSettings.indexRate} onChange={(event) => setRvcSettings((current) => ({ ...current, indexRate: Number(event.target.value) }))} />
+                      </div>
+                    </div>
+                  ) : (
+                    <small className="byo-note">Register a local RVC model in System & diagnostics to enable this stage.</small>
+                  )}
+                  {rvcSettings.enabled && rvcStatus && !rvcStatus.available ? <small className="openai-error">{shortUiLabel(rvcStatus.message, 180)} {shortUiLabel(rvcStatus.recovery, 180)}</small> : null}
+                </div>
+
                 {engine === 'supertonic' ? (
                   <div className="range-row">
                     <label htmlFor="supertonic-steps">Steps</label>
@@ -5731,10 +6142,10 @@ function App() {
                 {engine === 'kokoro' ? (
                   <>
                     <label className="toggle-row">
-                      <input type="checkbox" checked={streamPlay} onChange={(event) => setStreamPlay(event.target.checked)} />
+                      <input type="checkbox" checked={streamPlay && !rvcSettings.enabled} disabled={rvcSettings.enabled} onChange={(event) => setStreamPlay(event.target.checked)} />
                       <span>
                         Stream playback
-                        <small>Play audio as it generates. Pitch and music apply to the exported file.</small>
+                        <small>{rvcSettings.enabled ? 'Disabled while RVC waits for the completed clip.' : 'Play audio as it generates. Pitch and music apply to the exported file.'}</small>
                       </span>
                     </label>
                     <label className="toggle-row">

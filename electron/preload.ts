@@ -8,6 +8,8 @@ const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 const WHISPER_CHANNEL = 'bettertts:whisper'
 const SIDECAR_CHANNEL = 'bettertts:sidecar'
 const BYO_WEIGHTS_CHANNEL = 'bettertts:byo-weights'
+const RVC_CHANNEL = 'bettertts:rvc'
+const RVC_WEIGHTS_CHANNEL = 'bettertts:rvc-weights'
 const OPENAI_TTS_CHANNEL = 'bettertts:openai-tts'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
@@ -100,6 +102,26 @@ const bridge = {
   byoWeights: {
     choose(modelId: string): Promise<unknown> {
       return ipcRenderer.invoke(BYO_WEIGHTS_CHANNEL, { modelId })
+    },
+  },
+  rvc: {
+    post(message: unknown): void {
+      ipcRenderer.send(RVC_CHANNEL, message)
+    },
+    onMessage(listener: (message: unknown) => void): () => void {
+      const handler = (_event: unknown, message: unknown) => listener(message)
+      ipcRenderer.on(RVC_CHANNEL, handler)
+      return () => {
+        ipcRenderer.removeListener(RVC_CHANNEL, handler)
+      }
+    },
+  },
+  rvcWeights: {
+    chooseModel(): Promise<unknown> {
+      return ipcRenderer.invoke(RVC_WEIGHTS_CHANNEL, { action: 'model' })
+    },
+    chooseIndex(): Promise<unknown> {
+      return ipcRenderer.invoke(RVC_WEIGHTS_CHANNEL, { action: 'index' })
     },
   },
   openAiServer: {

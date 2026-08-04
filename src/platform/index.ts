@@ -78,6 +78,24 @@ export type ByoWeightsBridge = {
   }>
 }
 
+export type RvcWeightsBridge = {
+  chooseModel: () => Promise<{
+    canceled: boolean
+    path?: string
+    name?: string
+  }>
+  chooseIndex: () => Promise<{
+    canceled: boolean
+    path?: string
+    name?: string
+  }>
+}
+
+export type RvcBridge = {
+  post: (message: unknown) => void
+  onMessage: (listener: (message: unknown) => void) => () => void
+}
+
 export type OpenAiTtsServerStatus = {
   running: boolean
   host: '127.0.0.1'
@@ -104,6 +122,8 @@ export type DesktopBridge = {
   whisper?: WhisperBridge
   sidecar?: SidecarBridge
   byoWeights?: ByoWeightsBridge
+  rvc?: RvcBridge
+  rvcWeights?: RvcWeightsBridge
   openAiServer?: OpenAiTtsServerBridge
 }
 
@@ -168,4 +188,14 @@ export function getByoWeightsBridge(): ByoWeightsBridge | null {
 export function getOpenAiTtsServerBridge(): OpenAiTtsServerBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.openAiServer ?? null
+}
+
+export function getRvcBridge(): RvcBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.rvc ?? null
+}
+
+export function getRvcWeightsBridge(): RvcWeightsBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.rvcWeights ?? null
 }

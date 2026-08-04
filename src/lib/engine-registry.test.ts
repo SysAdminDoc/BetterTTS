@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   engineQueueable,
+  engineSupportsPostStage,
   visibleUserSuppliedEngines,
   visibleEngineDescriptors,
 } from './engine-registry.ts'
@@ -31,5 +32,11 @@ describe('engine registry', () => {
   it('keeps registered non-commercial engines hidden until consent', () => {
     expect(visibleUserSuppliedEngines(false, ['f5-tts', 'xtts-v2'])).toEqual([])
     expect(visibleUserSuppliedEngines(true, ['f5-tts', 'f5-tts', 'xtts-v2'])).toEqual(['f5-tts', 'xtts-v2'])
+  })
+
+  it('allows RVC after native audio generation, never browser playback', () => {
+    expect(engineSupportsPostStage('kokoro', 'rvc')).toBe(true)
+    expect(engineSupportsPostStage('qwen', 'rvc')).toBe(true)
+    expect(engineSupportsPostStage('browser', 'rvc')).toBe(false)
   })
 })

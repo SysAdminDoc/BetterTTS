@@ -17,6 +17,7 @@
 - Added an optional Windows-only Qwen3-TTS 0.6B CustomVoice engine through an isolated Python sidecar. The desktop UI can provision a private Python 3.12 environment, then lazily download `torch`, `qwen-tts`, and model weights into user data; sidecar setup, progress, cancellation, and crash recovery stay on the same bounded desktop bridge while web/PWA mode remains unchanged.
 - Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 - Added an opt-in loopback-only OpenAI-compatible desktop TTS server. `POST /v1/audio/speech` supports native Kokoro/Piper model and voice selection, WAV/MP3/Opus/FLAC output, bounded SSE base64 chunks, `/health` and `/v1/models`, an explicit port control, and a stop path that closes the listener.
+- Added an opt-in Windows-only RVC post-stage. Users can register consented local `.pth`/`.index` models with license and provenance, re-timbre a generated clip after TTS, optionally blend a second model through a bounded second inference pass, and retain the conversion metadata on the saved clip; the optional Python runtime is never bundled.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -41,6 +42,7 @@
 - Added Qwen sidecar IPC/client coverage and Python protocol tests for bounds, deterministic test-mode audio, cancellation, progress, and status recovery.
 - Added BYO metadata schema, consent/visibility, provenance bounds, desktop picker IPC, and web-bridge isolation coverage.
 - Added OpenAI-compatible request/IPC validation, raw audio and SSE endpoint tests, loopback binding, health/model discovery, and listener shutdown coverage.
+- Added RVC model metadata, consent, blend/provenance, conversion IPC/client, Python adapter protocol, missing-runtime/model recovery, and web-bridge isolation coverage.
 
 ## v0.21.0 - 2026-07-29
 

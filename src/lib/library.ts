@@ -1,5 +1,6 @@
 import type { Cue } from './subtitles.ts'
 import { publishStoreChange } from './coordination.ts'
+import type { RvcClipProvenance } from './rvc.ts'
 
 export type ClipRecord = {
   id: string
@@ -11,6 +12,7 @@ export type ClipRecord = {
   size: number
   duration: string
   cues?: Cue[]
+  rvc?: RvcClipProvenance
 }
 
 export type ClipSnapshot = {
@@ -60,6 +62,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
         )
       })
     : undefined
+  const rvc = migrateRvcProvenance(record.rvc)
   return {
     id: record.id,
     filename: record.filename,
@@ -70,6 +73,35 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     size: Number(record.size),
     duration: record.duration,
     cues,
+    ...(rvc ? { rvc } : {}),
+  }
+}
+
+function migrateRvcProvenance(value: unknown): RvcClipProvenance | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const candidate = value as Partial<RvcClipProvenance>
+  if (candidate.stage !== 'rvc' || !Number.isFinite(candidate.pitchSemitones) || !Number.isFinite(candidate.indexRate)) return null
+  if (!Array.isArray(candidate.models) || candidate.models.length < 1 || candidate.models.length > 2) return null
+  const models = candidate.models.flatMap((model) => {
+    if (!model || typeof model !== 'object') return []
+    const item = model as Partial<RvcClipProvenance['models'][number]>
+    if (
+      typeof item.id !== 'string' || !item.id || item.id.length > 120
+      || typeof item.name !== 'string' || !item.name || item.name.length > 120
+      || typeof item.license !== 'string' || !item.license || item.license.length > 200
+      || typeof item.provenance !== 'string' || !item.provenance || item.provenance.length > 600
+    ) return []
+    return [{ id: item.id, name: item.name, license: item.license, provenance: item.provenance }]
+  })
+  if (models.length !== candidate.models.length || typeof candidate.appliedAt !== 'string' || !Number.isFinite(Date.parse(candidate.appliedAt))) return null
+  if (candidate.blendRatio !== undefined && (!Number.isFinite(candidate.blendRatio) || candidate.blendRatio < 0 || candidate.blendRatio > 1)) return null
+  return {
+    stage: 'rvc',
+    appliedAt: candidate.appliedAt,
+    models,
+    ...(candidate.blendRatio === undefined ? {} : { blendRatio: candidate.blendRatio }),
+    pitchSemitones: Math.max(-24, Math.min(24, Number(candidate.pitchSemitones))),
+    indexRate: Math.max(0, Math.min(1, Number(candidate.indexRate))),
   }
 }
 

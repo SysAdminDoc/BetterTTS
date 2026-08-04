@@ -5,13 +5,13 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-374%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-387%20passing-53d889.svg)](#)
 
-**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, and optional desktop Qwen3-TTS run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
+**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Optional RVC conversion uses user-selected `.pth`/`.index` files through a separate Python adapter; the app stores their paths and provenance, never copies them, and only installs `rvc-python` after explicit setup. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -45,6 +45,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — opt-in reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, and disclosed PerTh watermark
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
+- **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
 - **41 Kokoro voices** — 28 English voices plus Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
 - **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
@@ -52,6 +53,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
+- **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
 - **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
@@ -145,6 +147,8 @@ Qwen3-TTS is available only in the Windows desktop app. Select it under Voice ch
 
 The **Bring-your-own weights** panel is disabled by default and is available in the Windows desktop app after an explicit non-commercial/restricted-terms acknowledgement. Choose a local file or directory for F5-TTS, XTTS-v2, Fish/OpenAudio S1, Higgs Audio, MaskGCT, Silero, or another compatible model, then record its exact license and provenance. BetterTTS stores only that metadata and the selected path, never downloads or copies the weights, and keeps registered models adapter-gated rather than silently activating them. Unchecking the acknowledgement hides the registered models until it is enabled again.
 
+The **RVC voice conversion** post-stage is available only in the Windows desktop app. Enable the consent gate under **Voice chain -> Engine -> System & diagnostics**, register a local `.pth` model and optional `.index` file with its license and provenance, then enable RVC in Advanced options. A second registered model can be blended through two inference passes. BetterTTS keeps the original files in place and records the selected model metadata on each converted clip; the optional Python 3.10 runtime and `rvc-python` package are installed only when you choose setup. If the package, runtime, or selected model is missing, the stage reports recovery guidance instead of silently falling back.
+
 The **Local OpenAI-compatible TTS server** is also desktop-only and starts only from **Voice chain -> Engine -> System & diagnostics**. It binds to `127.0.0.1` on the selected port (default `8765`) and exposes `GET /health`, `GET /v1/models`, and `POST /v1/audio/speech`. A minimal request is `{"input":"Hello","model":"kokoro","voice":"af_heart","response_format":"wav"}`; add `"stream":true` or `"stream_format":"sse"` for SSE events containing base64 audio chunks followed by `data: [DONE]`. Supported models are `kokoro`, `kokoro-82m`, `piper`, and `piper-plus`; the native provider currently maps Piper voices to English Cori. The server does not expose browser-only engines and never listens on a non-loopback interface.
 
 The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
@@ -164,6 +168,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via `qwen-tts` 0.1.1 + PyTorch sidecar |
 | Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
 | Sidecar runtime | Optional Windows-only Python 3.12 environment; `torch` and `qwen-tts` install into user data and model weights are downloaded on demand |
+| RVC post-stage | Optional Windows-only Python 3.10 environment; `rvc-python` and user-selected `.pth`/`.index` files remain outside the installer |
 | Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
 | Local API | Opt-in loopback-only Electron server for OpenAI-compatible speech requests, native Kokoro/Piper output, and SSE audio chunks |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
@@ -174,7 +179,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (374 tests across 64 files) + Playwright smoke |
+| Testing | Vitest (387 tests across 67 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -203,6 +208,7 @@ src/
 │   ├── whisper.ts            # whisper.cpp JSON word-cue parser and audio bounds
 │   ├── qwen.ts               # Optional desktop Qwen sidecar client and controls
 │   ├── byo-models.ts         # Consent-gated user-supplied weight metadata and provenance
+│   ├── rvc.ts                # Consent-gated RVC model metadata, blend plans, and provenance
 │   ├── piper-plus.ts        # Experimental Piper-plus lazy wrapper and support diagnostics
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
@@ -227,6 +233,8 @@ electron/
 ├── tts-host.ts               # Isolated Sherpa native inference host
 ├── sidecar-host.ts           # Isolated Python sidecar lifecycle and setup host
 ├── sidecar-ipc.ts            # Bounded Qwen sidecar protocol and model metadata
+├── rvc-host.ts               # Isolated optional RVC Python adapter host
+├── rvc-ipc.ts                # Bounded RVC conversion and weight-picker protocol
 ├── openai-server.ts          # Opt-in loopback OpenAI-compatible speech server
 ├── openai-ipc.ts             # Bounded local API lifecycle requests
 └── byo-ipc.ts                # Validated desktop local-weight selection request
@@ -236,6 +244,8 @@ electron/
 sidecar/
 ├── bettertts_sidecar.py      # JSON-lines supervisor and disposable inference worker
 ├── requirements-qwen.txt     # Optional post-install torch/qwen-tts requirements
+├── bettertts_rvc.py          # JSON-lines RVC adapter for user-managed models
+├── requirements-rvc.txt      # Optional rvc-python runtime requirement
 └── test_sidecar.py           # Protocol, bounds, cancellation, and test-mode coverage
 ```
 
@@ -246,6 +256,7 @@ sidecar/
 - Qwen3-TTS stays outside the browser bundle: Electron owns a private Python environment, the sidecar accepts bounded JSON-lines messages without opening a listener, and each synthesis runs in a disposable worker so cancellation or a crash cannot take down the desktop shell
 - Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
 - The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, bounds request/input/audio surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that closes the listener and active sockets
+- RVC is an explicit desktop-only post-stage: consent and model provenance are required, model paths are user-managed, optional blending performs two bounded inference passes, and converted clips retain the selected model metadata
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
 - Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages
@@ -327,6 +338,7 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro and Piper CPU utility-process runtime |
 | whisper.cpp Windows CLI and GGML model path | MIT | Optional desktop imported-audio word alignment; runtime is bundled, model weights are user-managed |
 | `qwen-tts`, Qwen3-TTS 0.6B model | Apache-2.0 | Optional Windows desktop sidecar; Python packages and model weights are user-managed and never bundled |
+| `rvc-python` | MIT | Optional Windows desktop RVC post-stage; package and model weights are user-managed and installed only after explicit setup |
 | User-supplied restricted/non-commercial weights | User-recorded terms | Consent-gated metadata registry only; BetterTTS does not download, copy, or activate these files by default |
 | Sherpa Kokoro int8 archive | Apache-2.0 | Pinned multilingual Kokoro model pack, downloaded on first native Kokoro load |
 | Sherpa Piper Cori archive | Public domain training data | Pinned English Cori model pack, downloaded on first native English Piper load |

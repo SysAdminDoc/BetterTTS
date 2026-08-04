@@ -2,6 +2,19 @@ import type { ByoModelOptionId } from './byo-models.ts'
 
 export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'qwen' | 'browser'
 
+export type PostStageId = 'rvc'
+
+export type PostStageDescriptor = {
+  id: PostStageId
+  label: string
+  desktopOnly: boolean
+  consentRequired: boolean
+}
+
+export const POST_STAGE_REGISTRY: PostStageDescriptor[] = [
+  { id: 'rvc', label: 'RVC voice conversion', desktopOnly: true, consentRequired: true },
+]
+
 export type EngineDescriptor = {
   id: EngineId
   label: string
@@ -39,6 +52,10 @@ export function visibleEngineDescriptors(flags: EngineFlags): EngineDescriptor[]
 
 export function engineQueueable(engineId: EngineId): boolean {
   return ENGINE_REGISTRY.find((engine) => engine.id === engineId)?.queueable === true
+}
+
+export function engineSupportsPostStage(engineId: EngineId, stage: PostStageId): boolean {
+  return stage === 'rvc' && engineId !== 'browser'
 }
 
 /** Restricted engines are cataloged only after the user has acknowledged the

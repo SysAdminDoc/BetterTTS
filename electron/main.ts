@@ -15,6 +15,7 @@ import { BYO_WEIGHTS_CHANNEL, validateByoWeightsRequest } from './byo-ipc.ts'
 import { validateNativeTtsRequest } from './native-ipc.ts'
 import { OPENAI_TTS_CHANNEL, validateOpenAiTtsRequest } from './openai-ipc.ts'
 import { createOpenAiTtsServer, type OpenAiSpeechRequest } from './openai-server.ts'
+import { RVC_CHANNEL, RVC_WEIGHTS_CHANNEL, validateRvcRequest, validateRvcWeightsRequest } from './rvc-ipc.ts'
 import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
@@ -133,12 +134,16 @@ const UPDATE_STATUS_CHANNEL = 'bettertts:update-status'
 const UPDATE_ACTION_CHANNEL = 'bettertts:update-action'
 const PROJECT_CHANNEL = 'bettertts:project'
 const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
+const RVC_MODEL_EXTENSIONS = new Set(['.pth'])
+const RVC_INDEX_EXTENSIONS = new Set(['.index'])
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
 let whisperHost: UtilityProcess | null = null
 let whisperHostSubscriber: WebContents | null = null
 let sidecarHost: UtilityProcess | null = null
 let sidecarHostSubscriber: WebContents | null = null
+let rvcHost: UtilityProcess | null = null
+let rvcHostSubscriber: WebContents | null = null
 let activeProjectPath: string | null = null
 let activeProjectIdentity: {
   revision: string
@@ -306,6 +311,58 @@ ipcMain.on(SIDECAR_CHANNEL, (event, message: unknown) => {
   ensureSidecarHost().postMessage(request)
 })
 
+// Optional RVC post-stage host (TF-120). Python, torch, and user-selected
+// weights stay outside the renderer and outside the installer payload.
+function sendToRvcSubscriber(message: unknown): void {
+  if (rvcHostSubscriber && !rvcHostSubscriber.isDestroyed()) {
+    rvcHostSubscriber.send(RVC_CHANNEL, message)
+  }
+}
+
+function ensureRvcHost(): UtilityProcess {
+  if (rvcHost) return rvcHost
+  const packagedSidecarRoot = app.isPackaged ? join(process.resourcesPath, 'sidecar') : join(__dirname, '..', 'sidecar')
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    BETTERTTS_RVC_DIR: join(app.getPath('userData'), 'rvc'),
+    BETTERTTS_RVC_SCRIPT: join(packagedSidecarRoot, 'bettertts_rvc.py'),
+    BETTERTTS_RVC_REQUIREMENTS: join(packagedSidecarRoot, 'requirements-rvc.txt'),
+  }
+  delete env.ELECTRON_RUN_AS_NODE
+  const host = utilityProcess.fork(join(__dirname, 'rvc-host.mjs'), [], {
+    serviceName: 'BetterTTS RVC voice conversion',
+    env: env as Record<string, string>,
+  })
+  host.on('message', (message) => sendToRvcSubscriber(message))
+  host.on('exit', () => {
+    if (rvcHost === host) {
+      rvcHost = null
+      sendToRvcSubscriber({ type: 'crashed', message: 'The RVC utility host stopped. Try again to restart it.' })
+    }
+  })
+  rvcHost = host
+  return host
+}
+
+ipcMain.on(RVC_CHANNEL, (event, message: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) return
+  const request = validateRvcRequest(message)
+  const candidate = message as { id?: unknown }
+  if (!request) {
+    if (Number.isSafeInteger(candidate?.id) && Number(candidate.id) >= 0) {
+      event.sender.send(RVC_CHANNEL, {
+        type: 'error',
+        id: Number(candidate.id),
+        code: 'failed',
+        message: 'Invalid RVC voice conversion request.',
+      })
+    }
+    return
+  }
+  rvcHostSubscriber = event.sender
+  ensureRvcHost().postMessage(request)
+})
+
 ipcMain.handle(BYO_WEIGHTS_CHANNEL, async (event, message: unknown) => {
   const owner = BrowserWindow.fromWebContents(event.sender)
   const request = validateByoWeightsRequest(message)
@@ -326,6 +383,30 @@ ipcMain.handle(BYO_WEIGHTS_CHANNEL, async (event, message: unknown) => {
     path: selectedPath,
     name: basename(selectedPath),
     kind: selected.isDirectory() ? 'directory' : 'file',
+  }
+})
+
+ipcMain.handle(RVC_WEIGHTS_CHANNEL, async (event, message: unknown) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  const request = validateRvcWeightsRequest(message)
+  if (!owner || !request) throw new Error('Invalid RVC model selection request.')
+  if (IS_SMOKE) return { canceled: true }
+  const isIndex = request.action === 'index'
+  const choice = await dialog.showOpenDialog(owner, {
+    title: isIndex ? 'Select optional RVC index file' : 'Select RVC model weights',
+    properties: ['openFile'],
+    filters: [{ name: isIndex ? 'RVC index files' : 'RVC model files', extensions: [isIndex ? 'index' : 'pth'] }],
+  })
+  const selectedPath = choice.filePaths[0]
+  if (choice.canceled || !selectedPath) return { canceled: true }
+  const selected = await stat(selectedPath)
+  const extension = extname(selectedPath).toLowerCase()
+  const allowed = (isIndex ? RVC_INDEX_EXTENSIONS : RVC_MODEL_EXTENSIONS).has(extension)
+  if (!selected.isFile() || !allowed) throw new Error(`Choose a local RVC ${isIndex ? '.index' : '.pth'} file.`)
+  return {
+    canceled: false,
+    path: selectedPath,
+    name: basename(selectedPath),
   }
 })
 
@@ -888,9 +969,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, openAiServer: !!window.betterttsPlatform.openAiServer }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, rvc: !!window.betterttsPlatform.rvc, rvcWeights: !!window.betterttsPlatform.rvcWeights, openAiServer: !!window.betterttsPlatform.openAiServer }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; openAiServer: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; rvc: boolean; rvcWeights: boolean; openAiServer: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -924,6 +1005,20 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         panel: !!panel,
         startAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Start server')),
         stoppedByDefault: panel?.querySelector('[role="status"]')?.textContent?.includes('Stopped') ?? false,
+      }
+    })()`)
+    result.rvcUi = await win.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector('[aria-label="RVC model registry"]')
+      panel?.scrollIntoView({ block: 'center' })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const consentInput = panel?.querySelector('#rvc-consent')
+      if (consentInput && !consentInput.checked) consentInput.click()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return {
+        panel: !!panel,
+        consent: consentInput?.checked ?? false,
+        registerAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Register RVC model')),
+        setupAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Set up RVC runtime')),
       }
     })()`)
     const openAiImage = await win.webContents.capturePage()
@@ -1004,6 +1099,28 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       result.sidecarStatusError = err instanceof Error ? err.message : String(err)
     }
 
+    try {
+      result.rvcStatus = await win.webContents.executeJavaScript(`(async () => {
+        const bridge = window.betterttsPlatform?.rvc
+        if (!bridge) return null
+        const id = 987654
+        return await Promise.race([
+          new Promise((resolve) => {
+            const unsubscribe = bridge.onMessage((message) => {
+              if (message && typeof message === 'object' && message.type === 'status' && message.id === id) {
+                unsubscribe()
+                resolve(message.status ?? null)
+              }
+            })
+            bridge.post({ type: 'status', id })
+          }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+      })()`)
+    } catch (err) {
+      result.rvcStatusError = err instanceof Error ? err.message : String(err)
+    }
+
     result.ok =
       probe.brand === 'BetterTTS' &&
       probe.railItems >= 5 &&
@@ -1012,6 +1129,8 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.platform?.whisper === true &&
       probe.platform?.sidecar === true &&
       probe.platform?.byoWeights === true &&
+      probe.platform?.rvc === true &&
+      probe.platform?.rvcWeights === true &&
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&
@@ -1023,6 +1142,10 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
       Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
       Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
+      Boolean((result.rvcUi as { panel?: boolean; consent?: boolean; registerAction?: boolean; setupAction?: boolean } | undefined)?.panel) &&
+      Boolean((result.rvcUi as { consent?: boolean } | undefined)?.consent) &&
+      Boolean((result.rvcUi as { registerAction?: boolean } | undefined)?.registerAction) &&
+      Boolean((result.rvcUi as { setupAction?: boolean } | undefined)?.setupAction) &&
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.saved) &&
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.opened) &&
       JSON.stringify((result.projectIo as { bytes?: number[] } | undefined)?.bytes) === '[80,75,3,4,5]' &&
