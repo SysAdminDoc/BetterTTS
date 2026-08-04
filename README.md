@@ -204,7 +204,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (450 tests across 76 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (457 tests across 79 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -212,11 +212,14 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 
 ```
 src/
-├── App.tsx                  # App shell, state, UI
+├── App.tsx                  # Public renderer entrypoint
+├── AppShell.tsx             # Studio controller and current UI composition
 ├── App.css                  # Layout and component styles
 ├── index.css                # Design tokens, dark/light themes
 ├── main.tsx                 # React entry point + SW registration
 ├── lib/
+│   ├── generation-dispatcher.ts # Abort-aware sentence plans, cues, and progress
+│   ├── object-urls.ts        # Output/caption blob URL ownership
 │   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
 │   ├── engine-registry.ts   # Engine capability flags and queue boundaries
 │   ├── kokoro-assets.ts     # Pages-hosted q8 asset routing + HF fallback
@@ -249,6 +252,10 @@ src/
 │   ├── subtitles.ts         # SRT/VTT serializers
 │   ├── queue.ts             # IndexedDB persistent generation queue
 │   └── library.ts           # IndexedDB clip storage
+├── hooks/
+│   ├── useGeneration.ts      # Generation lifecycle state and cancellation refs
+│   ├── useQueue.ts           # Queue state boundary
+│   └── useLibrary.ts         # Library state boundary
 ├── worker/
 │   ├── tts.worker.ts         # Off-thread Kokoro inference
 │   └── chatterbox.worker.ts  # Off-thread Chatterbox inference and speaker cache
