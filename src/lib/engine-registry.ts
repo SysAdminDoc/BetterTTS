@@ -1,3 +1,5 @@
+import type { ByoModelOptionId } from './byo-models.ts'
+
 export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'qwen' | 'browser'
 
 export type EngineDescriptor = {
@@ -37,4 +39,10 @@ export function visibleEngineDescriptors(flags: EngineFlags): EngineDescriptor[]
 
 export function engineQueueable(engineId: EngineId): boolean {
   return ENGINE_REGISTRY.find((engine) => engine.id === engineId)?.queueable === true
+}
+
+/** Restricted engines are cataloged only after the user has acknowledged the
+ * license gate and registered a local weight location. */
+export function visibleUserSuppliedEngines(consent: boolean, modelIds: readonly ByoModelOptionId[]): ByoModelOptionId[] {
+  return consent ? [...new Set(modelIds)] : []
 }

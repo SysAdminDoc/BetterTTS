@@ -69,6 +69,15 @@ export type SidecarBridge = {
   onMessage: (listener: (message: unknown) => void) => () => void
 }
 
+export type ByoWeightsBridge = {
+  choose: (modelId: string) => Promise<{
+    canceled: boolean
+    path?: string
+    name?: string
+    kind?: 'file' | 'directory'
+  }>
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -79,6 +88,7 @@ export type DesktopBridge = {
   ffmpeg?: DesktopFfmpegBridge
   whisper?: WhisperBridge
   sidecar?: SidecarBridge
+  byoWeights?: ByoWeightsBridge
 }
 
 declare global {
@@ -132,4 +142,9 @@ export function getWhisperBridge(): WhisperBridge | null {
 export function getSidecarBridge(): SidecarBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.sidecar ?? null
+}
+
+export function getByoWeightsBridge(): ByoWeightsBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.byoWeights ?? null
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   engineQueueable,
+  visibleUserSuppliedEngines,
   visibleEngineDescriptors,
 } from './engine-registry.ts'
 
@@ -25,5 +26,10 @@ describe('engine registry', () => {
     expect(engineQueueable('piper')).toBe(true)
     expect(engineQueueable('chatterbox')).toBe(false)
     expect(engineQueueable('browser')).toBe(false)
+  })
+
+  it('keeps registered non-commercial engines hidden until consent', () => {
+    expect(visibleUserSuppliedEngines(false, ['f5-tts', 'xtts-v2'])).toEqual([])
+    expect(visibleUserSuppliedEngines(true, ['f5-tts', 'f5-tts', 'xtts-v2'])).toEqual(['f5-tts', 'xtts-v2'])
   })
 })

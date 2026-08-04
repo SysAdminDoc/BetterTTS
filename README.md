@@ -5,9 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-357%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-366%20passing-53d889.svg)](#)
 
-**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, and optional desktop Qwen3-TTS run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
+**Private local text-to-speech studio for web and Windows.** Kokoro 82M, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, and optional desktop Qwen3-TTS run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
@@ -142,6 +142,8 @@ Desktop audio captioning is available from the generated-output panel. `npm run 
 
 Qwen3-TTS is available only in the Windows desktop app. Select it under Voice chain -> Engine to inspect the sidecar status, then choose **Set up Qwen3-TTS** when the private Python 3.12 environment is not installed. Setup downloads `torch` and `qwen-tts` into the desktop user-data folder; the 0.6B model weights download on first synthesis into `models/qwen/` and are never bundled in the installer. A disposable worker isolates inference and reports setup, progress, cancellation, and crash recovery. The web/PWA build remains unchanged when the desktop bridge is absent.
 
+The **Bring-your-own weights** panel is disabled by default and is available in the Windows desktop app after an explicit non-commercial/restricted-terms acknowledgement. Choose a local file or directory for F5-TTS, XTTS-v2, Fish/OpenAudio S1, Higgs Audio, MaskGCT, Silero, or another compatible model, then record its exact license and provenance. BetterTTS stores only that metadata and the selected path, never downloads or copies the weights, and keeps registered models adapter-gated rather than silently activating them. Unchecking the acknowledgement hides the registered models until it is enabled again.
+
 The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
@@ -159,6 +161,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via `qwen-tts` 0.1.1 + PyTorch sidecar |
 | Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
 | Sidecar runtime | Optional Windows-only Python 3.12 environment; `torch` and `qwen-tts` install into user data and model weights are downloaded on demand |
+| Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
 | M4B Export | WebCodecs AAC preflight + direct ISO BMFF writer with QuickTime/Nero chapter metadata |
@@ -167,7 +170,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (357 tests across 58 files) + Playwright smoke |
+| Testing | Vitest (366 tests across 61 files) + Playwright smoke |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -195,6 +198,7 @@ src/
 │   ├── chatterbox-config.ts # Chatterbox model IDs, languages, limits, and controls
 │   ├── whisper.ts            # whisper.cpp JSON word-cue parser and audio bounds
 │   ├── qwen.ts               # Optional desktop Qwen sidecar client and controls
+│   ├── byo-models.ts         # Consent-gated user-supplied weight metadata and provenance
 │   ├── piper-plus.ts        # Experimental Piper-plus lazy wrapper and support diagnostics
 │   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
@@ -218,7 +222,8 @@ electron/
 ├── whisper-ipc.ts            # Bounded desktop caption IPC protocol
 ├── tts-host.ts               # Isolated Sherpa native inference host
 ├── sidecar-host.ts           # Isolated Python sidecar lifecycle and setup host
-└── sidecar-ipc.ts            # Bounded Qwen sidecar protocol and model metadata
+├── sidecar-ipc.ts            # Bounded Qwen sidecar protocol and model metadata
+└── byo-ipc.ts                # Validated desktop local-weight selection request
 ```
 
 ```
@@ -233,6 +238,7 @@ sidecar/
 - Word-level SRT/VTT is opt-in and uses the HF-hosted `Kokoro-82M-v1.0-ONNX-timestamped` q8 graph plus duration-output alignment
 - Desktop imported-audio word-level SRT/VTT uses whisper.cpp `-ml 1 -sow` forced alignment; the CLI is pinned and bundled by the Windows build, while `ggml-base.bin` remains a user-managed multilingual model
 - Qwen3-TTS stays outside the browser bundle: Electron owns a private Python environment, the sidecar accepts bounded JSON-lines messages without opening a listener, and each synthesis runs in a disposable worker so cancellation or a crash cannot take down the desktop shell
+- Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
 - Service worker injects COOP/COEP headers to enable SharedArrayBuffer for threaded WASM on GitHub Pages
@@ -314,6 +320,7 @@ BetterTTS application code is MIT. Runtime dependencies and model paths carry th
 | `sherpa-onnx-node`, `sherpa-onnx-win-x64` | Apache-2.0 | Windows native Kokoro and Piper CPU utility-process runtime |
 | whisper.cpp Windows CLI and GGML model path | MIT | Optional desktop imported-audio word alignment; runtime is bundled, model weights are user-managed |
 | `qwen-tts`, Qwen3-TTS 0.6B model | Apache-2.0 | Optional Windows desktop sidecar; Python packages and model weights are user-managed and never bundled |
+| User-supplied restricted/non-commercial weights | User-recorded terms | Consent-gated metadata registry only; BetterTTS does not download, copy, or activate these files by default |
 | Sherpa Kokoro int8 archive | Apache-2.0 | Pinned multilingual Kokoro model pack, downloaded on first native Kokoro load |
 | Sherpa Piper Cori archive | Public domain training data | Pinned English Cori model pack, downloaded on first native English Piper load |
 | Supertonic ONNX model | OpenRAIL | HF-hosted English speed engine |

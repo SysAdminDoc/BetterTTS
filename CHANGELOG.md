@@ -15,6 +15,7 @@
 - Added an explicit opt-in Chatterbox voice lab. English and 23-language multilingual ONNX variants run in a dedicated lazy worker, accept a bounded in-memory reference clip, reuse its speaker embedding across sentences, expose the emotion exaggeration control, prefer WebGPU with a visible CPU-slow fallback, and disclose the model's retained PerTh watermark. Chatterbox remains direct-only and never enters the persistent queue.
 - Added desktop imported-audio captioning through a pinned whisper.cpp v1.9.1 Windows x64 runtime. The isolated host converts bounded audio to temporary 16 kHz mono WAV, creates multilingual word cues with `-ml 1 -sow`, exposes synchronized playback, and downloads SRT/VTT; missing runtime/model recovery is explicit and model weights stay user-managed.
 - Added an optional Windows-only Qwen3-TTS 0.6B CustomVoice engine through an isolated Python sidecar. The desktop UI can provision a private Python 3.12 environment, then lazily download `torch`, `qwen-tts`, and model weights into user data; sidecar setup, progress, cancellation, and crash recovery stay on the same bounded desktop bridge while web/PWA mode remains unchanged.
+- Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 
 ### Fixed
 - Persisted queue jobs now recover bounded engine settings, formats, timestamps, chunk indexes, and subtitle cues instead of propagating malformed values after restart.
@@ -37,6 +38,7 @@
 - Added Chatterbox language/model selection, reference-clip bounds, prompt-prefix, resampling, cache classification, consent visibility, and non-queueable engine coverage.
 - Added whisper.cpp JSON word-cue, timestamp, language, resampling, runtime-guidance, and bounded IPC coverage, plus Electron smoke status for the caption host.
 - Added Qwen sidecar IPC/client coverage and Python protocol tests for bounds, deterministic test-mode audio, cancellation, progress, and status recovery.
+- Added BYO metadata schema, consent/visibility, provenance bounds, desktop picker IPC, and web-bridge isolation coverage.
 
 ## v0.21.0 - 2026-07-29
 

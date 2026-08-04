@@ -1611,6 +1611,109 @@ ul.queue-chunk-list > li {
   accent-color: var(--accent);
 }
 
+.byo-panel {
+  background: color-mix(in srgb, var(--warning) 4%, var(--surface-1));
+}
+
+.byo-panel .toggle-row {
+  margin: 2px 0 4px;
+}
+
+.byo-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.byo-options,
+.byo-records,
+.byo-draft {
+  display: grid;
+  gap: 7px;
+}
+
+.byo-option,
+.byo-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-2) 52%, var(--surface-1));
+}
+
+.byo-option > span,
+.byo-record > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.byo-option strong,
+.byo-record strong,
+.byo-draft > strong {
+  color: var(--heading);
+  font-size: 11.5px;
+}
+
+.byo-option small,
+.byo-record small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.byo-option button,
+.byo-record button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.byo-draft {
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning) 5%, var(--surface-1));
+}
+
+.byo-draft label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.byo-draft input,
+.byo-draft textarea {
+  min-width: 0;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.byo-draft input:focus-visible,
+.byo-draft textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .cache-manager,
 .diagnostics-panel {
   display: grid;

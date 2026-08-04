@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, utilityProcess } from 'electron'
 import type { UtilityProcess, WebContents } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import {
   ProjectConflictError,
@@ -9,6 +9,8 @@ import {
   writeProjectFile,
 } from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
+import { getByoModelOption } from '../src/lib/byo-models.ts'
+import { BYO_WEIGHTS_CHANNEL, validateByoWeightsRequest } from './byo-ipc.ts'
 import { validateNativeTtsRequest } from './native-ipc.ts'
 import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
@@ -299,6 +301,29 @@ ipcMain.on(SIDECAR_CHANNEL, (event, message: unknown) => {
   }
   sidecarHostSubscriber = event.sender
   ensureSidecarHost().postMessage(request)
+})
+
+ipcMain.handle(BYO_WEIGHTS_CHANNEL, async (event, message: unknown) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  const request = validateByoWeightsRequest(message)
+  if (!owner || !request) throw new Error('Invalid bring-your-own weights request.')
+  if (IS_SMOKE) return { canceled: true }
+
+  const option = getByoModelOption(request.modelId)
+  const choice = await dialog.showOpenDialog(owner, {
+    title: `Select self-supplied ${option.label} weights`,
+    properties: ['openFile', 'openDirectory'],
+  })
+  const selectedPath = choice.filePaths[0]
+  if (choice.canceled || !selectedPath) return { canceled: true }
+  const selected = await stat(selectedPath)
+  if (!selected.isFile() && !selected.isDirectory()) throw new Error('The selected weights path is not a file or directory.')
+  return {
+    canceled: false,
+    path: selectedPath,
+    name: basename(selectedPath),
+    kind: selected.isDirectory() ? 'directory' : 'file',
+  }
 })
 
 type UpdateStatus = {
@@ -727,9 +752,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -831,6 +856,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean(probe.platform) &&
       probe.platform?.whisper === true &&
       probe.platform?.sidecar === true &&
+      probe.platform?.byoWeights === true &&
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&

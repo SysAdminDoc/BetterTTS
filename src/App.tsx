@@ -38,8 +38,22 @@ import {
   EXPERIMENTAL_CHATTERBOX_STORAGE_KEY,
   EXPERIMENTAL_PIPER_STORAGE_KEY,
   engineQueueable,
+  visibleUserSuppliedEngines,
   type EngineId,
 } from './lib/engine-registry.ts'
+import {
+  BYO_CONSENT_STORAGE_KEY,
+  BYO_MODEL_OPTIONS,
+  BYO_MODELS_STORAGE_KEY,
+  createByoModelRecord,
+  parseByoConsent,
+  parseByoModelRecords,
+  removeByoModelRecord,
+  serializeByoModelRecords,
+  upsertByoModelRecord,
+  type ByoModelOptionId,
+  type ByoModelRecord,
+} from './lib/byo-models.ts'
 import { type AudioFormat, encodeAudio, formatExtension, formatFromFilename, formatMime, mixBgm, opusSupported, shiftPitch } from './lib/encode.ts'
 import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
@@ -58,6 +72,7 @@ import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
 import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
+import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
 import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesizeQwen, QWEN_LANGUAGES, QWEN_MODEL_ID, QWEN_SPEAKERS, type QwenLanguage, type QwenSpeaker, type SidecarStatus } from './platform/qwen.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
@@ -156,6 +171,13 @@ const waveformCache = new Map<string, number[]>()
 type Engine = EngineId
 type Theme = 'dark' | 'light'
 type NavSection = 'studio' | 'models' | 'docs'
+
+type ByoDraft = {
+  modelId: ByoModelOptionId
+  license: string
+  provenance: string
+  sourceUrl: string
+}
 
 type QueueSourceChunk = {
   text: string
@@ -281,6 +303,24 @@ function getInitialChatterboxConsent(): boolean {
     return window.localStorage.getItem(EXPERIMENTAL_CHATTERBOX_STORAGE_KEY) === '1'
   } catch {
     return false
+  }
+}
+
+function getInitialByoConsent(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return parseByoConsent(window.localStorage.getItem(BYO_CONSENT_STORAGE_KEY))
+  } catch {
+    return false
+  }
+}
+
+function getInitialByoModels(): ByoModelRecord[] {
+  if (typeof window === 'undefined') return []
+  try {
+    return parseByoModelRecords(window.localStorage.getItem(BYO_MODELS_STORAGE_KEY))
+  } catch {
+    return []
   }
 }
 
@@ -1124,6 +1164,10 @@ function App() {
   const [piperLanguage, setPiperLanguage] = useState<PiperPlusLanguage>('ja')
   const [experimentalPiperEnabled, setExperimentalPiperEnabled] = useState(getInitialPiperFlag)
   const [chatterboxConsent, setChatterboxConsent] = useState(getInitialChatterboxConsent)
+  const [byoConsent, setByoConsent] = useState(getInitialByoConsent)
+  const [byoModels, setByoModels] = useState<ByoModelRecord[]>(getInitialByoModels)
+  const [byoDraft, setByoDraft] = useState<ByoDraft | null>(null)
+  const [byoAction, setByoAction] = useState<string | null>(null)
   const [chatterboxModel, setChatterboxModel] = useState<ChatterboxModelVariant>('multilingual')
   const [chatterboxLanguageId, setChatterboxLanguageId] = useState<ChatterboxLanguageId>('en')
   const [chatterboxExaggeration, setChatterboxExaggeration] = useState(CHATTERBOX_DEFAULT_EXAGGERATION)
@@ -1313,6 +1357,8 @@ function App() {
   const wordCount = useMemo(() => text.trim().split(/\s+/).filter(Boolean).length, [text])
   const lineCount = useMemo(() => text.split(/\r?\n/).length, [text])
   const cacheRows = modelCache?.engines ?? []
+  const visibleByoIds = useMemo(() => new Set(visibleUserSuppliedEngines(byoConsent, byoModels.map((record) => record.modelId))), [byoConsent, byoModels])
+  const visibleByoModels = useMemo(() => byoModels.filter((record) => visibleByoIds.has(record.modelId)), [byoModels, visibleByoIds])
   const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
   const m4bExportReady = ffmpegStatus?.available === true || m4bCapability?.supported === true
   const crossOriginStorage = useMemo(() => detectCrossOriginStorage(), [])
@@ -1322,6 +1368,7 @@ function App() {
   const desktopProjects = useMemo(() => getDesktopProjectBridge(), [])
   const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
   const desktopSidecar = useMemo(() => qwenSidecarAvailable(), [])
+  const desktopByoWeights = useMemo(() => byoWeightsAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
   const visibleQueueJobs = useMemo(() => normalizedProjectSearch
     ? queueJobs.filter((job) =>
@@ -1549,6 +1596,15 @@ function App() {
     persistSetting(EXPERIMENTAL_CHATTERBOX_STORAGE_KEY, chatterboxConsent ? '1' : '0')
     if (!chatterboxConsent && engine === 'chatterbox') setEngine('kokoro')
   }, [chatterboxConsent, engine])
+
+  useEffect(() => {
+    persistSetting(BYO_CONSENT_STORAGE_KEY, byoConsent ? '1' : '0')
+    if (!byoConsent) setByoDraft(null)
+  }, [byoConsent])
+
+  useEffect(() => {
+    persistSetting(BYO_MODELS_STORAGE_KEY, serializeByoModelRecords(byoModels))
+  }, [byoModels])
 
   useEffect(() => {
     if (forceNative) {
@@ -2208,6 +2264,47 @@ function App() {
       setQwenSetupBusy(false)
       setQwenSetupProgress(0)
     }
+  }
+
+  async function handleChooseByoWeights() {
+    if (!byoConsent || !desktopByoWeights || !byoDraft || byoAction !== null) return
+    const license = byoDraft.license.trim()
+    const provenance = byoDraft.provenance.trim()
+    if (!license || !provenance) {
+      showToast({ tone: 'warn', message: 'Record the exact weight license and provenance before choosing the files.' })
+      return
+    }
+    setByoAction(`choose-${byoDraft.modelId}`)
+    try {
+      const selection = await chooseByoWeights(byoDraft.modelId)
+      if (selection.canceled || !selection.path || !selection.kind) {
+        setByoAction(null)
+        return
+      }
+      const record = createByoModelRecord({
+        modelId: byoDraft.modelId,
+        weightsPath: selection.path,
+        selectionKind: selection.kind,
+        license,
+        provenance,
+        sourceUrl: byoDraft.sourceUrl.trim(),
+        acknowledgedAt: new Date().toISOString(),
+      })
+      setByoModels((current) => upsertByoModelRecord(current, record))
+      setByoDraft(null)
+      showToast({ tone: 'ok', message: `${record.modelName} weights registered. BetterTTS will not download or activate them automatically.` })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not register the selected weights.' })
+    } finally {
+      setByoAction(null)
+    }
+  }
+
+  function handleRemoveByoModel(recordId: string) {
+    if (byoAction !== null) return
+    setByoModels((current) => removeByoModelRecord(current, recordId))
+    if (byoDraft && byoModels.find((record) => record.id === recordId)?.modelId === byoDraft.modelId) setByoDraft(null)
+    showToast({ tone: 'ok', message: 'Self-supplied weight registration removed. The original files were not changed.' })
   }
 
   function openWorkspacePanel(target: typeof WORKSPACE_TABS[number][0]) {
@@ -4753,6 +4850,111 @@ function App() {
                     <small>Opt in to local reference-voice cloning. Use only audio you own or have permission to use; clips are decoded in memory and never uploaded.</small>
                   </span>
                 </label>
+                <div className="diagnostics-panel byo-panel" aria-label="Bring-your-own non-commercial weights">
+                  <div className="cache-manager-head">
+                    <span>
+                      <strong>Bring-your-own weights</strong>
+                      <small>Restricted and non-commercial checkpoints are hidden until you explicitly acknowledge their terms.</small>
+                    </span>
+                  </div>
+                  <label className="toggle-row experimental-engine-toggle" htmlFor="byo-consent" aria-label="I understand the non-commercial weight gate">
+                    <input
+                      id="byo-consent"
+                      type="checkbox"
+                      checked={byoConsent}
+                      onChange={(event) => setByoConsent(event.target.checked)}
+                    />
+                    <span>
+                      <strong>I understand the non-commercial weight gate</strong>
+                      <small>Only register weights you are allowed to use. You must record the exact license and where the files came from. BetterTTS never downloads or copies these files.</small>
+                    </span>
+                  </label>
+                  {byoConsent ? (
+                    <>
+                      {!desktopByoWeights ? <p className="byo-note">Selecting local weight paths is available in the Windows desktop app. The web/PWA build does not expose or download restricted model files.</p> : null}
+                      <div className="byo-options">
+                        {BYO_MODEL_OPTIONS.map((option) => {
+                          const registered = byoModels.filter((record) => record.modelId === option.id).length
+                          return (
+                            <div className="byo-option" key={option.id}>
+                              <span>
+                                <strong>{option.label}</strong>
+                                <small>{option.hint}{registered > 0 ? ` ${registered} location${registered === 1 ? '' : 's'} registered.` : ''}</small>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setByoDraft({ modelId: option.id, license: '', provenance: '', sourceUrl: '' })}
+                                disabled={!desktopByoWeights || byoAction !== null}
+                              >
+                                {registered > 0 ? 'Register another' : 'Choose weights'}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {byoDraft ? (
+                        <div className="byo-draft" aria-label={`Register ${BYO_MODEL_OPTIONS.find((option) => option.id === byoDraft.modelId)?.label ?? 'weights'}`}>
+                          <strong>Record provenance before choosing the files</strong>
+                          <label>
+                            Exact license or terms
+                            <input
+                              value={byoDraft.license}
+                              maxLength={200}
+                              placeholder="Example: CC-BY-NC-4.0; verify this checkpoint release"
+                              onChange={(event) => setByoDraft((current) => current ? { ...current, license: event.target.value } : current)}
+                            />
+                          </label>
+                          <label>
+                            Provenance note
+                            <textarea
+                              value={byoDraft.provenance}
+                              maxLength={600}
+                              rows={2}
+                              placeholder="Upstream URL, release or commit, and why you are allowed to use these weights"
+                              onChange={(event) => setByoDraft((current) => current ? { ...current, provenance: event.target.value } : current)}
+                            />
+                          </label>
+                          <label>
+                            Source URL <span className="field-hint">optional</span>
+                            <input
+                              type="url"
+                              value={byoDraft.sourceUrl}
+                              maxLength={2048}
+                              placeholder="https://…"
+                              onChange={(event) => setByoDraft((current) => current ? { ...current, sourceUrl: event.target.value } : current)}
+                            />
+                          </label>
+                          <div className="diagnostics-actions">
+                            <button type="button" onClick={() => void handleChooseByoWeights()} disabled={byoAction !== null || !byoDraft.license.trim() || !byoDraft.provenance.trim()}>
+                              {byoAction ? <Loader2 size={13} aria-hidden="true" /> : <Upload size={13} aria-hidden="true" />}
+                              {byoAction ? 'Choosing…' : 'Choose local weights'}
+                            </button>
+                            <button type="button" onClick={() => setByoDraft(null)} disabled={byoAction !== null}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {byoModels.length > 0 ? (
+                        <div className="byo-records" aria-label="Registered self-supplied weights">
+                          <strong>Registered locations</strong>
+                          {byoModels.map((record) => (
+                            <div className="byo-record" key={record.id}>
+                              <span>
+                                <strong>{record.modelName}</strong>
+                                <small>License: {record.license}</small>
+                                <small>Provenance: {record.provenance}</small>
+                                <small>Path: {shortUiLabel(record.weightsPath, 110)} ({record.selectionKind})</small>
+                                {record.sourceUrl ? <small>Source: {shortUiLabel(record.sourceUrl, 110)}</small> : null}
+                              </span>
+                              <button type="button" onClick={() => handleRemoveByoModel(record.id)} disabled={byoAction !== null}>Remove</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <small className="byo-note">The restricted model catalog and all registered locations stay inactive until this acknowledgement is enabled.</small>
+                  )}
+                </div>
                 <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>
@@ -5755,7 +5957,13 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {MODEL_ROWS.map((row) => (
+                {[...MODEL_ROWS, ...visibleByoModels.map((record) => [
+                  record.modelName,
+                  'User-supplied weights',
+                  'Local',
+                  shortUiLabel(record.provenance, 72),
+                  'Registered — adapter gated',
+                ])].map((row) => (
                   <tr key={row[0]}>
                     {row.map((cell, index) => (
                       <td key={cell} className={index === 4 ? `status-cell ${modelStatusClass(cell)}` : undefined}>
@@ -5784,6 +5992,13 @@ function App() {
                   {RUNTIME_LICENSE_ROWS.map((row) => (
                     <tr key={row[0]}>
                       {row.map((cell) => <td key={cell}>{cell}</td>)}
+                    </tr>
+                  ))}
+                  {visibleByoModels.map((record) => (
+                    <tr key={`byo-license-${record.id}`}>
+                      <td>{record.modelName} user weights</td>
+                      <td>{record.license}</td>
+                      <td>{record.provenance}</td>
                     </tr>
                   ))}
                 </tbody>

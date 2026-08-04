@@ -7,6 +7,7 @@ const PROJECT_CHANNEL = 'bettertts:project'
 const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 const WHISPER_CHANNEL = 'bettertts:whisper'
 const SIDECAR_CHANNEL = 'bettertts:sidecar'
+const BYO_WEIGHTS_CHANNEL = 'bettertts:byo-weights'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -93,6 +94,11 @@ const bridge = {
       return () => {
         ipcRenderer.removeListener(SIDECAR_CHANNEL, handler)
       }
+    },
+  },
+  byoWeights: {
+    choose(modelId: string): Promise<unknown> {
+      return ipcRenderer.invoke(BYO_WEIGHTS_CHANNEL, { modelId })
     },
   },
 }
