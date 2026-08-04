@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-485%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-487%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -96,7 +96,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer “Convert to audiobook” entries for TXT/EPUB/PDF/DOCX, and optional Tesseract screen OCR; all three integrations are independently disableable and the web/PWA build remains unchanged
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis
-- **Voice preview** — one-click preview for each voice with session-cached audio
+- **Voice preview** — one-click preview for each voice with a bounded 20-entry session LRU cache and object-URL disposal
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
 - **Generation stats** — elapsed time, time to first audio, chars/s throughput, audio duration, realtime speed factor
 - **Cancel button** — abort generation mid-run, keep partial results
@@ -108,7 +108,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
-- **Installable PWA** with service worker for offline app shell and per-build cache versioning
+- **Installable PWA** with service worker for offline app shell, per-build cache versioning, and desktop/mobile install screenshots
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
@@ -133,6 +133,9 @@ npm run dev
 
 # Run tests
 npm test
+
+# Verify runtime license coverage
+npm run license:runtime
 
 # Local rendered smoke check
 npm run smoke
@@ -161,7 +164,7 @@ Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON*
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
-Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
+Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, PWA screenshot manifest assets, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
@@ -211,7 +214,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (485 tests across 81 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (487 tests across 82 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

@@ -39,6 +39,23 @@ function runChecked(name, args) {
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
+async function assertManifestScreenshots() {
+  const manifest = JSON.parse(await readFile(join(distDir, 'manifest.webmanifest'), 'utf8'))
+  if (!Array.isArray(manifest.screenshots) || manifest.screenshots.length < 2) {
+    throw new Error('PWA manifest must declare desktop and mobile screenshots.')
+  }
+  for (const screenshot of manifest.screenshots) {
+    if (typeof screenshot.src !== 'string' || !screenshot.src.startsWith('screenshots/')) {
+      throw new Error(`PWA screenshot path is invalid: ${String(screenshot.src)}`)
+    }
+    if (screenshot.type !== 'image/png' || typeof screenshot.sizes !== 'string' || !/^\d+x\d+$/u.test(screenshot.sizes)) {
+      throw new Error(`PWA screenshot metadata is invalid: ${JSON.stringify(screenshot)}`)
+    }
+    const info = await stat(join(distDir, screenshot.src))
+    if (!info.isFile() || info.size < 10_000) throw new Error(`PWA screenshot is missing or empty: ${screenshot.src}`)
+  }
+}
+
 function makeDocxUpload() {
   const documentXml = `<?xml version="1.0"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -622,6 +639,7 @@ async function runRealEngineChecks(browser) {
 async function runSmoke() {
   console.log('Building production app...')
   runChecked('npm', ['run', 'build'])
+  await assertManifestScreenshots()
   if (existsSync(smokeDir)) rmSync(smokeDir, { recursive: true, force: true })
   mkdirSync(smokeDir, { recursive: true })
   console.log(`Starting smoke server at ${baseUrl}`)

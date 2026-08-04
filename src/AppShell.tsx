@@ -245,6 +245,7 @@ import type { ReaderAudioTrack } from './components/ReaderView.tsx'
 import type { EpubMappingVoiceOption } from './components/EpubMappingPanel.tsx'
 
 const APP_VERSION = '0.22.0'
+const PREVIEW_CACHE_MAX_ENTRIES = 20
 const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
 const MELO_MODEL_REVISION = 'af5d207a364ea4208c6f589c89f57f88414bdd16'
 const MELO_SAMPLE_RATE = 44_100
@@ -4228,7 +4229,7 @@ function App() {
       if (preview) {
         const blob = new Blob([encodeWav(preview.samples, preview.sampleRate)], { type: 'audio/wav' })
         const url = URL.createObjectURL(blob)
-        writeLruEntry(previewCacheRef.current, id, url, 12, (staleUrl) => URL.revokeObjectURL(staleUrl))
+        writeLruEntry(previewCacheRef.current, id, url, PREVIEW_CACHE_MAX_ENTRIES, (staleUrl) => URL.revokeObjectURL(staleUrl))
         const player = new Audio(url)
         await player.play()
         refreshModelCacheStatus().catch(() => {})
