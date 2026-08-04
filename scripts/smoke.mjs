@@ -709,6 +709,22 @@ async function runSmoke() {
     if (!(await trainerStatus.innerText()).includes('1.00x now')) throw new Error('Listening trainer indicator did not show the active rate')
     await desktop.page.getByRole('button', { name: 'Reset trainer progress' }).click()
     await trainerToggle.uncheck()
+    const optionalPlaybackSurfaces = await desktop.page.evaluate(() => ({
+      documentPictureInPicture: Boolean(window.documentPictureInPicture),
+      audioOutput: Boolean(navigator.mediaDevices?.selectAudioOutput && typeof document.createElement('audio').setSinkId === 'function'),
+    }))
+    const miniPlayerTrigger = desktop.page.getByTestId('mini-player-trigger')
+    const audioOutputPicker = desktop.page.getByTestId('audio-output-picker')
+    if (optionalPlaybackSurfaces.documentPictureInPicture) {
+      await miniPlayerTrigger.waitFor({ timeout: 20000 })
+    } else if (await miniPlayerTrigger.count() !== 0) {
+      throw new Error('Document Picture-in-Picture control rendered without browser support')
+    }
+    if (optionalPlaybackSurfaces.audioOutput) {
+      await audioOutputPicker.waitFor({ timeout: 20000 })
+    } else if (await audioOutputPicker.count() !== 0) {
+      throw new Error('Audio output picker rendered without browser support')
+    }
     const commaPause = desktop.page.getByLabel('Comma pause duration in seconds')
     await commaPause.waitFor({ timeout: 20000 })
     await commaPause.fill('0.25')
@@ -913,6 +929,27 @@ async function runSmoke() {
     await queueChunks.getByRole('button', { name: 'Play' }).first().click()
     await queueChunks.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await queueChunks.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
+    if (optionalPlaybackSurfaces.documentPictureInPicture) {
+      await outputTab.click()
+      await miniPlayerTrigger.waitFor({ state: 'visible', timeout: 20000 })
+      await miniPlayerTrigger.click()
+      await desktop.page.locator('[data-testid="mini-player-trigger"][aria-label="Close mini player"]').waitFor({ timeout: 20000 })
+      const pipSurface = await desktop.page.evaluate(() => {
+        const pipWindow = window.documentPictureInPicture?.window
+        return {
+          available: Boolean(pipWindow),
+          hasPrevious: Boolean(pipWindow?.document.querySelector('[aria-label="Previous sentence"]')),
+          hasNext: Boolean(pipWindow?.document.querySelector('[aria-label="Next sentence"]')),
+          hasHighlight: Boolean(pipWindow?.document.querySelector('.mini-player-cue')?.textContent?.trim()),
+        }
+      })
+      if (!pipSurface.available || !pipSurface.hasPrevious || !pipSurface.hasNext || !pipSurface.hasHighlight) {
+        throw new Error(`Document Picture-in-Picture transport did not render correctly: ${JSON.stringify(pipSurface)}`)
+      }
+      await desktop.page.evaluate(() => window.documentPictureInPicture?.window?.close())
+      await desktop.page.locator('[data-testid="mini-player-trigger"][aria-label="Open mini player"]').waitFor({ timeout: 20000 })
+      await desktop.page.getByRole('tab', { name: /Queue/ }).click()
+    }
     await queueChunks.getByText(/Resumed at/).waitFor({ timeout: 20000 })
     await queueChunks.getByRole('button', { name: 'Edit' }).first().click()
     const chunkEditor = queueChunks.locator('.queue-chunk-editor').first()

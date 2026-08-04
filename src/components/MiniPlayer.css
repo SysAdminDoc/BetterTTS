@@ -1,0 +1,104 @@
+.mini-player {
+  display: grid;
+  gap: 13px;
+  min-width: 320px;
+  min-height: 100vh;
+  padding: 18px;
+  color: var(--text);
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 17%, transparent), transparent 52%), var(--bg-strong);
+  font-family: var(--sans);
+}
+
+.mini-player-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mini-player-header > div {
+  min-width: 0;
+}
+
+.mini-player-kicker {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent-text);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mini-player-header strong {
+  display: block;
+  overflow: hidden;
+  color: var(--heading);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-player-close,
+.mini-player-transport button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mini-player-close:hover,
+.mini-player-transport button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--heading);
+}
+
+.mini-player-transport button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.mini-player-cue {
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 11px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
+  color: var(--heading);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.mini-player-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-player-transport strong {
+  margin-left: auto;
+  color: var(--muted);
+  font: 650 11px/1 var(--mono);
+  white-space: nowrap;
+}
+
+.mini-player-transport .mini-player-play {
+  border-color: var(--accent);
+  background: var(--accent-action);
+  color: var(--accent-action-contrast);
+}
+
+.mini-player-progress {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent-action);
+}

@@ -99,7 +99,7 @@ export function ReaderView({ document, tracks, onClose }: ReaderViewProps) {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !selectedTrack || !trackUrl) return undefined
-    return playbackController.register(playbackKey, audio, selectedTrack.label)
+    return playbackController.register(playbackKey, audio, selectedTrack.label, selectedTrack.cues ?? [])
   }, [playbackKey, selectedTrack, trackUrl])
 
   useEffect(() => {

@@ -105,7 +105,7 @@ export function clearPlaybackState(key: string, storage: PlaybackStorage | null 
   writeStore(store, storage)
 }
 
-export function cueIndexAtTime(cues: Cue[], timeSec: number): number {
+export function cueIndexAtTime(cues: readonly Cue[], timeSec: number): number {
   if (!Number.isFinite(timeSec) || cues.length === 0) return -1
   const t = Math.max(0, timeSec)
   for (let i = 0; i < cues.length; i += 1) {
@@ -114,7 +114,7 @@ export function cueIndexAtTime(cues: Cue[], timeSec: number): number {
   return -1
 }
 
-export function previousCueIndex(cues: Cue[], timeSec: number): number {
+export function previousCueIndex(cues: readonly Cue[], timeSec: number): number {
   if (cues.length === 0) return -1
   const active = cueIndexAtTime(cues, timeSec)
   if (active > 0 && timeSec - cues[active].startSec <= 1.25) return active - 1
@@ -125,7 +125,7 @@ export function previousCueIndex(cues: Cue[], timeSec: number): number {
   return 0
 }
 
-export function nextCueIndex(cues: Cue[], timeSec: number): number {
+export function nextCueIndex(cues: readonly Cue[], timeSec: number): number {
   if (cues.length === 0) return -1
   const active = cueIndexAtTime(cues, timeSec)
   if (active >= 0) return Math.min(cues.length - 1, active + 1)

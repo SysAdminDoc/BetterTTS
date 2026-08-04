@@ -62,6 +62,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **SRT/VTT re-voicing** — import existing timed subtitles, synthesize each cue with the selected local engine, preserve absolute silence gaps and overlaps, and export one timeline-aligned audio file with visible fit warnings
 - **Prosody panel** — opt-in per-punctuation pauses are persisted and reversible, while selected editor spans can carry explicit rate and pitch deltas through local synthesis and queue resume
 - **Listening speed trainer** — opt in to +5% playback ramps after configurable active-listening intervals, with a persisted per-profile cap, visible progress, and reset
+- **Mini player** — supported Chromium/Firefox browsers can pop active playback into a Document Picture-in-Picture controller with sentence highlighting, seek, and sentence skips; Media Session remains the fallback elsewhere
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
@@ -112,7 +113,8 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
 - **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
 - **Diagnostics export** — copy or download a local JSON support bundle with browser, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8
-- **Media Session API** — lock-screen play/pause controls for generated audio
+- **Media Session API** — lock-screen play/pause, seek, and sentence-skip controls for generated audio
+- **Audio output routing** — where the browser grants Audio Output Devices API support, choose a speaker or headset for every registered playback surface; unsupported browsers hide the picker
 - **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
 - **Responsive layout** — works on desktop and mobile
 - **Accessible** — ARIA progressbar, live status, native caption tracks, alert toasts, AA contrast ratios
@@ -158,7 +160,7 @@ Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON*
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
-Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, listening-trainer/prosody controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
+Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
@@ -208,7 +210,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (478 tests across 80 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (480 tests across 81 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -221,6 +223,9 @@ src/
 ├── App.css                  # Layout and component styles
 ├── index.css                # Design tokens, dark/light themes
 ├── main.tsx                 # React entry point + SW registration
+├── components/
+│   ├── MiniPlayer.tsx        # Document PiP transport and cue highlight surface
+│   └── AudioOutputPicker.tsx # Capability-gated output sink selection
 ├── lib/
 │   ├── generation-dispatcher.ts # Abort-aware sentence plans, cues, and progress
 │   ├── object-urls.ts        # Output/caption blob URL ownership
@@ -238,7 +243,8 @@ src/
 │   ├── sentence-retakes.ts   # Cue-boundary crossfade, resampling, and sentence text replacement
 │   ├── queue-sentence-retakes.ts # Lazy queue retake generation and atomic splice orchestration
 │   ├── playback.ts          # Read-along resume and sentence navigation
-│   ├── playback-controller.ts # Shared audio registration, transport, and Media Session
+│   ├── playback-controller.ts # Shared audio registration, transport, cues, sinks, and Media Session
+│   ├── audio-output.ts       # Audio Output Devices API capability and selection adapter
 │   ├── listening-trainer.ts # Persisted opt-in playback-rate ramp schedule
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser

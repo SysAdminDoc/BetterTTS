@@ -267,6 +267,14 @@ const ReaderView = lazy(async () => {
   const module = await import('./components/ReaderView.tsx')
   return { default: module.ReaderView }
 })
+const MiniPlayer = lazy(async () => {
+  const module = await import('./components/MiniPlayer.tsx')
+  return { default: module.MiniPlayer }
+})
+const AudioOutputPicker = lazy(async () => {
+  const module = await import('./components/AudioOutputPicker.tsx')
+  return { default: module.AudioOutputPicker }
+})
 const EpubMappingPanel = lazy(async () => {
   const module = await import('./components/EpubMappingPanel.tsx')
   return { default: module.EpubMappingPanel }
@@ -752,17 +760,20 @@ type PlaybackAudioProps = {
 type OutputMonitorTransportProps = {
   result?: AudioResult
   sampleRate: string
+  theme: 'dark' | 'light'
   onClear: () => void
   onError: (message: string) => void
   hasOutputs: boolean
 }
 
-function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutputs }: OutputMonitorTransportProps) {
+function OutputMonitorTransport({ result, sampleRate, theme, onClear, onError, hasOutputs }: OutputMonitorTransportProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const playbackKey = result ? `monitor:${result.id}` : 'monitor:empty'
   const [snapshot, setSnapshot] = useState(() => playbackController.getSnapshot())
   const [peaks, setPeaks] = useState<number[]>([])
   const [waveformError, setWaveformError] = useState<string | null>(null)
+  const [documentPictureInPictureSupported] = useState(() => typeof window !== 'undefined' && 'documentPictureInPicture' in window)
+  const [audioOutputSupported] = useState(() => typeof navigator !== 'undefined' && Boolean((navigator.mediaDevices as MediaDevices & { selectAudioOutput?: unknown } | undefined)?.selectAudioOutput) && typeof document !== 'undefined' && typeof document.createElement('audio').setSinkId === 'function')
   const cues = useMemo(() => result?.cues ?? [], [result?.cues])
   const playable = Boolean(result?.url)
   const playing = snapshot.key === playbackKey && snapshot.playing
@@ -785,8 +796,8 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !result?.url) return undefined
-    return playbackController.register(playbackKey, audio, result.filename)
-  }, [playbackKey, result?.filename, result?.url])
+    return playbackController.register(playbackKey, audio, result.filename, cues)
+  }, [cues, playbackKey, result?.filename, result?.url])
 
   useEffect(() => {
     let cancelled = false
@@ -938,6 +949,16 @@ function OutputMonitorTransport({ result, sampleRate, onClear, onError, hasOutpu
           Next sentence
           <ChevronRight size={14} aria-hidden="true" />
         </button>
+        {audioOutputSupported ? (
+          <Suspense fallback={null}>
+            <AudioOutputPicker />
+          </Suspense>
+        ) : null}
+        {documentPictureInPictureSupported ? (
+          <Suspense fallback={null}>
+            <MiniPlayer theme={theme} />
+          </Suspense>
+        ) : null}
       </div>
       </div>
     </>
@@ -1019,8 +1040,8 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang
   useEffect(() => {
     const el = audioRef.current
     if (!el) return undefined
-    return playbackController.register(playbackKey, el, label)
-  }, [label, playbackKey, src])
+    return playbackController.register(playbackKey, el, label, cues)
+  }, [cues, label, playbackKey, src])
 
   useEffect(() => {
     if (!followAlong || activeIdx < 0) return
@@ -6001,6 +6022,7 @@ function App() {
                 <OutputMonitorTransport
                   result={activeOutput}
                   sampleRate={engine === 'browser' ? 'Device' : activeSampleRate}
+                  theme={theme}
                   hasOutputs={results.length > 0 || zipUrl !== null}
                   onClear={handleClearOutputs}
                   onError={(message) => showToast({ tone: 'error', message })}

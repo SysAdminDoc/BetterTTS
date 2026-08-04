@@ -4,6 +4,7 @@ import { PlaybackController } from './playback-controller.ts'
 class FakeAudio extends EventTarget {
   paused = true
   playbackRate = 1
+  sinkId = ''
   currentTime = 0
   duration = 30
 
@@ -17,6 +18,11 @@ class FakeAudio extends EventTarget {
     if (this.paused) return
     this.paused = true
     this.dispatchEvent(new Event('pause'))
+  }
+
+  setSinkId(sinkId: string): Promise<void> {
+    this.sinkId = sinkId
+    return Promise.resolve()
   }
 }
 
@@ -70,5 +76,28 @@ describe('shared playback controller', () => {
     const second = new FakeAudio()
     controller.register('second', second as unknown as HTMLAudioElement, 'Second')
     expect(second.playbackRate).toBe(4)
+  })
+
+  it('routes current and future audio and exposes active sentence cues', async () => {
+    const controller = new PlaybackController()
+    const first = new FakeAudio()
+    const cues = [
+      { index: 0, startSec: 0, endSec: 5, text: 'First sentence' },
+      { index: 1, startSec: 5, endSec: 10, text: 'Second sentence' },
+    ]
+    controller.register('first', first as unknown as HTMLAudioElement, 'First', cues)
+    await controller.setSinkId('headphones')
+    expect(first.sinkId).toBe('headphones')
+
+    await controller.play('first')
+    first.currentTime = 6
+    first.dispatchEvent(new Event('timeupdate'))
+    expect(controller.getActiveCue()?.text).toBe('Second sentence')
+    controller.seekRelativeCue(-1)
+    expect(first.currentTime).toBe(0.001)
+
+    const second = new FakeAudio()
+    controller.register('second', second as unknown as HTMLAudioElement, 'Second')
+    expect(second.sinkId).toBe('headphones')
   })
 })
