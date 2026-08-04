@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-540%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-542%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.22.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 540 tests across 93 test files
+- **Tests:** 542 tests across 94 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -47,6 +47,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 ### Studio Interface
 - **Premium production workspace** with a persistent destination rail, session-aware command bar, dominant script canvas, real Output/Queue/Library tabs, integrated waveform transport, and compact properties inspector
 - **Clean dark and light themes** using neutral semantic design tokens, 4-8px control radii, visible focus states, and a mobile command grid that preserves full editor width
+- **Locale-ready interface** with a persisted UI-language boundary kept separate from each engine's synthesis-language selector; only reviewed English UI ships until translations are reviewed
 
 ### Audio Generation
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
@@ -241,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (540 tests across 93 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (542 tests across 94 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -272,6 +273,7 @@ src/
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
 │   ├── capabilities.ts       # Canonical app, engine, export, queue, and license facts
+│   ├── ui-locale.ts          # Reviewed UI-locale adapter; synthesis language remains engine-specific
 │   ├── document-import.ts   # PDF/DOCX text extraction
 │   ├── reader.ts             # Stable document coordinates, cue binding, and resume state
 │   ├── media-overlays.ts     # EPUB3 text/SMIL/audio package writer and WAV→MP3 normalization

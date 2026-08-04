@@ -737,6 +737,18 @@ async function runSmoke() {
     await desktop.page.screenshot({ path: join(smokeDir, 'desktop-light.png'), fullPage: false })
 
     await desktop.page.getByRole('button', { name: 'System & diagnostics' }).click()
+    const interfaceLanguage = desktop.page.locator('#ui-locale')
+    await interfaceLanguage.waitFor({ timeout: 20000 })
+    if (await interfaceLanguage.inputValue() !== 'en') throw new Error('UI locale did not default to reviewed English')
+    const synthesisLanguage = desktop.page.locator('#locale')
+    const initialSynthesisLanguage = await synthesisLanguage.inputValue()
+    await synthesisLanguage.selectOption('ja')
+    if (await interfaceLanguage.inputValue() !== 'en') throw new Error('UI locale changed with synthesis language')
+    await synthesisLanguage.selectOption(initialSynthesisLanguage)
+    await desktop.page.waitForTimeout(250)
+    if (await desktop.page.evaluate(() => localStorage.getItem('bettertts-ui-locale')) !== 'en') {
+      throw new Error('UI locale preference did not persist')
+    }
     await desktop.page.getByRole('button', { name: 'Advanced options' }).click()
     const fp16Toggle = desktop.page.locator('label.toggle-row').filter({ hasText: 'WebGPU fp16 (experimental)' }).locator('input[type="checkbox"]')
     await fp16Toggle.waitFor({ timeout: 20000 })

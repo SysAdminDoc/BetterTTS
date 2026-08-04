@@ -103,6 +103,7 @@ import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
+import { DEFAULT_UI_LOCALE, UI_LOCALE_STORAGE_KEY, UI_LOCALES, parseUiLocale, readUiLocale, uiText, type UiLocale } from './lib/ui-locale.ts'
 import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
@@ -1433,7 +1434,15 @@ function App() {
     typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, '')
   ))
   const [engine, setEngine] = useState<Engine>('kokoro')
-  const [locale, setLocale] = useState<KokoroLocale>('en-us')
+  const [uiLocale, setUiLocale] = useState<UiLocale>(() => {
+    if (typeof window === 'undefined') return DEFAULT_UI_LOCALE
+    try {
+      return readUiLocale(window.localStorage)
+    } catch {
+      return DEFAULT_UI_LOCALE
+    }
+  })
+  const [synthesisLocale, setSynthesisLocale] = useState<KokoroLocale>('en-us')
   const [voiceId, setVoiceId] = useState('af_heart')
   const [supertonicVoiceId, setSupertonicVoiceId] = useState<SupertonicVoiceId>('F1')
   const [supertonicSteps, setSupertonicSteps] = useState(SUPERTONIC_DEFAULT_STEPS)
@@ -1698,7 +1707,7 @@ function App() {
     return api
   }
 
-  const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === locale), [locale])
+  const availableVoices = useMemo(() => VOICES.filter((voice) => voice.locale === synthesisLocale), [synthesisLocale])
   const hasPhonemePronunciations = Object.values(pronunciations).some((rule) => rule.mode === 'phoneme')
   const epubMappingVoiceOptions = useMemo<EpubMappingVoiceOption[]>(() => {
     if (engine === 'kokoro') return availableVoices.map((voice) => ({ id: voice.id, name: voice.name, gender: voice.gender }))
@@ -1707,14 +1716,14 @@ function App() {
     return []
   }, [availableVoices, engine])
   const epubMappingSupportsVoice = engine === 'kokoro' || engine === 'supertonic' || engine === 'kitten'
-  const epubMappingSupportsBlend = engine === 'kokoro' && isEnglishKokoroLocale(locale)
+  const epubMappingSupportsBlend = engine === 'kokoro' && isEnglishKokoroLocale(synthesisLocale)
   const selectedVoice = VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]
   const selectedSupertonicVoice = SUPERTONIC_VOICES.find((voice) => voice.id === supertonicVoiceId) ?? SUPERTONIC_VOICES[0]
   const selectedKittenVoice = KITTEN_VOICES.find((voice) => voice.id === kittenVoiceId) ?? KITTEN_VOICES[0]
   const selectedKittenModel = KITTEN_MODELS.find((model) => model.id === kittenModelSize) ?? KITTEN_MODELS[0]
   const selectedPiperLanguage = PIPER_PLUS_LANGUAGES.find((language) => language.id === piperLanguage) ?? PIPER_PLUS_LANGUAGES[0]
-  const selectedKokoroLanguage = kokoroLanguageForLocale(locale)
-  const englishKokoro = isEnglishKokoroLocale(locale)
+  const selectedKokoroLanguage = kokoroLanguageForLocale(synthesisLocale)
+  const englishKokoro = isEnglishKokoroLocale(synthesisLocale)
   const chatterboxNeedsSetup = !chatterboxConsent || chatterboxReference === null
   const blendableVoices = useMemo(() => VOICES.filter((voice) => isEnglishKokoroLocale(voice.locale)), [])
   const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : `WebGPU ${getKokoroWebGpuDtype()} / WebAssembly q8`) : runtimeLabel
@@ -2073,7 +2082,7 @@ function App() {
       runtime: provenanceRuntime(),
       engine: createProvenanceEngine(selectedEngine, chatterboxModel),
       voiceId: options.voiceId ?? 'unknown',
-      locale: selectedEngine === 'kokoro' ? locale : selectedEngine === 'piper' ? piperLanguage : selectedEngine === 'chatterbox' ? chatterboxLanguageId : undefined,
+      locale: selectedEngine === 'kokoro' ? synthesisLocale : selectedEngine === 'piper' ? piperLanguage : selectedEngine === 'chatterbox' ? chatterboxLanguageId : undefined,
       speed: options.speedOverride ?? speed,
       pitchSemitones: selectedEngine === 'kokoro' && options.postProcessing !== false ? pitchSemitones : 0,
       cleanup,
@@ -2240,6 +2249,10 @@ function App() {
     if (chromeColor) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', chromeColor)
     persistSetting('bettertts-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    persistSetting(UI_LOCALE_STORAGE_KEY, uiLocale)
+  }, [uiLocale])
 
   useEffect(() => {
     const syncActiveSection = () => {
@@ -2716,7 +2729,7 @@ function App() {
               : engine === 'qwen'
                 ? QWEN_MODEL_ID
               : browserVoiceUri || 'browser-default',
-      language: engine === 'kokoro' ? locale : engine === 'chatterbox' ? chatterboxLanguageId : engine === 'piper' ? piperLanguage : engine === 'qwen' ? qwenLanguage : undefined,
+      language: engine === 'kokoro' ? synthesisLocale : engine === 'chatterbox' ? chatterboxLanguageId : engine === 'piper' ? piperLanguage : engine === 'qwen' ? qwenLanguage : undefined,
       format: audioFormat,
       bitrate: mp3Bitrate,
       speed,
@@ -4694,7 +4707,7 @@ function App() {
       createdAt: Date.now(),
       engine: queueEngine,
       voice: voiceIdForNarratorRole('narration'),
-      language: queueEngine === 'kokoro' ? locale : queueEngine === 'piper' ? piperLanguage : undefined,
+      language: queueEngine === 'kokoro' ? synthesisLocale : queueEngine === 'piper' ? piperLanguage : undefined,
       speed,
       format: audioFormat,
       bitrate: mp3Bitrate,
@@ -6886,7 +6899,7 @@ function App() {
               {engine === 'qwen' ? (
                 <div className="qwen-engine-controls" aria-label="Qwen3-TTS controls">
                   <label>
-                    Language
+                    {uiText(uiLocale, 'synthesisLanguage')}
                     <select value={qwenLanguage} onChange={(event) => setQwenLanguage(event.target.value as QwenLanguage)}>
                       {QWEN_LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
                     </select>
@@ -6935,6 +6948,25 @@ function App() {
               {showSystemTools ? (
               <div className="system-tools-section" role="group" aria-labelledby="diagnostics-heading" ref={systemToolsSectionRef}>
                 <h3 id="diagnostics-heading" className="sr-only">System and diagnostics</h3>
+                <div className="diagnostics-panel ui-locale-panel" aria-label={uiText(uiLocale, 'interfaceLanguage')}>
+                  <div className="cache-manager-head">
+                    <span>
+                      <strong>{uiText(uiLocale, 'interfaceLanguage')}</strong>
+                    </span>
+                  </div>
+                  <label className="control-label" htmlFor="ui-locale">
+                    {uiText(uiLocale, 'interfaceLanguage')}
+                  </label>
+                  <select
+                    id="ui-locale"
+                    value={uiLocale}
+                    onChange={(event) => setUiLocale(parseUiLocale(event.target.value))}
+                  >
+                    {UI_LOCALES.map((localeOption) => (
+                      <option value={localeOption.id} key={localeOption.id}>{localeOption.label}</option>
+                    ))}
+                  </select>
+                </div>
                 {!desktopProjects ? <label className="toggle-row experimental-engine-toggle" htmlFor="experimental-piper" aria-label="Enable experimental Piper-plus">
                   <input
                     id="experimental-piper"
@@ -7442,9 +7474,9 @@ function App() {
             {engine === 'kokoro' ? (
               <>
                 <label className="control-label" htmlFor="locale">
-                  Language
+                  {uiText(uiLocale, 'synthesisLanguage')}
                 </label>
-                <select id="locale" value={locale} onChange={(event) => setLocale(event.target.value as KokoroLocale)}>
+                <select id="locale" value={synthesisLocale} onChange={(event) => setSynthesisLocale(event.target.value as KokoroLocale)}>
                   {KOKORO_LANGUAGES.map((language) => (
                     <option value={language.id} key={language.id}>{language.label}</option>
                   ))}
@@ -7581,7 +7613,7 @@ function App() {
                 </select>
 
                 <label className="control-label" htmlFor="chatterbox-language">
-                  Synthesis language
+                  {uiText(uiLocale, 'synthesisLanguage')}
                 </label>
                 <select
                   id="chatterbox-language"
