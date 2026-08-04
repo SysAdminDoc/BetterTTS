@@ -59,6 +59,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
 - **Headless native CLI** — `bettertts synth` converts TXT or EPUB input to WAV, MP3, Opus, FLAC, or chaptered M4B with SRT/VTT captions and machine-readable progress, without launching the GUI
 - **Desktop audio captioning** — import a WAV/MP3/FLAC/OGG/WebM recording, choose a language or auto-detect, and run the pinned whisper.cpp x64 CLI in an isolated utility process for word-level multilingual cues; missing model/runtime recovery is explicit
+- **SRT/VTT re-voicing** — import existing timed subtitles, synthesize each cue with the selected local engine, preserve absolute silence gaps and overlaps, and export one timeline-aligned audio file with visible fit warnings
 - **Streaming playback** — audio plays as each sentence is synthesized, no waiting for the full run
 - **Web Speech API fallback** — device-native voices when Kokoro can't run, with full browser voice picker
 
@@ -68,7 +69,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **EPUB chapter mapping** — review imported chapters before queueing: rename, split, merge, reorder, exclude, assign voices, or configure per-chapter weighted Kokoro blends; “Queue with defaults” preserves the quick path
 - **Sentence retakes** — select a sentence in a completed queue chunk, edit and regenerate up to four local A/B takes, then apply the chosen take with a cue-boundary crossfade; the original stays intact until commit
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
-- **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
+- **SRT and VTT subtitle import/export** with sentence-level timing, cue-by-cue timeline re-voicing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
 - **Reader mode** — imported EPUBs, articles, PDFs, DOCX files, and text open in a book-like, chapter-aware view with stable sentence/word karaoke highlighting, paragraph-to-playback jumps, per-document resume, optional line focus, and EPUB queue audio tracks
 - **Honest persistence state** — settings and crash-recovery writes are verified; blocked/private/quota-limited storage switches the shell to session-only guidance instead of claiming data was saved
@@ -160,7 +161,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 
 The headless CLI is built by `npm run desktop:build` and runs the same verified Sherpa native host as the Windows app, but never opens a window. `bettertts synth --in book.epub --voice af_heart --m4b --out book.m4b` writes the audiobook plus sibling `book.srt` and `book.vtt` files; TXT input, WAV/MP3/Opus/FLAC formats, `--dry-run`, `--json`, `--force`, and `--no-captions` are also supported. Native model packs live in the user cache (override with `BETTERTTS_MODEL_CACHE`), and M4B output plus Studio cleanup require FFmpeg on `PATH` or `BETTERTTS_FFMPEG_PATH`.
 
-Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing.
+Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing. The same panel accepts SRT/VTT files for local cue-timed re-voicing without whisper.cpp.
 
 Desktop workflow integrations are available from **Voice chain -> Engine -> System & diagnostics** and are off by default. The read-selection hotkey reads the current clipboard after you copy a selection; it never injects keyboard input. The Explorer option registers per-user context-menu entries for TXT, EPUB, PDF, and DOCX and queues the imported file in BetterTTS. Screen OCR requires a local Tesseract installation or `BETTERTTS_TESSERACT_PATH`; capture runs only when you request it. Disable each option independently to remove its hotkey or Explorer registration and stop using OCR; web/PWA builds do not expose OS integrations.
 
@@ -204,7 +205,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (457 tests across 79 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (464 tests across 79 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -249,7 +250,7 @@ src/
 │   ├── text.ts              # Sentence splitting, pause parsing, cleanup, narrator segmentation
 │   ├── voices.ts            # 41-voice Kokoro catalog with quality grades
 │   ├── webspeech.ts         # Browser Speech API wrapper
-│   ├── subtitles.ts         # SRT/VTT serializers
+│   ├── subtitles.ts         # SRT/VTT parser/serializers and timed re-voice fitting
 │   ├── queue.ts             # IndexedDB persistent generation queue
 │   └── library.ts           # IndexedDB clip storage
 ├── hooks/

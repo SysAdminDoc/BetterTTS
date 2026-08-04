@@ -211,7 +211,7 @@ import {
   type PronunciationMode,
 } from './lib/pronunciations.ts'
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
-import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
+import { assembleSubtitleTimeline, parseSubtitleText, subtitleTextForSpeech, type Cue, type ParsedSubtitle, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { dispatchGeneration } from './lib/generation-dispatcher.ts'
 import { useObjectUrls } from './lib/object-urls.ts'
@@ -267,6 +267,16 @@ type Engine = EngineId
 type Theme = 'dark' | 'light'
 type NavSection = 'studio' | 'models' | 'docs'
 
+function outputSampleRateForEngine(engine: Engine): number {
+  if (engine === 'supertonic') return SUPERTONIC_SAMPLE_RATE
+  if (engine === 'kitten') return KITTEN_SAMPLE_RATE
+  if (engine === 'chatterbox') return CHATTERBOX_SAMPLE_RATE
+  if (engine === 'qwen') return 24_000
+  if (engine === 'piper') return PIPER_PLUS_SAMPLE_RATE
+  if (engine === 'melo') return MELO_SAMPLE_RATE
+  return KOKORO_SAMPLE_RATE
+}
+
 type ByoDraft = {
   modelId: ByoModelOptionId
   license: string
@@ -319,6 +329,8 @@ type ImportedCaption = {
   cues: Cue[]
   srtUrl: string
   vttUrl: string
+  kind: 'transcription' | 'revoice'
+  warnings?: string[]
 }
 
 type Toast = {
@@ -1535,6 +1547,7 @@ function App() {
   const [whisperLanguage, setWhisperLanguage] = useState<'auto' | Exclude<typeof WHISPER_LANGUAGES[number]['id'], 'auto'>>('auto')
   const [whisperStatus, setWhisperStatus] = useState<WhisperRuntimeStatus | null>(null)
   const [captionFile, setCaptionFile] = useState<File | null>(null)
+  const [captionSubtitle, setCaptionSubtitle] = useState<ParsedSubtitle | null>(null)
   const [captionResult, setCaptionResult] = useState<ImportedCaption | null>(null)
   const [isCaptioning, setIsCaptioning] = useState(false)
   const [captionProgress, setCaptionProgress] = useState<number | null>(null)
@@ -5306,14 +5319,34 @@ function App() {
     showToast({ tone: 'ok', message: `Background music selected: ${shortUiLabel(file.name, 48)}` })
   }
 
-  function handleCaptionFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleCaptionFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0] ?? null
     event.currentTarget.value = ''
     if (!file) return
     const lowerName = file.name.toLowerCase()
     const knownAudioExtension = /\.(?:wav|mp3|m4a|aac|ogg|flac|webm|opus)$/u.test(lowerName)
-    if (file.type && !file.type.toLowerCase().startsWith('audio/') && !knownAudioExtension) {
-      showToast({ tone: 'warn', message: 'Caption import requires an audio file.' })
+    const subtitleFormat = /\.(srt|vtt)$/u.exec(lowerName)?.[1] as 'srt' | 'vtt' | undefined
+    if (!knownAudioExtension && !subtitleFormat && file.type && !file.type.toLowerCase().startsWith('audio/')) {
+      showToast({ tone: 'warn', message: 'Caption import requires an audio file or an SRT/VTT subtitle file.' })
+      return
+    }
+    if (subtitleFormat) {
+      if (file.size > MAX_IMPORT_BYTES) {
+        showToast({ tone: 'warn', message: `Subtitle files must be ${formatBytes(MAX_IMPORT_BYTES)} or smaller.` })
+        return
+      }
+      try {
+        const parsed = parseSubtitleText(await file.text(), subtitleFormat)
+        clearCaptionResult()
+        setCaptionFile(file)
+        setCaptionSubtitle(parsed)
+        showToast({
+          tone: parsed.warnings.length > 0 ? 'warn' : 'ok',
+          message: `Subtitle source selected: ${parsed.cues.length} cue${parsed.cues.length === 1 ? '' : 's'} from ${shortUiLabel(file.name, 48)}${parsed.warnings.length > 0 ? ` (${parsed.warnings.length} skipped block${parsed.warnings.length === 1 ? '' : 's'})` : ''}.`,
+        })
+      } catch (error) {
+        showToast({ tone: 'warn', message: error instanceof Error ? error.message : 'Could not parse that subtitle file.' })
+      }
       return
     }
     if (file.size > MAX_WHISPER_AUDIO_BYTES) {
@@ -5322,6 +5355,7 @@ function App() {
     }
     clearCaptionResult()
     setCaptionFile(file)
+    setCaptionSubtitle(null)
     showToast({ tone: 'ok', message: `Caption source selected: ${shortUiLabel(file.name, 56)}` })
   }
 
@@ -5330,16 +5364,145 @@ function App() {
     setStatus('Cancelling captions…')
   }
 
+  async function revoiceImportedSubtitles(parsed: ParsedSubtitle, sourceFile: File, controller: AbortController) {
+    if (engine === 'browser') throw new Error('Subtitle re-voicing needs an export-capable local engine; Browser voices can only play speech.')
+    if (engine === 'chatterbox' && chatterboxNeedsSetup) {
+      throw new Error(!chatterboxConsent
+        ? 'Enable the Chatterbox voice lab in System & diagnostics first.'
+        : 'Choose a reference clip before re-voicing subtitles.')
+    }
+
+    const outputSampleRate = outputSampleRateForEngine(engine)
+    const voice = engine === 'kokoro'
+      ? selectedVoice.id
+      : engine === 'supertonic'
+        ? supertonicVoiceId
+        : engine === 'kitten'
+          ? kittenVoiceId
+          : engine === 'piper'
+            ? piperLanguage
+            : engine === 'melo'
+              ? 'melo-default'
+              : engine === 'qwen'
+                ? qwenSpeaker
+                : chatterboxReference?.name ?? 'reference'
+    let voiceBin: Float32Array | undefined
+    if (engine === 'kokoro' && englishKokoro && voiceMixEnabled && voiceMixEntries.length >= 2) {
+      setStatus('Loading voice blend…')
+      const bins = await Promise.all(voiceMixEntries.map(async (entry) => ({
+        data: await fetchVoiceBin(entry.voiceId),
+        weight: entry.weight,
+      })))
+      voiceBin = blendVoiceBins(bins)
+    }
+
+    setCaptionProgress(8)
+    setStatus('Loading subtitle re-voice engine')
+    const { synthesize } = await ensureEngine((info) => {
+      if (info.status === 'ready') {
+        setCaptionProgress(12)
+        setStatus('Model ready')
+      } else if (info.name || info.file || info.status) {
+        setStatus(info.name ?? info.file ?? info.status ?? 'Loading subtitle re-voice engine')
+      }
+    })
+    setStatus(`Re-voicing 0 / ${parsed.cues.length} cues`)
+    const dispatchResult = await dispatchGeneration(
+      parsed.cues.map((cue) => ({ text: subtitleTextForSpeech(cue.text), voice, voiceBin })),
+      {
+        sampleRate: outputSampleRate,
+        speed,
+        requestStart: performance.now(),
+        signal: controller.signal,
+        applyPronunciations,
+        synthesize,
+        checkCompleteness: (sentence, durationSeconds, currentSpeed) => checkSynthesisCompleteness(sentence, durationSeconds, currentSpeed),
+        onProgress: (completed, total) => {
+          const percentage = total > 0 ? Math.round((completed / total) * 76) : 0
+          setCaptionProgress(14 + percentage)
+          setStatus(`Re-voicing ${Math.min(parsed.cues.length, completed)} / ${parsed.cues.length} cues`)
+        },
+        onMissingAudio: (sentence) => {
+          recordDiagnosticEvent('warn', `Engine produced no audio for subtitle text: ${sentence.slice(0, 120)}`, 'subtitle.revoice.missing-audio')
+        },
+        onSuspectAudio: (sentence, completeness) => {
+          recordDiagnosticEvent(
+            'warn',
+            `Possible subtitle truncation: ${completeness.speakableChars} speakable chars produced ${completeness.durationSeconds.toFixed(1)}s of audio.`,
+            'subtitle.revoice.completeness',
+          )
+          void sentence
+        },
+      },
+    )
+    if (dispatchResult.cancelled || controller.signal.aborted) throw new DOMException('Subtitle re-voicing cancelled.', 'AbortError')
+    if (dispatchResult.totalSamples === 0 || dispatchResult.jobs.length !== parsed.cues.length) {
+      throw new Error('No audio was produced for the imported subtitles.')
+    }
+
+    const timeline = assembleSubtitleTimeline(parsed.cues.map((cue, index) => {
+      const job = dispatchResult.jobs[index]
+      return {
+        cue,
+        samples: job.audioParts.length > 0 ? concatFloat32Arrays(job.audioParts) : null,
+        sampleRate: outputSampleRate,
+      }
+    }), outputSampleRate)
+    if (controller.signal.aborted) throw new DOMException('Subtitle re-voicing cancelled.', 'AbortError')
+    setCaptionProgress(92)
+    setStatus('Encoding aligned subtitle audio')
+    const sourceStem = sourceFile.name.replace(/\.(?:srt|vtt)$/iu, '') || 'subtitles'
+    const encoded = await encodeOutput(
+      timeline.samples,
+      outputSampleRate,
+      audioFormat,
+      mp3Bitrate,
+      `Re-voiced subtitles · ${sourceStem}`,
+    )
+    if (controller.signal.aborted) throw new DOMException('Subtitle re-voicing cancelled.', 'AbortError')
+    const filename = `${slugify(sourceStem)}-revoiced${encoded.extension}`
+    const audioUrl = rememberCaptionUrl(URL.createObjectURL(encoded.blob))
+    const srtUrl = rememberCaptionUrl(URL.createObjectURL(new Blob([toSRT(parsed.cues)], { type: 'text/plain' })))
+    const vttUrl = rememberCaptionUrl(URL.createObjectURL(new Blob([toVTT(parsed.cues)], { type: 'text/vtt' })))
+    const warnings = [...parsed.warnings, ...timeline.warnings]
+    if (dispatchResult.flaggedSentences > 0) {
+      warnings.push(`${dispatchResult.flaggedSentences} generated sentence${dispatchResult.flaggedSentences === 1 ? '' : 's'} may be truncated.`)
+    }
+    setCaptionResult({
+      id: crypto.randomUUID(),
+      filename,
+      audioUrl,
+      language: engine === 'kokoro' ? selectedKokoroLanguage.label : activeEngineName,
+      cues: parsed.cues,
+      srtUrl,
+      vttUrl,
+      kind: 'revoice',
+      warnings: warnings.length > 0 ? warnings : undefined,
+    })
+    setCaptionProgress(100)
+    setStatus('Ready')
+    showToast({
+      tone: warnings.length > 0 ? 'warn' : 'ok',
+      message: warnings.length > 0
+        ? `Re-voiced ${parsed.cues.length} subtitle cues with ${warnings.length} timing note${warnings.length === 1 ? '' : 's'}.`
+        : `Re-voiced ${parsed.cues.length} subtitle cues to ${filename}.`,
+    })
+  }
+
   async function generateImportedCaption() {
     if (isCaptioning) {
       cancelCaptioning()
       return
     }
     if (!captionFile) {
-      showToast({ tone: 'warn', message: 'Choose an audio file before generating captions.' })
+      showToast({ tone: 'warn', message: 'Choose an audio or SRT/VTT subtitle file first.' })
       return
     }
-    if (!whisperDesktopAvailable()) {
+    if (captionSubtitle && engine === 'browser') {
+      showToast({ tone: 'warn', message: 'Subtitle re-voicing needs an export-capable local engine; Browser voices can only play speech.' })
+      return
+    }
+    if (!captionSubtitle && !whisperDesktopAvailable()) {
       showToast({ tone: 'warn', message: 'Imported-audio captions require the BetterTTS desktop app and its whisper.cpp runtime.' })
       return
     }
@@ -5348,8 +5511,12 @@ function App() {
     captionAbortRef.current = controller
     setIsCaptioning(true)
     setCaptionProgress(2)
-    setStatus('Preparing caption audio')
+    setStatus(captionSubtitle ? 'Preparing subtitle re-voice' : 'Preparing caption audio')
     try {
+      if (captionSubtitle) {
+        await revoiceImportedSubtitles(captionSubtitle, captionFile, controller)
+        return
+      }
       const status = whisperStatus ?? await getWhisperRuntimeStatus()
       setWhisperStatus(status)
       if (!status.available) throw new Error(status.recovery)
@@ -5372,6 +5539,7 @@ function App() {
         cues: alignment.cues,
         srtUrl,
         vttUrl,
+        kind: 'transcription',
       })
       setCaptionProgress(100)
       setStatus('Ready')
@@ -5751,28 +5919,30 @@ function App() {
               )}
               <section className="caption-import-card" aria-labelledby="caption-import-heading">
                 <div className="section-heading">
-                  <h3 id="caption-import-heading">Caption an audio file</h3>
-                  <span>Desktop whisper.cpp</span>
+                  <h3 id="caption-import-heading">Caption audio or re-voice subtitles</h3>
+                  <span>{captionSubtitle ? 'Local subtitle re-voice' : 'Desktop whisper.cpp'}</span>
                 </div>
                 <p className="caption-import-note">
-                  Import an existing recording and create multilingual word-level SRT/VTT cues locally. Audio is converted to a temporary 16 kHz mono buffer and removed after alignment.
+                  {captionSubtitle
+                    ? 'Import an SRT or VTT file to synthesize each cue at its original timestamp. Short speech is padded, moderate overruns are compressed, and impossible fits are clipped with a warning.'
+                    : 'Import an existing recording and create multilingual word-level SRT/VTT cues locally. Audio is converted to a temporary 16 kHz mono buffer and removed after alignment.'}
                 </p>
                 <div className="caption-import-controls">
                   <input
                     ref={captionInputRef}
                     type="file"
-                    accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm,.opus"
+                    accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm,.opus,.srt,.vtt,text/vtt,application/x-subrip"
                     onChange={handleCaptionFileChange}
                     hidden
                   />
                   <button type="button" onClick={() => captionInputRef.current?.click()} disabled={isCaptioning}>
                     <Upload size={16} aria-hidden="true" />
-                    {captionFile ? 'Replace audio' : 'Choose audio'}
+                    {captionFile ? 'Replace source' : 'Choose audio or subtitles'}
                   </button>
                   <select
                     value={whisperLanguage}
                     onChange={(event) => setWhisperLanguage(event.target.value as typeof whisperLanguage)}
-                    disabled={isCaptioning}
+                    disabled={isCaptioning || captionSubtitle !== null}
                     aria-label="Caption language"
                   >
                     {WHISPER_LANGUAGES.map((language) => <option key={language.id} value={language.id}>{language.label}</option>)}
@@ -5781,19 +5951,25 @@ function App() {
                     type="button"
                     className={isCaptioning ? 'secondary-action cancel' : undefined}
                     onClick={generateImportedCaption}
-                    disabled={!isCaptioning && (!captionFile || (whisperStatus !== null && !whisperStatus.available))}
+                    disabled={!isCaptioning && (!captionFile || (!captionSubtitle && whisperStatus !== null && !whisperStatus.available))}
                   >
                     {isCaptioning ? <X size={16} aria-hidden="true" /> : <Captions size={16} aria-hidden="true" />}
-                    {isCaptioning ? 'Cancel captioning' : 'Generate captions'}
+                    {isCaptioning ? 'Cancel operation' : captionSubtitle ? 'Re-voice subtitles' : 'Generate captions'}
                   </button>
                 </div>
                 <div className="caption-runtime" role="status">
-                  <span className={whisperStatus?.available ? 'status-ready' : 'status-warn'}>
-                    {whisperDesktopAvailable()
-                      ? whisperStatus?.message ?? 'Checking whisper.cpp runtime…'
-                      : 'Desktop whisper.cpp captioning is unavailable in the web app.'}
-                  </span>
-                  {whisperStatus && !whisperStatus.available ? <small>{whisperStatus.recovery}</small> : null}
+                  {captionSubtitle ? (
+                    <span className="status-ready">{captionSubtitle.cues.length} timed cues ready for {activeEngineName} at {speed.toFixed(2)}× speed.</span>
+                  ) : (
+                    <>
+                      <span className={whisperStatus?.available ? 'status-ready' : 'status-warn'}>
+                        {whisperDesktopAvailable()
+                          ? whisperStatus?.message ?? 'Checking whisper.cpp runtime…'
+                          : 'Desktop whisper.cpp captioning is unavailable in the web app.'}
+                      </span>
+                      {whisperStatus && !whisperStatus.available ? <small>{whisperStatus.recovery}</small> : null}
+                    </>
+                  )}
                 </div>
                 {captionFile ? <small className="caption-file-label">Source: {shortUiLabel(captionFile.name, 72)}</small> : null}
                 {captionProgress !== null ? (
@@ -5805,7 +5981,7 @@ function App() {
                   <div className="caption-result" aria-label="Imported audio caption result">
                     <div className="caption-result-meta">
                       <strong>{captionResult.filename}</strong>
-                      <span>{captionResult.cues.length} word cues · {captionResult.language}</span>
+                      <span>{captionResult.kind === 'revoice' ? `${captionResult.cues.length} timed cues · ${captionResult.language}` : `${captionResult.cues.length} word cues · ${captionResult.language}`}</span>
                     </div>
                     <PlaybackAudio
                       playbackKey={`caption:${captionResult.id}`}
@@ -5815,7 +5991,16 @@ function App() {
                       vttUrl={captionResult.vttUrl}
                       srcLang={captionResult.language}
                     />
+                    {captionResult.warnings?.length ? (
+                      <ul className="caption-warnings" aria-label="Subtitle timing warnings">
+                        {captionResult.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    ) : null}
                     <div className="playback-tools">
+                      <a href={captionResult.audioUrl} download={captionResult.filename}>
+                        <Download size={15} aria-hidden="true" />
+                        Download audio
+                      </a>
                       <a href={captionResult.srtUrl} download={captionResult.filename.replace(/\.[^.]+$/u, '.srt')}>
                         <FileText size={15} aria-hidden="true" />
                         Download SRT

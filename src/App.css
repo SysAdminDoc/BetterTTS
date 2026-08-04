@@ -1289,6 +1289,18 @@ ul.queue-chunk-list > li {
   white-space: nowrap;
 }
 
+.caption-warnings {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border));
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .inspector-summary span {
   display: grid;
   min-width: 0;

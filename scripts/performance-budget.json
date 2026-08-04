@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "shell": {
-    "maxRawBytes": 575000,
-    "maxGzipBytes": 165000,
+    "maxRawBytes": 585000,
+    "maxGzipBytes": 170000,
     "maxTimeToInteractiveMs": 5000,
     "forbiddenInitialAssetPatterns": [
       "document",

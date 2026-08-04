@@ -86,6 +86,14 @@ function makePdfUpload() {
   return { name: 'smoke.pdf', mimeType: 'application/pdf', buffer: Buffer.from(parts.join('')) }
 }
 
+function makeSubtitleUpload() {
+  return {
+    name: 'smoke-revoice.srt',
+    mimeType: 'application/x-subrip',
+    buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,500\nFirst timed cue.\n\n2\n00:00:03,000 --> 00:00:04,000\nSecond timed cue.\n'),
+  }
+}
+
 function makeBgmUpload() {
   const sampleRate = 8000
   const samples = sampleRate / 4
@@ -738,6 +746,15 @@ async function runSmoke() {
     if (await advancedOptionsToggle.getAttribute('aria-expanded') !== 'true') await advancedOptionsToggle.click()
     for (const label of ['Skip citations', 'Drop page headers', 'Re-flow PDF lines', 'Skip footnotes', 'Normalize numbers', 'Drop book metadata']) {
       await desktop.page.getByLabel(label).waitFor({ timeout: 20000 })
+    }
+
+    console.log('Checking SRT/VTT subtitle re-voice import...')
+    const subtitleInput = desktop.page.locator('.caption-import-card input[type="file"]')
+    await subtitleInput.setInputFiles(makeSubtitleUpload())
+    await desktop.page.getByText(/2 timed cues ready for Piper-plus/).waitFor({ timeout: 20000 })
+    await desktop.page.getByRole('button', { name: 'Re-voice subtitles' }).waitFor({ timeout: 20000 })
+    if (!(await desktop.page.locator('.caption-import-note').innerText()).includes('original timestamp')) {
+      throw new Error('Subtitle re-voice guidance did not render')
     }
 
     console.log('Checking DOCX and unsupported file import...')
