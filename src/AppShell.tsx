@@ -211,6 +211,7 @@ import {
 } from './lib/kitten.ts'
 import { SUPERTONIC_DEFAULT_STEPS, SUPERTONIC_MODEL_ID, SUPERTONIC_SAMPLE_RATE, SUPERTONIC_VOICES, type SupertonicVoiceId, clampSupertonicSpeed, loadSupertonic, resetSupertonicSession, supertonicVoiceUrl, synthesizeSupertonic } from './lib/supertonic.ts'
 import { applyPunctuationPauses, type CleanupOptions, DEFAULT_CLEANUP, DEFAULT_PUNCTUATION_PAUSES, PAUSE_TAG, checkSynthesisCompleteness, cleanupText, formatBytes, parseDialogLines, reflowPdfText, slugify, splitInput, splitNarratorText, stripProsodyTags, type NarratorRole, type NarratorSegment, type PunctuationPauseKey, type PunctuationPauseSettings } from './lib/text.ts'
+import type { TextNormalizationPreview, TextNormalizationRuleId } from './lib/text-normalization-preview.ts'
 import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WORD_CHARS, parseCleanupSetting, parsePronunciationDictionarySetting, parsePunctuationPauseSetting } from './lib/settings.ts'
 import {
   TECH_PRONUNCIATION_PACK,
@@ -282,6 +283,10 @@ const EpubMappingPanel = lazy(async () => {
   const module = await import('./components/EpubMappingPanel.tsx')
   return { default: module.EpubMappingPanel }
 })
+const NormalizationPreview = lazy(async () => {
+  const module = await import('./components/NormalizationPreview.tsx')
+  return { default: module.NormalizationPreview }
+})
 const SentenceRetakePanel = lazy(async () => {
   const module = await import('./components/SentenceRetakePanel.tsx')
   return { default: module.SentenceRetakePanel }
@@ -351,8 +356,31 @@ type AudioResult = {
   originalUrl?: string
   sourceDocumentId?: string
   sourceText?: string
+  synthesisTextSnapshot?: string
   loudness?: LoudnessMeasurement
   provenanceManifest?: GenerationProvenanceManifest
+}
+
+type ImportedTextSnapshot = {
+  text: string
+  document: ReaderDocument
+}
+
+type CleanupPreviewState = {
+  sourceText: string
+  sourceKind?: ReaderDocument['kind']
+  options: CleanupOptions
+  punctuationPauses: PunctuationPauseSettings
+  includePauses: boolean
+  preview: TextNormalizationPreview
+}
+
+type NormalizationUndoState = {
+  text: string
+  cleanup: CleanupOptions
+  punctuationPauses: PunctuationPauseSettings
+  readerDocument: ReaderDocument | null
+  importedText: ImportedTextSnapshot | null
 }
 
 type ImportedCaption = {
@@ -547,6 +575,29 @@ function shortUiLabel(value: string, max = 80): string {
   const normalized = value.replace(/\s+/g, ' ').trim()
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`
+}
+
+async function buildCleanupPreviewState(
+  sourceText: string,
+  options: CleanupOptions,
+  punctuationPauses: PunctuationPauseSettings,
+  sourceKind?: ReaderDocument['kind'],
+  includePauses = true,
+): Promise<CleanupPreviewState> {
+  const { previewTextNormalization } = await import('./lib/text-normalization-preview.ts')
+  return {
+    sourceText,
+    sourceKind,
+    options: { ...options },
+    punctuationPauses: { ...punctuationPauses },
+    includePauses,
+    preview: previewTextNormalization(
+      sourceText,
+      options,
+      includePauses ? punctuationPauses : DEFAULT_PUNCTUATION_PAUSES,
+      { pdf: sourceKind === 'pdf' },
+    ),
+  }
 }
 
 function importSizeError(file: File): Toast | null {
@@ -1155,6 +1206,12 @@ function ResultRow({ result, selected, isSpeaking, assCaptionPreset, onSelect, o
       </button>
       {result.url ? <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} /> : null}
       {result.originalUrl ? <PlaybackAudio playbackKey={`clip:${result.id}:before`} src={result.originalUrl} label={`${result.filename} before cleanup`} cues={cues} vttUrl={result.vttUrl} /> : null}
+      {result.synthesisTextSnapshot ? (
+        <details className="result-text-snapshot">
+          <summary>Synthesized text snapshot</summary>
+          <pre>{result.synthesisTextSnapshot}</pre>
+        </details>
+      ) : null}
       <div className="result-actions">
         {result.replayText ? (
           <button type="button" onClick={() => onReplay(result.replayText!)} disabled={isSpeaking}>
@@ -1603,6 +1660,9 @@ function App() {
   })
   const [text, setText] = useState(STARTER_TEXT)
   const [readerDocument, setReaderDocument] = useState<ReaderDocument | null>(null)
+  const [importedText, setImportedText] = useState<ImportedTextSnapshot | null>(null)
+  const [cleanupPreview, setCleanupPreview] = useState<CleanupPreviewState | null>(null)
+  const [normalizationUndo, setNormalizationUndo] = useState<NormalizationUndoState | null>(null)
   const [readerOpen, setReaderOpen] = useState(false)
   const [pendingEpubMapping, setPendingEpubMapping] = useState<PendingEpubMapping | null>(null)
   const [results, setResults] = useState<AudioResult[]>([])
@@ -1705,6 +1765,7 @@ function App() {
   const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
   const scriptEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  const cleanupPreviewRequestRef = useRef(0)
   const listeningTrainerRef = useRef<ListeningTrainerSettings>(listeningTrainer)
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null)
   const advancedSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1799,6 +1860,148 @@ function App() {
   const speedMax = engine === 'supertonic' ? 1.2 : engine === 'kitten' ? 2 : 1.5
   const usableText = text.slice(0, MAX_TEXT_CHARS)
   const overLimit = text.length > MAX_TEXT_CHARS
+
+  function refreshCleanupPreview(
+    sourceText: string,
+    options: CleanupOptions,
+    pauses: PunctuationPauseSettings,
+    sourceKind: ReaderDocument['kind'] | undefined,
+    includePauses: boolean,
+  ) {
+    const requestId = cleanupPreviewRequestRef.current + 1
+    cleanupPreviewRequestRef.current = requestId
+    void buildCleanupPreviewState(sourceText, options, pauses, sourceKind, includePauses).then((next) => {
+      if (cleanupPreviewRequestRef.current === requestId) setCleanupPreview(next)
+    }).catch((error: unknown) => recordDiagnosticEvent('warn', error, 'text.normalization.preview'))
+  }
+
+  function openCleanupPreview(sourceText = usableText, sourceKind = readerDocument?.kind, includePauses = true) {
+    refreshCleanupPreview(sourceText, cleanup, punctuationPauses, sourceKind, includePauses)
+  }
+
+  function closeCleanupPreview() {
+    cleanupPreviewRequestRef.current += 1
+    setCleanupPreview(null)
+  }
+
+  function updateCleanupPreviewRule(id: TextNormalizationRuleId, enabled: boolean) {
+    const current = cleanupPreview
+    if (!current) return
+    const options = id === 'pauses' ? current.options : { ...current.options, [id]: enabled }
+    const includePauses = id === 'pauses' ? enabled : current.includePauses
+    setCleanupPreview({ ...current, options, includePauses })
+    refreshCleanupPreview(current.sourceText, options, current.punctuationPauses, current.sourceKind, includePauses)
+  }
+
+  function updateCleanupSetting(id: keyof CleanupOptions, enabled: boolean) {
+    setCleanup((current) => ({ ...current, [id]: enabled }))
+    const current = cleanupPreview
+    if (current) refreshCleanupPreview(current.sourceText, { ...current.options, [id]: enabled }, current.punctuationPauses, current.sourceKind, current.includePauses)
+  }
+
+  function captureNormalizationState(): NormalizationUndoState {
+    return {
+      text,
+      cleanup: { ...cleanup },
+      punctuationPauses: { ...punctuationPauses },
+      readerDocument,
+      importedText,
+    }
+  }
+
+  function restoreNormalizationState(snapshot: NormalizationUndoState) {
+    setText(snapshot.text)
+    setCleanup(snapshot.cleanup)
+    setPunctuationPauses(snapshot.punctuationPauses)
+    setReaderDocument(snapshot.readerDocument)
+    setImportedText(snapshot.importedText)
+    closeCleanupPreview()
+  }
+
+  function undoNormalization() {
+    const snapshot = normalizationUndo
+    if (!snapshot) return
+    restoreNormalizationState(snapshot)
+    setNormalizationUndo(null)
+    showToast({ tone: 'ok', message: 'Normalization undone.' })
+  }
+
+  function applyCleanupPreview() {
+    const current = cleanupPreview
+    if (!current) return
+    if (!current.preview.changed) {
+      closeCleanupPreview()
+      showToast({ tone: 'ok', message: 'No normalization changes to apply.' })
+      return
+    }
+    if (current.preview.emptyOutput) {
+      showToast({ tone: 'warn', message: 'These rules remove all text. Turn off a rule or keep the original text.' })
+      return
+    }
+    const previous = captureNormalizationState()
+    const nextText = current.preview.output.slice(0, MAX_TEXT_CHARS)
+    const nextDocument = readerDocument
+      ? createReaderDocument({ kind: current.sourceKind ?? readerDocument.kind, title: readerDocument.title, text: current.preview.output })
+      : null
+    setNormalizationUndo(previous)
+    setCleanup(current.options)
+    setText(nextText)
+    if (nextDocument) setReaderDocument(nextDocument)
+    closeCleanupPreview()
+    showToast({
+      tone: 'ok',
+      message: current.preview.output.length > MAX_TEXT_CHARS
+        ? `Normalization applied; editor trimmed to ${MAX_TEXT_CHARS} characters.`
+        : 'Normalization applied.',
+      action: {
+        label: 'Undo cleanup',
+        run: () => {
+          restoreNormalizationState(previous)
+          setNormalizationUndo(null)
+          showToast({ tone: 'ok', message: 'Normalization undone.' })
+        },
+      },
+    })
+  }
+
+  function restoreOriginalImportedText() {
+    const original = importedText
+    if (!original) return
+    const previous = captureNormalizationState()
+    setNormalizationUndo(previous)
+    setText(original.text.slice(0, MAX_TEXT_CHARS))
+    setReaderDocument(original.document)
+    closeCleanupPreview()
+    showToast({
+      tone: 'ok',
+      message: original.text.length > MAX_TEXT_CHARS
+        ? `Original import restored; editor trimmed to ${MAX_TEXT_CHARS} characters.`
+        : 'Original import restored.',
+      action: {
+        label: 'Undo restore',
+        run: () => {
+          restoreNormalizationState(previous)
+          setNormalizationUndo(null)
+          showToast({ tone: 'ok', message: 'Previous script restored.' })
+        },
+      },
+    })
+  }
+
+  function setImportedSource(source: { text: string; document: ReaderDocument }) {
+    const editorText = source.text.slice(0, MAX_TEXT_CHARS)
+    setText(editorText)
+    setPendingEpubMapping(null)
+    setReaderDocument(source.document)
+    setImportedText(source)
+    refreshCleanupPreview(editorText, cleanup, punctuationPauses, source.document.kind, true)
+  }
+
+  function normalizedTextForSynthesis(input: string, sourceKind = readerDocument?.kind): string {
+    const sourceText = sourceKind === 'pdf' && cleanup.pdfReflow ? reflowPdfText(input) : input
+    return cleanupText(sourceText, cleanup)
+  }
+
   const wordCount = useMemo(() => text.trim().split(/\s+/).filter(Boolean).length, [text])
   const lineCount = useMemo(() => text.split(/\r?\n/).length, [text])
   const cacheRows = modelCache?.engines ?? []
@@ -2807,6 +3010,9 @@ function App() {
       setLibrary(await listClips())
       setQueueJobs(await listJobs())
       setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
+      setImportedText(null)
+      closeCleanupPreview()
+      setNormalizationUndo(null)
       setPendingBackup(null)
       await refreshStorageEstimate()
       showToast({ tone: 'ok', message: `Restored ${preview.clips} clips and ${preview.jobs} jobs.` })
@@ -2899,6 +3105,9 @@ function App() {
     setLibrary(await listClips())
     setQueueJobs(await listJobs())
     setText(window.localStorage.getItem('bettertts-current-text') ?? STARTER_TEXT)
+    setImportedText(null)
+    closeCleanupPreview()
+    setNormalizationUndo(null)
     setActiveProjectName(opened.name)
     setProjectSearch('')
     setProjectDirty(false)
@@ -3128,6 +3337,9 @@ function App() {
     const previousText = text
     setText('')
     setPendingEpubMapping(null)
+    setImportedText(null)
+    closeCleanupPreview()
+    setNormalizationUndo(null)
     showToast({
       tone: 'ok',
       message: 'Script cleared.',
@@ -3952,6 +4164,7 @@ function App() {
     for (let index = 0; index < dispatchResult.jobs.length; index += 1) {
       const job = jobs[index]
       const dispatched = dispatchResult.jobs[index]
+      const synthesisText = dispatchJobs[index].text
       const audioParts = dispatched.audioParts
       const cues: Cue[] = dispatched.cues.map((cue, cueIndex) => ({ ...cue, index: cueIndex + 1 }))
 
@@ -4000,6 +4213,7 @@ function App() {
       if (encoded.loudness) result.loudness = encoded.loudness
       if (readerDocument) result.sourceDocumentId = readerDocument.id
       result.sourceText = job.text
+      result.synthesisTextSnapshot = synthesisText
       if (originalBlob) result.originalUrl = rememberUrl(URL.createObjectURL(originalBlob))
       if (cues.length > 0) {
         result.cues = cues
@@ -4009,7 +4223,7 @@ function App() {
 
       const generationProvenance = await createCurrentProvenance({
         voiceId: job.voice,
-        sourceText: job.text,
+        sourceText: synthesisText,
         sampleRate: outputSampleRate,
         cueCount: cues.length,
         cueTiming: wordTimestamps && englishKokoro ? 'word' : cues.length > 0 ? 'sentence' : 'none',
@@ -4075,6 +4289,7 @@ function App() {
       generated.push(result)
       generatedProvenance.push(generationProvenance)
       zipFiles[filename] = blob
+      zipFiles[`text/${filename.replace(/\.[^.]+$/u, '.txt')}`] = new Blob([synthesisText], { type: 'text/plain' })
       setResults([...generated])
     }
 
@@ -4248,6 +4463,7 @@ function App() {
     }
     const markerBlob = new Blob([cleanText], { type: 'text/plain' })
     const result = await buildResult(markerBlob, 'Browser speech playback', 'browser-playback.txt', cleanText)
+    result.synthesisTextSnapshot = cleanText
 
     setResults([result])
     setProgress(100)
@@ -4321,7 +4537,7 @@ function App() {
     }
     const effectiveNarrator = narratorMode && engine !== 'browser'
     const effectiveDialog = !effectiveNarrator && dialogMode && engine === 'kokoro'
-    const sourceText = cleanupText(usableText, cleanup)
+    const sourceText = normalizedTextForSynthesis(usableText)
     const chunks = effectiveNarrator || effectiveDialog ? [] : splitInput(sourceText, separateLines)
 
     if (!effectiveNarrator && !effectiveDialog && chunks.length === 0) {
@@ -4537,15 +4753,14 @@ function App() {
       if (!textContent) throw new Error('No readable text found')
       const truncated = textContent.length > MAX_TEXT_CHARS
       const title = shortUiLabel(article?.title ?? 'article')
-      setText(textContent.slice(0, MAX_TEXT_CHARS))
-      setPendingEpubMapping(null)
-      setReaderDocument(createReaderDocument({ kind: 'article', title, text: textContent }))
+      const document = createReaderDocument({ kind: 'article', title, text: textContent })
+      setImportedSource({ text: textContent, document })
       setReaderOpen(true)
       setImportUrlValue('')
       showToast(
         truncated
-          ? { tone: 'warn', message: `Imported "${title}" — trimmed to ${MAX_TEXT_CHARS} characters.` }
-          : { tone: 'ok', message: `Imported "${title}".` },
+          ? { tone: 'warn', message: `Imported "${title}" — review cleanup before synthesis; the editor is trimmed to ${MAX_TEXT_CHARS} characters.` }
+          : { tone: 'ok', message: `Imported "${title}" — review cleanup before synthesis.` },
       )
     } catch (err) {
       // Tell the user what actually failed — timeout, HTTP status, unreadable
@@ -4627,7 +4842,7 @@ function App() {
     job.generationProvenance = await createCurrentProvenance({
       engineId: queueEngine,
       voiceId: job.voice,
-      sourceText: chunks.map((chunk) => chunk.text).join('\n\n'),
+      sourceText: chunks.map((chunk) => applyPunctuationPauses(chunk.text, punctuationPauses)).join('\n\n'),
       sampleRate: outputSampleRateForEngine(queueEngine),
       cueTiming: 'none',
       postProcessing: false,
@@ -4643,10 +4858,10 @@ function App() {
     return job
   }
 
-  async function queueCurrentText(sourceOverride?: string, titleOverride?: string) {
+  async function queueCurrentText(sourceOverride?: string, titleOverride?: string, sourceKindOverride?: ReaderDocument['kind']) {
     const currentText = sourceOverride ?? usableText
     if (!currentText.trim()) return
-    const sourceText = cleanupText(currentText, cleanup)
+    const sourceText = normalizedTextForSynthesis(currentText, sourceKindOverride)
     const chunks: QueueSourceChunk[] = narratorMode
       ? splitNarratorText(sourceText).map((segment) => ({
         text: segment.text,
@@ -5244,6 +5459,7 @@ function App() {
         index: number
         filename: string
         text: string
+        synthesisText: string
         voice?: string
         role?: NarratorRole
         speaker?: string
@@ -5262,6 +5478,7 @@ function App() {
             index: chunk.index,
             filename,
             text: chunk.text,
+            synthesisText: applyPunctuationPauses(chunk.text, punctuationPauses),
             voice: chunk.voice,
             role: chunk.role,
             speaker: chunk.speaker,
@@ -5587,6 +5804,8 @@ function App() {
       }
       setPendingEpubMapping(pending)
       setReaderDocument(importedReader)
+      setImportedText(null)
+      closeCleanupPreview()
       setReaderOpen(true)
       showToast({
         tone: 'ok',
@@ -5624,28 +5843,22 @@ function App() {
         setStatus(info.phase === 'read' ? `Reading ${extension}…` : `Parsing ${extension} ${info.done} / ${info.total}`)
       }, controller.signal)
       if (imported.kind === 'epub') throw new Error('Document parser returned an unexpected EPUB result.')
-      const sourceText = imported.kind === 'pdf' && cleanup.pdfReflow
-        ? reflowPdfText(imported.text)
-        : imported.text
-      const cleaned = cleanupText(sourceText, cleanup)
-      if (!cleaned.trim()) {
-        showToast({ tone: 'warn', message: `No readable text found in ${fileLabel} after cleanup.` })
+      if (!imported.text.trim()) {
+        showToast({ tone: 'warn', message: `No readable text found in ${fileLabel}.` })
         return
       }
 
-      const trimmed = cleaned.slice(0, MAX_TEXT_CHARS)
-      const chunkCount = splitInput(trimmed, false).length
-      setText(trimmed)
-      setPendingEpubMapping(null)
-      setReaderDocument(createReaderDocument({ kind: imported.kind, title: imported.title, text: cleaned }))
+      const trimmed = imported.text.slice(0, MAX_TEXT_CHARS)
+      const importedDocument = createReaderDocument({ kind: imported.kind, title: imported.title, text: imported.text })
+      setImportedSource({ text: imported.text, document: importedDocument })
       setReaderOpen(true)
       showToast({
-        tone: cleaned.length > MAX_TEXT_CHARS ? 'warn' : 'ok',
-        message: cleaned.length > MAX_TEXT_CHARS
-          ? `${fileLabel} imported from ${imported.kind.toUpperCase()} and trimmed to ${MAX_TEXT_CHARS} characters; ${chunkCount} cleaned chunks ready.`
-          : `${fileLabel} imported from ${imported.kind.toUpperCase()}; ${chunkCount} cleaned chunks ready.`,
+        tone: imported.text.length > MAX_TEXT_CHARS ? 'warn' : 'ok',
+        message: imported.text.length > MAX_TEXT_CHARS
+          ? `${fileLabel} imported from ${imported.kind.toUpperCase()} and trimmed to ${MAX_TEXT_CHARS} characters; review cleanup before synthesis.`
+          : `${fileLabel} imported from ${imported.kind.toUpperCase()}; review cleanup before synthesis.`,
       })
-      if (autoQueue) await queueCurrentText(trimmed, file.name.replace(/\.(?:pdf|docx)$/iu, ''))
+      if (autoQueue) await queueCurrentText(trimmed, file.name.replace(/\.(?:pdf|docx)$/iu, ''), imported.kind)
     } catch (err) {
       showToast(err instanceof Error && err.name === 'AbortError'
         ? { tone: 'warn', message: 'Document import cancelled. The previous script was kept.' }
@@ -5687,17 +5900,16 @@ function App() {
         const raw = String(reader.result ?? '')
         const truncated = raw.length > MAX_TEXT_CHARS
         const trimmed = raw.slice(0, MAX_TEXT_CHARS)
-        setText(trimmed)
-        setPendingEpubMapping(null)
-        setReaderDocument(createReaderDocument({ kind: 'text', title: file.name.replace(/\.txt$/iu, ''), text: raw }))
+        const importedDocument = createReaderDocument({ kind: 'text', title: file.name.replace(/\.txt$/iu, ''), text: raw })
+        setImportedSource({ text: raw, document: importedDocument })
         setReaderOpen(true)
         showToast(
           truncated
-            ? { tone: 'warn', message: `${fileLabel} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters.` }
-            : { tone: 'ok', message: `${fileLabel} imported.` },
+            ? { tone: 'warn', message: `${fileLabel} truncated from ${raw.length} to ${MAX_TEXT_CHARS} characters; review cleanup before synthesis.` }
+            : { tone: 'ok', message: `${fileLabel} imported; review cleanup before synthesis.` },
         )
         if (autoQueue) {
-          void queueCurrentText(trimmed, file.name.replace(/\.txt$/iu, '')).finally(resolve)
+          void queueCurrentText(trimmed, file.name.replace(/\.txt$/iu, ''), 'text').finally(resolve)
         } else {
           resolve()
         }
@@ -6276,6 +6488,18 @@ function App() {
                 <span>{editorModeLabel}</span>
                 <span>{cleanupSummary}</span>
               </div>
+              {cleanupPreview ? (
+                <Suspense fallback={<section className="normalization-preview" aria-label="Text normalization preview">Loading preview…</section>}>
+                  <NormalizationPreview
+                    state={cleanupPreview}
+                    undoAvailable={normalizationUndo !== null}
+                    onRuleToggle={updateCleanupPreviewRule}
+                    onApply={applyCleanupPreview}
+                    onClose={closeCleanupPreview}
+                    onUndo={undoNormalization}
+                  />
+                </Suspense>
+              ) : null}
             </div>
 
             <div className="workspace-column">
@@ -7964,7 +8188,11 @@ function App() {
                   </span>
                 </label>
 
-                <span className="control-label">Text cleanup</span>
+                <div className="cleanup-heading">
+                  <span className="control-label">Text cleanup</span>
+                  <button type="button" className="heading-action" onClick={() => openCleanupPreview()} disabled={!usableText.trim()}>Preview changes</button>
+                  {importedText ? <button type="button" className="heading-action" onClick={restoreOriginalImportedText}>Restore original import</button> : null}
+                </div>
                 {(
                   [
                     ['citations', 'Skip citations', 'Remove [12]-style reference markers.'],
@@ -7982,7 +8210,7 @@ function App() {
                     <input
                       type="checkbox"
                       checked={cleanup[key]}
-                      onChange={(event) => setCleanup((prev) => ({ ...prev, [key]: event.target.checked }))}
+                      onChange={(event) => updateCleanupSetting(key, event.target.checked)}
                     />
                     <span>
                       {title}

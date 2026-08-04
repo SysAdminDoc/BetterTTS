@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyPunctuationPauses, DEFAULT_CLEANUP, DEFAULT_PUNCTUATION_PAUSES, checkSynthesisCompleteness, cleanupText, formatBytes, normalizeAudiobookNumbers, parseDialogLines, parsePauseTags, parseProsodyTags, reflowPdfText, slugify, splitInput, splitIntoSentences, splitNarratorText } from './text.ts'
+import { previewTextNormalization } from './text-normalization-preview.ts'
 
 describe('checkSynthesisCompleteness', () => {
   // ~200 speakable chars of ordinary prose.
@@ -396,6 +397,41 @@ describe('cleanupText', () => {
     expect(result).not.toContain('footnote line')
     expect(result).not.toContain('References')
     expect(result).not.toContain('Smith')
+  })
+
+  it('groups cleanup and punctuation pause changes by rule', () => {
+    const input = 'Book Header\n1\nVisit https://example.com/a [12]. SQL costs $12.50.\nBook Header\nPage 2 of 4'
+    const preview = previewTextNormalization(input, {
+      ...off,
+      urls: true,
+      citations: true,
+      acronyms: true,
+      numbers: true,
+      pageArtifacts: true,
+    }, { ...DEFAULT_PUNCTUATION_PAUSES, period: 0.75 })
+    expect(preview.changed).toBe(true)
+    expect(preview.emptyOutput).toBe(false)
+    expect(preview.groups.map((group) => group.id)).toEqual(expect.arrayContaining(['pageArtifacts', 'urls', 'citations', 'numbers', 'acronyms', 'pauses']))
+    expect(preview.output).toContain('link')
+    expect(preview.output).toContain('S Q L')
+    expect(preview.output).toContain('12 dollars and 50 cents')
+    expect(preview.output).toContain('[pause 0.75s]')
+  })
+
+  it('honors individual preview rule toggles and PDF context', () => {
+    const input = 'Wrapped hy-\nphenation. Visit https://example.com.'
+    const withoutUrls = previewTextNormalization(input, { ...off, pdfReflow: true, urls: false }, DEFAULT_PUNCTUATION_PAUSES, { pdf: true })
+    expect(withoutUrls.groups.map((group) => group.id)).toContain('pdfReflow')
+    expect(withoutUrls.groups.map((group) => group.id)).not.toContain('urls')
+    expect(withoutUrls.output).toContain('https://example.com')
+    expect(withoutUrls.output).toContain('hyphenation')
+  })
+
+  it('reports an empty output before destructive cleanup is applied', () => {
+    const preview = previewTextNormalization('[12]', { ...off, citations: true })
+    expect(preview.changed).toBe(true)
+    expect(preview.emptyOutput).toBe(true)
+    expect(preview.groups).toEqual([{ id: 'citations', label: 'Citations', before: '[12]', after: '' }])
   })
 })
 

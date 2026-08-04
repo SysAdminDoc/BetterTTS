@@ -875,12 +875,30 @@ async function runSmoke() {
     if (!importedText.includes('Imported DOCX body.') || !importedText.includes('Second cleaned paragraph.')) {
       throw new Error(`DOCX import did not populate the editor: ${importedText}`)
     }
+    await desktop.page.getByLabel('Text to synthesize').fill('Visit https://example.com/article [12]. SQL costs $12.50.')
+    await desktop.page.getByRole('button', { name: 'Preview changes' }).click()
+    const normalizationPreview = desktop.page.getByLabel('Text normalization preview')
+    await normalizationPreview.waitFor({ timeout: 20000 })
+    await normalizationPreview.getByLabel('Enable URLs normalization').uncheck()
+    if (await normalizationPreview.getByText('URLs', { exact: true }).count() === 0) throw new Error('Normalization preview did not group URL changes')
+    await normalizationPreview.getByRole('button', { name: 'Apply normalization' }).click()
+    const normalizedImportedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
+    if (!normalizedImportedText.includes('https://example.com/article') || normalizedImportedText.includes('[12]') || !normalizedImportedText.includes('S Q L')) {
+      throw new Error(`Normalization preview applied the wrong rule set: ${normalizedImportedText}`)
+    }
+    await desktop.page.getByRole('button', { name: 'Restore original import' }).click()
+    if (!(await desktop.page.getByLabel('Text to synthesize').inputValue()).includes('Imported DOCX body.')) {
+      throw new Error('Restore original import did not recover the raw document text')
+    }
     await fileInput.setInputFiles(makePdfUpload())
     const pdfImportResult = await Promise.race([
       desktop.page.getByText(/smoke\.pdf imported from PDF/).waitFor({ timeout: 20000 }).then(() => 'ok'),
       desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
     ])
     if (pdfImportResult !== 'ok') throw new Error(`PDF worker import did not complete: ${pdfImportResult}`)
+    const pdfPreview = desktop.page.getByLabel('Text normalization preview')
+    await pdfPreview.waitFor({ timeout: 20000 })
+    await pdfPreview.getByRole('button', { name: 'Apply normalization' }).click()
     await desktop.page.waitForTimeout(200)
     const pdfImportedText = await desktop.page.getByLabel('Text to synthesize').inputValue()
     const normalizedPdfText = pdfImportedText.replace(/\s/g, '')

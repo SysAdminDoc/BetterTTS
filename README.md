@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-521%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-524%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -49,6 +49,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
 - **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
 - **Versioned generation provenance** — saved clips and resumable jobs retain engine/model revisions, voice, synthesis, cleanup, pronunciation, BGM, encoder, source hash, cues, and RVC context; ZIP/project exports and M4B metadata carry the manifest while source text and article URLs remain opt-in
+- **Text normalization preview** — imported text can show compact rule-grouped before/after changes, toggle cleanup rules, apply or undo them, restore the raw import, and inspect the exact synthesized text snapshot
 - **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
 - **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `ja`, `cmn`, `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
@@ -96,7 +97,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis or Reader mode
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer menu plus “Open with BetterTTS” registrations for TXT/EPUB/PDF/DOCX, bounded folder import, optional Tesseract screen OCR, tray render status, and completion notifications; every OS hook is independently disableable and the web/PWA build remains unchanged
 - **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
-- **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis
+- **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis; the persisted rules are previewable and reversible
 - **Voice preview** — one-click preview for each voice with a bounded 20-entry session LRU cache and object-URL disposal
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
 - **Generation stats** — elapsed time, time to first audio, chars/s throughput, audio duration, realtime speed factor
@@ -224,7 +225,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (521 tests across 90 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (524 tests across 90 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

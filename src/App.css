@@ -497,6 +497,192 @@ footer button {
   font: 600 12px/1.25 var(--sans);
 }
 
+.cleanup-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.normalization-preview {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border-strong));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-raised));
+}
+
+.normalization-preview-heading,
+.normalization-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.normalization-preview-heading h3 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.normalization-preview-heading small,
+.normalization-rule small,
+.normalization-diff-columns span {
+  color: var(--muted);
+  font: 600 11px/1.4 var(--sans);
+}
+
+.normalization-preview-heading small {
+  display: block;
+  max-width: 48rem;
+  margin-top: 3px;
+}
+
+.normalization-count {
+  color: var(--accent-text);
+  font: 700 12px/1 var(--sans);
+  white-space: nowrap;
+}
+
+.normalization-rule-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.normalization-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-1) 72%, transparent);
+}
+
+.normalization-rule input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.normalization-rule span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.normalization-rule strong {
+  color: var(--heading);
+  font-size: 12px;
+}
+
+.normalization-rule small {
+  display: block;
+}
+
+.normalization-diff-list {
+  display: grid;
+  gap: 8px;
+}
+
+.normalization-diff {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-1);
+}
+
+.normalization-diff > strong {
+  color: var(--heading);
+  font-size: 12px;
+}
+
+.normalization-diff-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.normalization-diff-columns > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.normalization-diff-columns del,
+.normalization-diff-columns ins {
+  display: block;
+  min-height: 34px;
+  overflow-wrap: anywhere;
+  padding: 7px 8px;
+  border-radius: 5px;
+  font: 500 12px/1.45 var(--mono);
+  text-decoration-thickness: 1px;
+  white-space: pre-wrap;
+}
+
+.normalization-diff-columns del {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface-0));
+}
+
+.normalization-diff-columns ins {
+  color: color-mix(in srgb, var(--success) 78%, var(--text));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-0));
+  text-decoration: none;
+}
+
+.normalization-empty,
+.normalization-warning {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 6px;
+  font: 600 12px/1.4 var(--sans);
+}
+
+.normalization-empty {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-1) 70%, transparent);
+}
+
+.normalization-warning {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface-1));
+}
+
+.result-text-snapshot {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.result-text-snapshot summary {
+  cursor: pointer;
+  color: var(--muted);
+  font: 700 12px/1.3 var(--sans);
+}
+
+.result-text-snapshot pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-0);
+  color: var(--text);
+  font: 500 12px/1.45 var(--mono);
+  white-space: pre-wrap;
+}
+
 button:hover:not(:disabled),
 .result-actions a:hover,
 .playback-tools button:hover:not(:disabled),
@@ -3059,6 +3245,11 @@ footer {
   }
 
   .result-row {
+    grid-template-columns: 1fr;
+  }
+
+  .normalization-rule-list,
+  .normalization-diff-columns {
     grid-template-columns: 1fr;
   }
 
