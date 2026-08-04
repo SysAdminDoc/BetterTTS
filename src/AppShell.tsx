@@ -4379,10 +4379,11 @@ function App() {
   useEffect(() => {
     // PWA share target: Android shares land here as ?url= / ?text= params.
     const params = new URLSearchParams(window.location.search)
+    const extensionHandoff = params.get('source') === 'extension'
     const explicitUrl = params.get('url')
     const sharedText = params.get('text')
-    const urlFromText = sharedText?.match(/https?:\/\/\S+/)?.[0] ?? null
-    const sharedUrl = explicitUrl || urlFromText
+    const urlFromText = extensionHandoff ? null : sharedText?.match(/https?:\/\/\S+/)?.[0] ?? null
+    const sharedUrl = extensionHandoff ? null : explicitUrl || urlFromText
     if (sharedUrl) {
       importFromUrl(sharedUrl)
     } else if (sharedText) {

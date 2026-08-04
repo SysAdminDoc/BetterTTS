@@ -19,6 +19,7 @@
     "test": "vitest run",
     "lint": "oxlint",
     "smoke": "node scripts/smoke.mjs",
+    "extension:build": "node scripts/build-extension.mjs",
     "smoke:release": "cross-env BETTERTTS_SMOKE_REAL_ENGINE=1 node scripts/smoke.mjs",
     "release:smoke": "node scripts/run-release-smoke.mjs",
     "license:runtime": "node scripts/check-runtime-licenses.mjs",

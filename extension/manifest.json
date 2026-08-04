@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Listen in BetterTTS",
+  "version": "0.22.0",
+  "description": "Send the current selection or page text to the local BetterTTS studio.",
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Listen in BetterTTS",
+    "default_icon": {
+      "192": "icon-192.png",
+      "512": "icon-512.png"
+    }
+  },
+  "icons": {
+    "192": "icon-192.png",
+    "512": "icon-512.png"
+  }
+}

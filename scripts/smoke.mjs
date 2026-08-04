@@ -636,6 +636,21 @@ async function runRealEngineChecks(browser) {
   }
 }
 
+async function assertExtensionHandoff(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  try {
+    const page = await context.newPage()
+    const payload = 'Read this selection literally, including https://example.com/article.'
+    await page.goto(`${baseUrl}?source=extension&text=${encodeURIComponent(payload)}`, { waitUntil: 'domcontentloaded' })
+    const editor = page.getByLabel('Text to synthesize')
+    await editor.waitFor({ timeout: 20000 })
+    const value = await editor.inputValue()
+    if (value !== payload) throw new Error('Extension handoff changed page text into an article import.')
+  } finally {
+    await context.close()
+  }
+}
+
 async function runSmoke() {
   console.log('Building production app...')
   runChecked('npm', ['run', 'build'])
@@ -673,6 +688,9 @@ async function runSmoke() {
     await desktop.page.getByLabel('Text to synthesize').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Generate audio' }).first().waitFor({ timeout: 20000 })
     if (/Vite Error|Internal Server Error|Failed to compile/i.test(body)) throw new Error('Framework error overlay detected')
+
+    console.log('Checking browser-extension text handoff...')
+    await assertExtensionHandoff(browser)
 
     console.log('Checking semantic structure, keyboard access, and display preferences...')
     await assertAccessibilityStructure(desktop.page)
