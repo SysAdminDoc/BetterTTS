@@ -23,6 +23,7 @@ export type DiagnosticsSelection = {
   engine: string
   engineStatus: string
   runtime: string
+  webGpuDtype?: string
   voice: string
   language?: string
   format: string

@@ -50,8 +50,8 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
 - **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `ja`, `cmn`, `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
-- **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support
-- **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32 stays HF-hosted because it exceeds the Pages file cap
+- **WebGPU acceleration** with automatic WASM q8 fallback for devices without GPU support, plus a persisted experimental fp16 opt-in; fp32 remains the default
+- **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
@@ -203,7 +203,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (429 tests across 73 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (432 tests across 74 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -342,10 +342,22 @@ Multilingual voices:
 | Parameters | 82 million |
 | ONNX source | `onnx-community/Kokoro-82M-v1.0-ONNX` |
 | Sample rate | 24,000 Hz |
-| WebGPU dtype | fp32 (~326 MB, HF-hosted) |
+| WebGPU dtype | fp32 default (~326 MB, HF-hosted); fp16 experimental opt-in |
 | WASM dtype | q8 (~92 MB, Pages-hosted) |
 | Languages | English (US + British), Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, Brazilian Portuguese |
 | License | Apache-2.0 |
+
+The WebGPU fp16 switch is available under **Voice chain -> Advanced options -> WebGPU fp16 (experimental)**. It is persisted per browser, resets the active Kokoro session when changed, and automatically falls back to WASM q8 if WebGPU model loading fails.
+
+### WebGPU dtype benchmark (2026-08-03)
+
+| Browser / adapter | fp32 | fp16 | Notes |
+|---|---|---|---|
+| Chrome 151.0.7922.72 / NVIDIA Lovelace | PASS — RIFF/WAV, 150,044 bytes, 3.125 s | PASS — RIFF/WAV, 148,844 bytes, 3.100 s | Headed WebGPU run on the isolated virtual display; no page, inference, request, or media errors |
+| Firefox 137.0.1 | N/A | N/A | Installed Firefox reports no `navigator.gpu`; Firefox 141 is not installed on this Windows host |
+| Safari 26 | N/A | N/A | Safari is unavailable on this Windows host |
+
+fp32 remains the default because only the Chrome adapter was available for an artifact-free WebGPU A/B run; the fp16 opt-in and CPU fallback remain available for broader adapter coverage.
 
 Supertonic is available as a separate English speed engine: 66M parameters, 10 voices, 44,100 Hz output, HF-hosted fp32 ONNX assets, OpenRAIL license, and Transformers.js 4.2.0 runtime.
 

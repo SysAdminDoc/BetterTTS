@@ -2,6 +2,33 @@ import { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE, installKokoroAssetFallback } from 
 
 export { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE }
 
+export type KokoroWebGpuDtype = 'fp32' | 'fp16'
+export const KOKORO_WEBGPU_DTYPE_STORAGE_KEY = 'bettertts-kokoro-webgpu-dtype'
+let sessionKokoroWebGpuDtype: KokoroWebGpuDtype | null = null
+
+export function parseKokoroWebGpuDtype(value: string | null): KokoroWebGpuDtype {
+  return value === 'fp16' ? 'fp16' : 'fp32'
+}
+
+export function getKokoroWebGpuDtype(): KokoroWebGpuDtype {
+  if (sessionKokoroWebGpuDtype) return sessionKokoroWebGpuDtype
+  if (typeof window === 'undefined') return 'fp32'
+  try {
+    return parseKokoroWebGpuDtype(window.localStorage.getItem(KOKORO_WEBGPU_DTYPE_STORAGE_KEY))
+  } catch {
+    return 'fp32'
+  }
+}
+
+export function setKokoroWebGpuDtype(value: KokoroWebGpuDtype) {
+  sessionKokoroWebGpuDtype = value
+  try {
+    window.localStorage.setItem(KOKORO_WEBGPU_DTYPE_STORAGE_KEY, value)
+  } catch {
+    // The in-memory preference still applies when browser storage is blocked.
+  }
+}
+
 type KokoroModule = typeof import('kokoro-js')
 export type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
 
@@ -34,7 +61,7 @@ export async function probeWebGpu(): Promise<boolean> {
   }
 }
 
-export async function loadKokoro(onProgress: (info: ProgressInfo) => void): Promise<KokoroInstance> {
+export async function loadKokoro(onProgress: (info: ProgressInfo) => void, webGpuDtype: KokoroWebGpuDtype = getKokoroWebGpuDtype()): Promise<KokoroInstance> {
   if (kokoroPromise) return kokoroPromise
 
   installKokoroAssetFallback()
@@ -45,7 +72,7 @@ export async function loadKokoro(onProgress: (info: ProgressInfo) => void): Prom
   ])
 
   const device = hasWebGpu ? ('webgpu' as const) : ('wasm' as const)
-  const dtype = hasWebGpu ? ('fp32' as const) : ('q8' as const)
+  const dtype = hasWebGpu ? webGpuDtype : ('q8' as const)
 
   const promise = KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
     device,

@@ -37,6 +37,16 @@ beforeEach(() => {
 })
 
 describe('kokoro worker cancellation', () => {
+  it('sends the selected WebGPU dtype to the inference worker', async () => {
+    const mod = await loadModule()
+    window.localStorage.setItem('bettertts-kokoro-webgpu-dtype', 'fp16')
+    const loading = mod.loadKokoroWorker('webgpu', () => {})
+
+    expect(FakeWorker.instances[0].posted).toContainEqual({ type: 'load', device: 'webgpu', dtype: 'fp16' })
+    mod.resetWorker()
+    await expect(loading).rejects.toThrow('TTS session was reset.')
+  })
+
   it('rejects a targeted request deterministically and notifies the worker', async () => {
     const mod = await loadModule()
     const controller = new AbortController()

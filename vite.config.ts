@@ -27,7 +27,7 @@ function cspInjector(): Plugin {
     "script-src 'self' blob: 'wasm-unsafe-eval'",
     // https: is broad, but article import fetches arbitrary pages; script-src
     // 'self' still blocks the injection an exfiltration attack would need.
-    "connect-src 'self' https:",
+    "connect-src 'self' https: blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "media-src 'self' blob:",

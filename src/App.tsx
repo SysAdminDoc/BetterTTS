@@ -86,7 +86,15 @@ import type { BackupPreview } from './lib/backup.ts'
 import { subscribeToStoreChanges, withJobLease } from './lib/coordination.ts'
 import { queueExportSizeError } from './lib/export-guards.ts'
 import { commitBlobToFile, FileSaveError } from './lib/file-save.ts'
-import { KOKORO_SAMPLE_RATE, type ProgressInfo, type RawAudioLike, loadKokoro, probeWebGpu, resetKokoroSession } from './lib/kokoro.ts'
+import {
+  KOKORO_SAMPLE_RATE,
+  type ProgressInfo,
+  type RawAudioLike,
+  getKokoroWebGpuDtype,
+  loadKokoro,
+  probeWebGpu,
+  resetKokoroSession,
+} from './lib/kokoro.ts'
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
 import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
@@ -208,6 +216,10 @@ const EpubMappingPanel = lazy(async () => {
 const SentenceRetakePanel = lazy(async () => {
   const module = await import('./components/SentenceRetakePanel.tsx')
   return { default: module.SentenceRetakePanel }
+})
+const KokoroWebGpuDtypeControl = lazy(async () => {
+  const module = await import('./components/KokoroWebGpuDtypeControl.tsx')
+  return { default: module.KokoroWebGpuDtypeControl }
 })
 
 type Engine = EngineId
@@ -1538,7 +1550,7 @@ function App() {
   const englishKokoro = isEnglishKokoroLocale(locale)
   const chatterboxNeedsSetup = !chatterboxConsent || chatterboxReference === null
   const blendableVoices = useMemo(() => VOICES.filter((voice) => isEnglishKokoroLocale(voice.locale)), [])
-  const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : 'WebGPU fp32 / WebAssembly q8') : runtimeLabel
+  const kokoroRuntimeLabel = runtimeLabel.startsWith('Supertonic') ? (forceWasm ? 'WebAssembly q8' : `WebGPU ${getKokoroWebGpuDtype()} / WebAssembly q8`) : runtimeLabel
   const kittenRuntimeReady = hasKittenWebGpu()
   const speedMin = engine === 'supertonic' ? 0.8 : 0.5
   const speedMax = engine === 'supertonic' ? 1.2 : engine === 'kitten' ? 2 : 1.5
@@ -2046,7 +2058,7 @@ function App() {
     } else if (forceWasm) {
       setRuntimeLabel('WebAssembly q8')
     } else {
-      probeWebGpu().then((hasGpu) => setRuntimeLabel(hasGpu ? 'WebGPU fp32' : 'WebAssembly q8'))
+      probeWebGpu().then((hasGpu) => setRuntimeLabel(hasGpu ? `WebGPU ${getKokoroWebGpuDtype()}` : 'WebAssembly q8'))
     }
   }, [forceWasm, forceNative])
 
@@ -2214,6 +2226,7 @@ function App() {
       engine,
       engineStatus,
       runtime: runtimeLabel,
+      webGpuDtype: engine === 'kokoro' ? getKokoroWebGpuDtype() : undefined,
       voice: engine === 'kokoro'
         ? selectedVoice.id
         : engine === 'supertonic'
@@ -3040,7 +3053,7 @@ function App() {
           if (needsDirectKokoroPath(voice, bin)) {
             // Blended and multilingual voices still route through the browser
             // runtime — the native host covers the standard English path first.
-            await loadKokoroWorker('wasm', 'q8', onProgress)
+            await loadKokoroWorker('wasm', onProgress)
             return { samples: await generateWorker(text, voice, spd, bin, signal), sampleRate: KOKORO_SAMPLE_RATE }
           }
           try {
@@ -3063,11 +3076,11 @@ function App() {
     const hasGpu = !forceWasm && (await probeWebGpu())
     if (useWorker) {
       try {
-        await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', hasGpu ? 'fp32' : 'q8', onProgress)
-        setRuntimeLabel(hasGpu ? 'WebGPU fp32' : 'WebAssembly q8')
+        await loadKokoroWorker(hasGpu ? 'webgpu' : 'wasm', onProgress)
+        setRuntimeLabel(hasGpu ? `WebGPU ${getKokoroWebGpuDtype()}` : 'WebAssembly q8')
       } catch (err) {
         if (!hasGpu) throw err
-        await loadKokoroWorker('wasm', 'q8', onProgress)
+        await loadKokoroWorker('wasm', onProgress)
         setRuntimeLabel('WebAssembly q8')
       }
       return {
@@ -7122,6 +7135,11 @@ function App() {
                         <small>{forceNative ? 'Managed by the native desktop engine.' : 'Use if audio sounds corrupted or distorted on your GPU.'}</small>
                       </span>
                     </label>
+                    <Suspense fallback={null}>
+                      <KokoroWebGpuDtypeControl
+                        disabled={isGenerating || forceWasm || forceNative}
+                      />
+                    </Suspense>
                     {nativeAvailable ? (
                       <label className="toggle-row">
                         <input

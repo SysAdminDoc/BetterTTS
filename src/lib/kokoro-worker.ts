@@ -1,4 +1,4 @@
-import type { ProgressInfo } from './kokoro.ts'
+import { getKokoroWebGpuDtype, type ProgressInfo } from './kokoro.ts'
 import type { WorkerRequest, WorkerResponse } from '../worker/tts.worker.ts'
 
 let worker: Worker | null = null
@@ -75,10 +75,10 @@ function getWorker(): Worker {
 
 export function loadKokoroWorker(
   device: 'webgpu' | 'wasm',
-  dtype: 'fp32' | 'q8',
   onProgress: (info: ProgressInfo) => void,
 ): Promise<void> {
   progressCallback = onProgress
+  const dtype = device === 'webgpu' ? getKokoroWebGpuDtype() : 'q8'
   const key = `${device}:${dtype}`
   if (loadPromise && loadKey === key) return loadPromise
   const w = getWorker()

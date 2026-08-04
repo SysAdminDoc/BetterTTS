@@ -1,12 +1,12 @@
 import { KOKORO_MODEL_ID, installKokoroAssetFallback } from '../lib/kokoro-assets.ts'
-import type { ProgressInfo } from '../lib/kokoro.ts'
+import type { KokoroWebGpuDtype, ProgressInfo } from '../lib/kokoro.ts'
 import { needsDirectKokoroPath } from '../lib/kokoro-direct.ts'
 
 type KokoroModule = typeof import('kokoro-js')
 type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>
 
 export type WorkerRequest =
-  | { type: 'load'; device: 'webgpu' | 'wasm'; dtype: 'fp32' | 'q8' }
+  | { type: 'load'; device: 'webgpu' | 'wasm'; dtype: KokoroWebGpuDtype | 'q8' }
   | { type: 'generate'; text: string; voice: string; speed: number; id: number; voiceBin?: Float32Array }
   | { type: 'cancel'; id: number }
 
