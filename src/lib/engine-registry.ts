@@ -1,5 +1,29 @@
 import type { ByoModelOptionId } from './byo-models.ts'
 
+export type {
+  EngineAccelerator,
+  EngineAdapter,
+  EngineAdapterContext,
+  EngineAudio,
+  EngineAvailability,
+  EngineCapabilities,
+  EngineDiagnosticField,
+  EngineDiagnosticsDescriptor,
+  EngineExportFormat,
+  EngineHardwareRequirements,
+  EngineLicense,
+  EngineLicenseTier,
+  EngineManifest,
+  EngineModelFile,
+  EngineModelSource,
+  EnginePlatform,
+  EngineProbeContext,
+  EngineProgress,
+  EngineRuntime,
+  EngineSafetyTier,
+  EngineSynthesisRequest,
+} from './engine-adapter.ts'
+
 export type EngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'piper' | 'melo' | 'qwen' | 'browser'
 
 export type PostStageId = 'rvc'

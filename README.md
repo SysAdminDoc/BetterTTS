@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-496%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-499%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -218,7 +218,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (496 tests across 84 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (499 tests across 85 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -239,6 +239,7 @@ src/
 │   ├── object-urls.ts        # Output/caption blob URL ownership
 │   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
 │   ├── engine-registry.ts   # Engine capability flags and queue boundaries
+│   ├── engine-adapter.ts    # Validated v1 engine manifests, adapters, and registry
 │   ├── kokoro-assets.ts     # SHA-verified Pages q8 routing + HF fallback
 │   ├── model-assets.json     # Immutable model revisions and asset digests
 │   ├── kokoro-multilingual.ts # ephone + direct Kokoro model path for ja/cmn/es/fr/it/pt-BR/hi
@@ -317,6 +318,7 @@ sidecar/
 - Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
 - The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, bounds request/input/audio surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that closes the listener and active sockets
 - RVC is an explicit desktop-only post-stage: consent and model provenance are required, model paths are user-managed, optional blending performs two bounded inference passes, and converted clips retain the selected model metadata
+- New engines enter through the v1 adapter SDK: a local manifest declares immutable model files, runtime/license/safety metadata, hardware needs, queue/export capabilities, and required diagnostics fields before an adapter can be registered
 - Narrator mode is a bounded text transformation before synthesis: quoted and explicit-speaker segments receive per-chunk role/voice metadata, plain text remains narration, and queue/M4B exports consume the persisted rendered chunks
 - All audio generation and processing happens client-side — zero network calls after model download
 - Web Worker isolates WASM/WebGPU inference from the main thread
