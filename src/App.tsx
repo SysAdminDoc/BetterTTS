@@ -173,6 +173,7 @@ import { MAX_PRONUNCIATIONS, MAX_PRONUNCIATION_VALUE_CHARS, MAX_PRONUNCIATION_WO
 import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocale, kokoroLanguageForVoice, type KokoroLocale } from './lib/voices.ts'
 import { type Cue, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
+import type { SentenceRetakeAudio } from './lib/sentence-retakes.ts'
 import {
   MAX_WHISPER_AUDIO_BYTES,
   MAX_WHISPER_AUDIO_SECONDS,
@@ -203,6 +204,10 @@ const ReaderView = lazy(async () => {
 const EpubMappingPanel = lazy(async () => {
   const module = await import('./components/EpubMappingPanel.tsx')
   return { default: module.EpubMappingPanel }
+})
+const SentenceRetakePanel = lazy(async () => {
+  const module = await import('./components/SentenceRetakePanel.tsx')
+  return { default: module.SentenceRetakePanel }
 })
 
 type Engine = EngineId
@@ -1126,10 +1131,12 @@ type QueueChunkPlayerProps = {
   format: AudioFormat
   regenerating: boolean
   onRegenerate: (jobId: string, chunkIndex: number, nextText: string, nextTitle?: string) => Promise<boolean>
+  onRetake: (jobId: string, chunkIndex: number, cue: Cue, text: string) => Promise<SentenceRetakeAudio | null>
+  onSplice: (jobId: string, chunkIndex: number, cue: Cue, take: SentenceRetakeAudio, text: string) => Promise<boolean>
   onNotice: (toast: Toast) => void
 }
 
-function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, onNotice }: QueueChunkPlayerProps) {
+function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, onRetake, onSplice, onNotice }: QueueChunkPlayerProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [draftText, setDraftText] = useState(chunk.text)
@@ -1150,7 +1157,7 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
       if (current) URL.revokeObjectURL(current)
       return null
     })
-  }, [chunk.text, chunk.duration])
+  }, [chunk.cues, chunk.text, chunk.duration])
 
   useEffect(() => {
     return () => {
@@ -1239,6 +1246,19 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
           </div>
           <small>Old audio stays available until the replacement segment finishes successfully.</small>
         </div>
+      ) : null}
+      {chunk.status === 'done' && chunk.cues?.length ? (
+        <Suspense fallback={null}>
+          <SentenceRetakePanel
+            jobId={jobId}
+            chunkIndex={chunk.index}
+            cues={chunk.cues}
+            regenerating={regenerating}
+            onRetake={onRetake}
+            onSplice={onSplice}
+            onNotice={onNotice}
+          />
+        </Suspense>
       ) : null}
     </div>
   )
@@ -4484,6 +4504,156 @@ function App() {
     }
   }
 
+  async function retakeQueueSentence(
+    jobId: string,
+    chunkIndex: number,
+    cue: Cue,
+    nextText: string,
+  ): Promise<SentenceRetakeAudio | null> {
+    if (generatingRef.current || regeneratingChunkKey) {
+      showToast({ tone: 'warn', message: 'Another generation is running — original unchanged.' })
+      return null
+    }
+    const lease = await withJobLease(jobId, (leaseSignal) => retakeQueueSentenceWithLease(jobId, chunkIndex, cue, nextText, leaseSignal))
+    if (!lease.acquired) {
+      showToast({ tone: 'warn', message: 'Queue job active in another tab. Pause it first.' })
+      return null
+    }
+    return lease.value
+  }
+
+  async function retakeQueueSentenceWithLease(
+    jobId: string,
+    chunkIndex: number,
+    cue: Cue,
+    nextText: string,
+    leaseSignal: AbortSignal,
+  ): Promise<SentenceRetakeAudio | null> {
+    if (leaseSignal.aborted) throw leaseSignal.reason
+    const cleanText = nextText.trim()
+
+    generatingRef.current = true
+    setIsGenerating(true)
+    setRegeneratingChunkKey(`${jobId}:${chunkIndex}`)
+    setActiveJobId(jobId)
+    clearProgressResetTimer()
+    abortRef.current = false
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
+    const onLeaseLost = () => cancelGeneration()
+    leaseSignal.addEventListener('abort', onLeaseLost, { once: true })
+    setStatus(`Retaking sentence ${cue.index}`)
+    setProgress(5)
+
+    try {
+      const { generateSentenceRetake } = await import('./lib/queue-sentence-retakes.ts')
+      const audio = await generateSentenceRetake({
+        ensureQueueEngine,
+        queueVoiceBin,
+        applyPronunciations,
+        setStatus,
+        isCancelled: () => abortRef.current || leaseSignal.aborted || generationController.signal.aborted,
+      }, jobId, chunkIndex, cue, cleanText, generationController.signal)
+      if (!audio) {
+        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled — original kept.` })
+        return null
+      }
+      setProgress(100)
+      showToast({ tone: 'ok', message: `Retake ${cue.index} ready. Original unchanged.` })
+      return audio
+    } catch (err) {
+      if (abortRef.current || leaseSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled — original kept.` })
+      } else {
+        showToast({ tone: 'error', message: err instanceof Error ? `Retake failed: ${err.message}` : 'Retake failed.' })
+      }
+      return null
+    } finally {
+      leaseSignal.removeEventListener('abort', onLeaseLost)
+      generatingRef.current = false
+      setIsGenerating(false)
+      setRegeneratingChunkKey(null)
+      setActiveJobId(null)
+      setProgress(null)
+      setStatus('Ready')
+      if (generationAbortRef.current === generationController) generationAbortRef.current = null
+    }
+  }
+
+  async function spliceQueueSentence(
+    jobId: string,
+    chunkIndex: number,
+    cue: Cue,
+    take: SentenceRetakeAudio,
+    replacementText: string,
+  ): Promise<boolean> {
+    if (generatingRef.current || regeneratingChunkKey) {
+      showToast({ tone: 'warn', message: 'Another generation is running — original unchanged.' })
+      return false
+    }
+    const lease = await withJobLease(jobId, (leaseSignal) => spliceQueueSentenceWithLease(jobId, chunkIndex, cue, take, replacementText, leaseSignal))
+    if (!lease.acquired) {
+      showToast({ tone: 'warn', message: 'Queue job active in another tab. Pause it first.' })
+      return false
+    }
+    return lease.value
+  }
+
+  async function spliceQueueSentenceWithLease(
+    jobId: string,
+    chunkIndex: number,
+    cue: Cue,
+    take: SentenceRetakeAudio,
+    replacementText: string,
+    leaseSignal: AbortSignal,
+  ): Promise<boolean> {
+    if (leaseSignal.aborted) throw leaseSignal.reason
+    const cleanText = replacementText.trim()
+
+    generatingRef.current = true
+    setIsGenerating(true)
+    setRegeneratingChunkKey(`${jobId}:${chunkIndex}`)
+    setActiveJobId(jobId)
+    clearProgressResetTimer()
+    abortRef.current = false
+    const generationController = new AbortController()
+    generationAbortRef.current = generationController
+    const onLeaseLost = () => cancelGeneration()
+    leaseSignal.addEventListener('abort', onLeaseLost, { once: true })
+    setStatus(`Splicing sentence ${cue.index}`)
+    setProgress(10)
+
+    try {
+      const { spliceSentenceRetake } = await import('./lib/queue-sentence-retakes.ts')
+      const nextJob = await spliceSentenceRetake({
+        encodeOutput,
+        onEncoding: () => setProgress(70),
+        isCancelled: () => abortRef.current || leaseSignal.aborted || generationController.signal.aborted,
+      }, jobId, chunkIndex, cue, take, cleanText, generationController.signal)
+      if (!nextJob) return false
+      setQueueJobs((previous) => previous.map((item) => (item.id === jobId ? nextJob : item)))
+      setProgress(100)
+      showToast({ tone: 'ok', message: `Take ${cue.index} applied. Original replaced.` })
+      return true
+    } catch (err) {
+      if (abortRef.current || leaseSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        showToast({ tone: 'warn', message: `Splice ${cue.index} cancelled — original kept.` })
+      } else {
+        showToast({ tone: 'error', message: err instanceof Error ? `Splice failed: ${err.message} Original kept.` : 'Splice failed. Original kept.' })
+      }
+      return false
+    } finally {
+      leaseSignal.removeEventListener('abort', onLeaseLost)
+      generatingRef.current = false
+      setIsGenerating(false)
+      setRegeneratingChunkKey(null)
+      setActiveJobId(null)
+      setProgress(null)
+      setStatus('Ready')
+      if (generationAbortRef.current === generationController) generationAbortRef.current = null
+    }
+  }
+
   async function downloadJobZip(jobId: string) {
     // Exports share the status/progress channel with generation — never let
     // the two interleave, and never build two ZIPs from a double-click.
@@ -5606,6 +5776,8 @@ function App() {
                                   format={job.format}
                                   regenerating={regeneratingChunkKey === `${job.id}:${chunk.index}`}
                                   onRegenerate={regenerateQueueChunk}
+                                  onRetake={retakeQueueSentence}
+                                  onSplice={spliceQueueSentence}
                                   onNotice={showToast}
                                 />
                               </li>

@@ -742,6 +742,13 @@ async function runSmoke() {
       throw new Error('EPUB overlay SMIL is missing synchronized text timing')
     }
     const queueChunks = desktop.page.getByLabel('Smoke queue completed chunks')
+    const sentenceRetakes = queueChunks.getByLabel('Sentence retakes for chunk 1')
+    await sentenceRetakes.waitFor({ timeout: 20000 })
+    await sentenceRetakes.getByRole('button', { name: '1. Smoke sentence one.' }).click()
+    await sentenceRetakes.getByLabel('Retake text for sentence 1').waitFor({ timeout: 20000 })
+    if (await sentenceRetakes.getByRole('button', { name: 'Retake sentence' }).count() !== 1) {
+      throw new Error('Sentence retake controls did not load for the completed queue chunk')
+    }
     const companionMessages = []
     const companion = await desktopContext.newPage()
     companion.on('console', (msg) => {

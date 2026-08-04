@@ -66,6 +66,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **WAV** (lossless), **MP3** (96/128/160 kbps), **Opus/WebM**, and **chaptered M4B audiobook** export with AAC capability preflight
 - **EPUB3 Media Overlays** — completed EPUB queue jobs export text, SMIL timing, synchronized audio, and active highlight classes; WAV queue audio is normalized to EPUB-compatible MP3
 - **EPUB chapter mapping** — review imported chapters before queueing: rename, split, merge, reorder, exclude, assign voices, or configure per-chapter weighted Kokoro blends; “Queue with defaults” preserves the quick path
+- **Sentence retakes** — select a sentence in a completed queue chunk, edit and regenerate up to four local A/B takes, then apply the chosen take with a cue-boundary crossfade; the original stays intact until commit
 - **Per-line generation** with individual files + automatic chaptered ZIP bundle, including `chapters.json` for fallback workflows
 - **SRT and VTT subtitle export** with sentence-level timing, plus opt-in word-level cues from the timestamped Kokoro model or desktop whisper.cpp forced alignment
 - **Persistent clip library** — generated clips saved to IndexedDB, survive page reloads, and restore their last playback position
@@ -202,7 +203,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (424 tests across 72 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (429 tests across 73 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -226,6 +227,8 @@ src/
 │   ├── reader.ts             # Stable document coordinates, cue binding, and resume state
 │   ├── media-overlays.ts     # EPUB3 text/SMIL/audio package writer and WAV→MP3 normalization
 │   ├── epub-mapping.ts       # Immutable EPUB chapter edits and per-chapter voice/blend metadata
+│   ├── sentence-retakes.ts   # Cue-boundary crossfade, resampling, and sentence text replacement
+│   ├── queue-sentence-retakes.ts # Lazy queue retake generation and atomic splice orchestration
 │   ├── playback.ts          # Read-along resume and sentence navigation
 │   ├── supertonic.ts        # Supertonic pipeline loader and voice metadata
 │   ├── kitten.ts            # KittenTTS WebGPU wrapper, metadata, and WAV parser
