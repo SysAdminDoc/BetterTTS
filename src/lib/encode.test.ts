@@ -3,6 +3,7 @@ import {
   MAX_MP3_KBPS_24K,
   TRUE_PEAK_CEILING_DBTP,
   buildWebmOpus,
+  cropAudioToTimeRange,
   encodeAudio,
   formatExtension,
   formatFromFilename,
@@ -58,6 +59,19 @@ describe('encodeAudio wav', () => {
     const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer())
     expect(String.fromCharCode(...head.slice(0, 4))).toBe('RIFF')
     expect(String.fromCharCode(...head.slice(8, 12))).toBe('WAVE')
+  })
+})
+
+describe('cropAudioToTimeRange', () => {
+  it('keeps only the timestamped word boundary samples', () => {
+    const source = Float32Array.from({ length: 10 }, (_, index) => index)
+    expect(cropAudioToTimeRange(source, 10, 0.21, 0.69)).toEqual(Float32Array.from([2, 3, 4, 5, 6]))
+  })
+
+  it('returns the original samples for invalid or full ranges', () => {
+    const source = Float32Array.from([1, 2, 3])
+    expect(cropAudioToTimeRange(source, 10, 0, 0)).toBe(source)
+    expect(cropAudioToTimeRange(source, 10, 0, 1)).toBe(source)
   })
 })
 

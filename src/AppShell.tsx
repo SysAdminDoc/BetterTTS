@@ -116,7 +116,7 @@ import {
   resetKokoroSession,
 } from './lib/kokoro.ts'
 import { KOKORO_HF_RESOLVE_PREFIX, KOKORO_LOCAL_MODEL_PREFIX, KOKORO_MODEL_ID } from './lib/kokoro-assets.ts'
-import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
+import { isShortKokoroInput, loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimestampedKokoro } from './lib/kokoro-timestamps.ts'
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativeMelo, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
@@ -3359,8 +3359,30 @@ function App() {
 
   async function ensureKokoroEngine(
     onProgress: (info: ProgressInfo) => void,
-    opts: { wordTimestamps?: boolean } = { wordTimestamps: wordTimestamps && englishKokoro },
+    opts: { wordTimestamps?: boolean; shortInputMitigation?: boolean } = {
+      wordTimestamps: wordTimestamps && englishKokoro,
+      shortInputMitigation: true,
+    },
   ): Promise<LoadedEngine> {
+    const shouldMitigateShortInput = (text: string, voice: string, voiceBin?: Float32Array) =>
+      opts.shortInputMitigation !== false
+      && !hasPhonemePronunciations
+      && !needsDirectKokoroPath(voice, voiceBin)
+      && isShortKokoroInput(text)
+
+    const synthesizeMitigatedShortInput = async (
+      text: string,
+      voice: string,
+      spd: number,
+      bin: Float32Array | undefined,
+      signal: AbortSignal | undefined,
+    ): Promise<SynthesizedAudio | null> => {
+      if (!shouldMitigateShortInput(text, voice, bin) || signal?.aborted) return null
+      const tts = await loadTimestampedKokoro(onProgress)
+      if (signal?.aborted) return null
+      return synthesizeTimestampedKokoro(tts, text, voice, spd, bin)
+    }
+
     if (opts.wordTimestamps) {
       const tts = await loadTimestampedKokoro(onProgress)
       setRuntimeLabel('WebAssembly q8 + word timestamps')
@@ -3375,6 +3397,8 @@ function App() {
       setRuntimeLabel(`Sherpa-ONNX ${runtime.ep.toUpperCase()} q8 · sherpa-onnx-node ${runtime.sherpaVersion ?? 'unknown'}${packSuffix}`)
       return {
         synthesize: async (text, voice, spd, bin, signal) => {
+          const mitigated = await synthesizeMitigatedShortInput(text, voice, spd, bin, signal)
+          if (mitigated) return mitigated
           if (needsDirectKokoroPath(voice, bin)) {
             // Blended and multilingual voices still route through the browser
             // runtime — the native host covers the standard English path first.
@@ -3409,15 +3433,21 @@ function App() {
         setRuntimeLabel('WebAssembly q8')
       }
       return {
-        synthesize: async (text, voice, spd, bin, signal) => ({
-          samples: await generateWorker(text, voice, spd, bin, signal),
-          sampleRate: KOKORO_SAMPLE_RATE,
-        }),
+        synthesize: async (text, voice, spd, bin, signal) => {
+          const mitigated = await synthesizeMitigatedShortInput(text, voice, spd, bin, signal)
+          if (mitigated) return mitigated
+          return {
+            samples: await generateWorker(text, voice, spd, bin, signal),
+            sampleRate: KOKORO_SAMPLE_RATE,
+          }
+        },
       }
     }
     const tts = await loadKokoro(onProgress)
     return {
-      synthesize: async (text, voice, spd, bin) => {
+      synthesize: async (text, voice, spd, bin, signal) => {
+        const mitigated = await synthesizeMitigatedShortInput(text, voice, spd, bin, signal)
+        if (mitigated) return mitigated
         if (needsDirectKokoroPath(voice, bin) || hasPhonemePronunciations) {
           const { synthesizeDirectKokoro } = await import('./lib/kokoro-multilingual.ts')
           return synthesizeDirectKokoro(tts, text, voice, spd, bin)
@@ -3428,7 +3458,10 @@ function App() {
     }
   }
 
-  async function ensureEngine(onProgress: (info: ProgressInfo) => void): Promise<LoadedEngine> {
+  async function ensureEngine(
+    onProgress: (info: ProgressInfo) => void,
+    opts: { shortInputMitigation?: boolean } = { shortInputMitigation: true },
+  ): Promise<LoadedEngine> {
     if (engine === 'supertonic') {
       const tts = await loadSupertonic(onProgress)
       setRuntimeLabel('Supertonic fp32')
@@ -3517,7 +3550,10 @@ function App() {
         synthesize: (text, _voice, spd) => synthesizePiperPlus(tts, text, piperLanguage, spd),
       }
     }
-    return ensureKokoroEngine(onProgress)
+    return ensureKokoroEngine(onProgress, {
+      wordTimestamps: wordTimestamps && englishKokoro,
+      shortInputMitigation: opts.shortInputMitigation !== false,
+    })
   }
 
   async function ensureQueueEngine(job: QueueJob, onProgress: (info: ProgressInfo) => void): Promise<LoadedQueueEngine> {
@@ -3579,7 +3615,7 @@ function App() {
 
     return {
       sampleRate: KOKORO_SAMPLE_RATE,
-      ...(await ensureKokoroEngine(onProgress, { wordTimestamps: false })),
+      ...(await ensureKokoroEngine(onProgress, { wordTimestamps: false, shortInputMitigation: true })),
     }
   }
 

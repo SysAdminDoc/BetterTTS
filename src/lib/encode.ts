@@ -44,6 +44,13 @@ export const MP3_SUPPORTED_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 320
 const DEFAULT_PITCH_SAMPLE_RATE = 24000
 const SIGNALSMITH_RENDER_GUARD_SECONDS = 0.25
 
+export function cropAudioToTimeRange(samples: Float32Array, sampleRate: number, startSec: number, endSec: number): Float32Array {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0 || !Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return samples
+  const start = Math.max(0, Math.min(samples.length, Math.floor(startSec * sampleRate)))
+  const end = Math.max(start, Math.min(samples.length, Math.ceil(endSec * sampleRate)))
+  return start === 0 && end === samples.length ? samples : samples.slice(start, end)
+}
+
 export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128): Promise<Blob> {
   if (samples.length === 0) {
     return Promise.reject(new Error('No audio samples to encode — the export would be an empty file.'))

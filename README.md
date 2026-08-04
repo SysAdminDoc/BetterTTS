@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-442%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-485%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -40,6 +40,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 
 ### Audio Generation
 - **Kokoro 82M** neural TTS via `kokoro-js` + Transformers.js — top-tier voice quality (MOS 4.3-4.5)
+- **Kokoro short-input cleanup** — one-to-four-word English renders use padded context and timestamped boundary cropping to remove leading/trailing artifacts across generation, queue chunks, and voice previews
 - **Supertonic speed engine** via Transformers.js — 10 English F/M voices, 44.1 kHz fp32 output, lazy-loaded only when selected
 - **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
 - **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — opt-in reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, and disclosed PerTh watermark
@@ -210,7 +211,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (480 tests across 81 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (485 tests across 81 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -233,7 +234,7 @@ src/
 │   ├── engine-registry.ts   # Engine capability flags and queue boundaries
 │   ├── kokoro-assets.ts     # Pages-hosted q8 asset routing + HF fallback
 │   ├── kokoro-multilingual.ts # ephone + direct Kokoro model path for ja/cmn/es/fr/it/pt-BR/hi
-│   ├── kokoro-timestamps.ts # Timestamped Kokoro loader and word cue alignment
+│   ├── kokoro-timestamps.ts # Timestamped Kokoro loader, short-input pad/crop, and word cue alignment
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
 │   ├── document-import.ts   # PDF/DOCX text extraction
@@ -255,7 +256,7 @@ src/
 │   ├── byo-models.ts         # Consent-gated user-supplied weight metadata and provenance
 │   ├── rvc.ts                # Consent-gated RVC model metadata, blend plans, and provenance
 │   ├── piper-plus.ts        # Experimental Piper-plus lazy wrapper and support diagnostics
-│   ├── encode.ts            # WAV/MP3 encoding, pitch shift, BGM mixing
+│   ├── encode.ts            # WAV/MP3 encoding, sample-range cropping, pitch shift, BGM mixing
 │   ├── m4b.ts               # WebCodecs AAC + M4B chapter muxing
 │   ├── wav.ts               # Raw PCM → WAV encoder
 │   ├── text.ts              # Sentence/pause/prosody parsing, cleanup, narrator segmentation

@@ -21,6 +21,7 @@
 - Added a persisted Prosody panel for opt-in punctuation pauses plus reversible selection markup for per-span rate and pitch deltas. Defaults remain unchanged; direct generation and resumable queue chunks share the same dispatcher and post-processing path.
 - Added an opt-in listening speed trainer shared by generated, queue, library, and Reader playback. It persists per-profile progress, ramps +5% after the selected active-listening interval, clamps to a visible user cap, and exposes reset controls without changing synthesis speed.
 - Added a capability-gated Document Picture-in-Picture mini player with cue highlighting, play/pause, seek, and sentence skips; shared playback now applies selected Audio Output Devices sinks to current and future audio elements, while Media Session adds seek-position and sentence-skip fallbacks.
+- Added automatic short-input mitigation for English Kokoro: one-to-four-word renders synthesize with padded context and crop back to timestamped word boundaries across generation, queue chunks, and voice previews.
 - Added an optional Windows-only Qwen3-TTS 0.6B CustomVoice engine through an isolated Python sidecar. The desktop UI can provision a private Python 3.12 environment, then lazily download `torch`, `qwen-tts`, and model weights into user data; sidecar setup, progress, cancellation, and crash recovery stay on the same bounded desktop bridge while web/PWA mode remains unchanged.
 - Added a consent-gated Windows bring-your-own-weights tier for restricted/non-commercial model families. Users can register an existing file or directory only after recording its exact license and provenance; the manager stores metadata and the selected path, performs no downloads or copies, and keeps these entries hidden/adapter-gated until explicitly enabled.
 - Added an opt-in loopback-only OpenAI-compatible desktop TTS server. `POST /v1/audio/speech` supports native Kokoro/Piper model and voice selection, WAV/MP3/Opus/FLAC output, bounded SSE base64 chunks, `/health` and `/v1/models`, an explicit port control, and a stop path that closes the listener.
@@ -83,6 +84,7 @@
 - Added punctuation-pause persistence, bounded prosody parsing, cleanup protection for prosody attributes, span-rate/pitch dispatcher coverage, queue routing, and browser smoke assertions (474 tests across 79 files).
 - Added listening-trainer schedule/cap/reset coverage, shared controller playback-rate coverage, and browser smoke assertions for the persisted playback ramp controls (478 tests across 80 files).
 - Added audio-output capability/controller coverage plus browser smoke assertions for hidden unsupported controls and the Document PiP transport/highlight surface (480 tests across 81 files).
+- Added short-input pad/crop fixture coverage for boundary sample ranges, cue rebasing, and timestamped Kokoro synthesis (485 tests across 81 files).
 
 ## v0.21.0 - 2026-07-29
 
