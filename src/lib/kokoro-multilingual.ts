@@ -27,6 +27,8 @@ const STYLE_MAX_TOKENS = 509
 
 let romanceEphonePromise: Promise<EphoneModule> | null = null
 let allEphonePromise: Promise<EphoneModule> | null = null
+let japaneseEphonePromise: Promise<EphoneModule> | null = null
+let chineseEphonePromise: Promise<EphoneModule> | null = null
 
 export async function synthesizeDirectKokoro(
   tts: unknown,
@@ -79,6 +81,20 @@ async function loadEphone(language: KokoroLanguage['phonemeLanguage']): Promise<
       allEphonePromise = import('ephone').then(({ default: createEphone, all }) => createEphoneQuietly(createEphone, all))
     }
     return allEphonePromise
+  }
+
+  if (language === 'ja') {
+    if (!japaneseEphonePromise) {
+      japaneseEphonePromise = import('ephone').then(({ default: createEphone, jpx }) => createEphoneQuietly(createEphone, jpx))
+    }
+    return japaneseEphonePromise
+  }
+
+  if (language === 'cmn') {
+    if (!chineseEphonePromise) {
+      chineseEphonePromise = import('ephone').then(({ default: createEphone, sit }) => createEphoneQuietly(createEphone, sit))
+    }
+    return chineseEphonePromise
   }
 
   if (!romanceEphonePromise) {

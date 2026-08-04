@@ -31,8 +31,8 @@ if (!targetRoot.startsWith(`${distRoot}${sep}`)) {
   console.error(`Refusing to sync Kokoro assets outside dist/: ${targetRoot}`)
   process.exit(1)
 }
-if (voiceEntries.length !== 41 || voiceIds.length !== 28) {
-  console.error(`Expected 41 wired Kokoro voices with 28 self-hosted English bins, found ${voiceEntries.length}/${voiceIds.length}`)
+if (voiceEntries.length !== 54 || voiceIds.length !== 28) {
+  console.error(`Expected 54 wired Kokoro voices with 28 self-hosted English bins, found ${voiceEntries.length}/${voiceIds.length}`)
   process.exit(1)
 }
 

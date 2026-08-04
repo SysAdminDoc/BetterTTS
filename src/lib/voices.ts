@@ -5,18 +5,21 @@ export type VoiceId =
   | 'am_echo' | 'am_eric' | 'am_fenrir' | 'am_michael' | 'am_onyx' | 'am_santa'
   | 'bf_alice' | 'bf_emma' | 'bf_isabella' | 'bf_lily'
   | 'bm_daniel' | 'bm_fable' | 'bm_george' | 'bm_lewis'
+  | 'jf_alpha' | 'jf_gongitsune' | 'jf_nezumi' | 'jf_tebukuro' | 'jm_kumo'
+  | 'zf_xiaobei' | 'zf_xiaoni' | 'zf_xiaoxiao' | 'zf_xiaoyi'
+  | 'zm_yunjian' | 'zm_yunxi' | 'zm_yunxia' | 'zm_yunyang'
   | 'ef_dora' | 'em_alex' | 'em_santa'
   | 'ff_siwis'
   | 'hf_alpha' | 'hf_beta' | 'hm_omega' | 'hm_psi'
   | 'if_sara' | 'im_nicola'
   | 'pf_dora' | 'pm_alex' | 'pm_santa'
 
-export type KokoroLocale = 'en-us' | 'en-gb' | 'es' | 'fr' | 'it' | 'pt-br' | 'hi'
+export type KokoroLocale = 'en-us' | 'en-gb' | 'ja' | 'cmn' | 'es' | 'fr' | 'it' | 'pt-br' | 'hi'
 
 export type KokoroLanguage = {
   id: KokoroLocale
   label: string
-  phonemeLanguage: 'en-us' | 'en' | 'es' | 'fr' | 'it' | 'pt-BR' | 'hi'
+  phonemeLanguage: 'en-us' | 'en' | 'ja' | 'cmn' | 'es' | 'fr' | 'it' | 'pt-BR' | 'hi'
   previewText: string
 }
 
@@ -31,6 +34,8 @@ export type Voice = {
 export const KOKORO_LANGUAGES: KokoroLanguage[] = [
   { id: 'en-us', label: 'English US', phonemeLanguage: 'en-us', previewText: 'This is how I sound.' },
   { id: 'en-gb', label: 'English British', phonemeLanguage: 'en', previewText: 'This is how I sound.' },
+  { id: 'ja', label: 'Japanese', phonemeLanguage: 'ja', previewText: 'こんにちは、これは私の声です。' },
+  { id: 'cmn', label: 'Mandarin Chinese', phonemeLanguage: 'cmn', previewText: '你好，这是我的声音。' },
   { id: 'es', label: 'Spanish', phonemeLanguage: 'es', previewText: 'Hola, asi suena mi voz.' },
   { id: 'fr', label: 'French', phonemeLanguage: 'fr', previewText: 'Bonjour, voici ma voix.' },
   { id: 'it', label: 'Italian', phonemeLanguage: 'it', previewText: 'Ciao, questa e la mia voce.' },
@@ -67,6 +72,19 @@ export const VOICES: Voice[] = [
   { id: 'bm_fable', name: 'Fable', locale: 'en-gb', gender: 'Male', grade: 'C' },
   { id: 'bm_george', name: 'George', locale: 'en-gb', gender: 'Male', grade: 'C' },
   { id: 'bm_lewis', name: 'Lewis', locale: 'en-gb', gender: 'Male', grade: 'D+' },
+  { id: 'jf_alpha', name: 'Alpha', locale: 'ja', gender: 'Female', grade: 'C+' },
+  { id: 'jf_gongitsune', name: 'Gongitsune', locale: 'ja', gender: 'Female', grade: 'C' },
+  { id: 'jf_nezumi', name: 'Nezumi', locale: 'ja', gender: 'Female', grade: 'C-' },
+  { id: 'jf_tebukuro', name: 'Tebukuro', locale: 'ja', gender: 'Female', grade: 'C' },
+  { id: 'jm_kumo', name: 'Kumo', locale: 'ja', gender: 'Male', grade: 'C-' },
+  { id: 'zf_xiaobei', name: 'Xiaobei', locale: 'cmn', gender: 'Female', grade: 'D' },
+  { id: 'zf_xiaoni', name: 'Xiaoni', locale: 'cmn', gender: 'Female', grade: 'D' },
+  { id: 'zf_xiaoxiao', name: 'Xiaoxiao', locale: 'cmn', gender: 'Female', grade: 'D' },
+  { id: 'zf_xiaoyi', name: 'Xiaoyi', locale: 'cmn', gender: 'Female', grade: 'D' },
+  { id: 'zm_yunjian', name: 'Yunjian', locale: 'cmn', gender: 'Male', grade: 'D' },
+  { id: 'zm_yunxi', name: 'Yunxi', locale: 'cmn', gender: 'Male', grade: 'D' },
+  { id: 'zm_yunxia', name: 'Yunxia', locale: 'cmn', gender: 'Male', grade: 'D' },
+  { id: 'zm_yunyang', name: 'Yunyang', locale: 'cmn', gender: 'Male', grade: 'D' },
   { id: 'ef_dora', name: 'Dora', locale: 'es', gender: 'Female', grade: 'C' },
   { id: 'em_alex', name: 'Alex', locale: 'es', gender: 'Male', grade: 'C' },
   { id: 'em_santa', name: 'Santa', locale: 'es', gender: 'Male', grade: 'C' },
