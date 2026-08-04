@@ -3,6 +3,7 @@ import {
   isSelfHostedKokoroAsset,
   kokoroLocalAssetUrl,
   kokoroRemoteAssetUrl,
+  verifyKokoro,
 } from './kokoro-assets.ts'
 
 export type ModelCacheEngineId = 'kokoro' | 'supertonic' | 'kitten' | 'chatterbox' | 'shell'
@@ -128,8 +129,9 @@ export async function prefetchKokoroQ8Pack(
     // Re-running prefetch must be idempotent — never re-download the 92 MB
     // model file when it is already in the cache.
     const alreadyCached = isVoiceBin
-      ? Boolean(await transformersCache.match(remoteUrl)) && Boolean(await voiceCache.match(remoteUrl))
-      : Boolean(await transformersCache.match(remoteUrl))
+      ? await hasVerifiedCacheEntry(transformersCache, remoteUrl, path)
+        && await hasVerifiedCacheEntry(voiceCache, remoteUrl, path)
+      : await hasVerifiedCacheEntry(transformersCache, remoteUrl, path)
     if (alreadyCached) {
       cached += 1
       onProgress(cached, paths.length, path)
@@ -164,13 +166,27 @@ async function fetchKokoroPrefetchAsset(path: string): Promise<Response> {
   for (const url of candidates) {
     try {
       const response = await fetch(url, { cache: 'reload' })
-      if (response.ok && !response.headers.get('content-type')?.toLowerCase().includes('text/html')) return response
+      if (response.ok && !response.headers.get('content-type')?.toLowerCase().includes('text/html')) {
+        return await verifyKokoro(path, response)
+      }
     } catch {
       /* try the next source */
     }
   }
 
   throw new Error(`Could not prefetch ${path}`)
+}
+
+async function hasVerifiedCacheEntry(cache: Cache, url: string, path: string): Promise<boolean> {
+  const response = await cache.match(url)
+  if (!response) return false
+  try {
+    await verifyKokoro(path, response)
+    return true
+  } catch {
+    await cache.delete(url)
+    return false
+  }
 }
 
 function cachedResponseSize(response: Response | undefined): number | null {

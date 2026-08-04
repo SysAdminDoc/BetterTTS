@@ -1,4 +1,4 @@
-import { KOKORO_MODEL_ID, installKokoroAssetFallback } from '../lib/kokoro-assets.ts'
+import { KOKORO_MODEL_ID, installKokoro } from '../lib/kokoro-assets.ts'
 import type { KokoroWebGpuDtype, ProgressInfo } from '../lib/kokoro.ts'
 import { needsDirectKokoroPath } from '../lib/kokoro-direct.ts'
 
@@ -37,7 +37,7 @@ self.addEventListener('message', async (e: MessageEvent<WorkerRequest>) => {
       return
     }
     try {
-      installKokoroAssetFallback()
+      await installKokoro()
       const { KokoroTTS } = await import('kokoro-js')
       tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
         device: msg.device,

@@ -1,87 +1,107 @@
 #!/usr/bin/env node
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, copyFileSync, renameSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, copyFileSync, renameSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
+import modelAssets from '../src/lib/model-assets.json' with { type: 'json' }
+import { assertAssetMetadata, verifyFile } from './model-integrity.mjs'
 
 const repoRoot = resolve(import.meta.dirname, '..')
-const modelId = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-const hfResolveBase = `https://huggingface.co/${modelId}/resolve/main`
+const modelId = modelAssets.kokoro.modelId
+const revision = modelAssets.kokoro.revision
+const hfResolveBase = `https://huggingface.co/${modelId}/resolve/${revision}`
 const pagesFileCap = 100 * 1000 * 1000
 const pagesSiteCap = 1024 * 1024 * 1024
-const targetRoot = resolve(repoRoot, process.argv[2] ?? join('dist', 'models', modelId))
 const distRoot = resolve(repoRoot, 'dist')
 const cacheRoot = resolve(repoRoot, 'node_modules', '.cache', 'bettertts-model-assets', modelId)
 const voiceSourceRoot = resolve(repoRoot, 'node_modules', 'kokoro-js', 'voices')
-const voiceEntries = [...readFileSync(join(repoRoot, 'src', 'lib', 'voices.ts'), 'utf8')
-  .matchAll(/\{\s*id: '([^']+)'.*?locale: '([^']+)'/g)]
-  .map((match) => ({ id: match[1], locale: match[2] }))
-const voiceIds = voiceEntries
-  .filter((voice) => voice.locale === 'en-us' || voice.locale === 'en-gb')
-  .map((voice) => voice.id)
+const remoteAssets = modelAssets.kokoro.remoteAssets
+const voiceAssets = modelAssets.kokoro.voiceAssets
 
-const remoteAssets = [
-  { path: 'config.json', size: 44 },
-  { path: 'tokenizer.json', size: 3497 },
-  { path: 'tokenizer_config.json', size: 113 },
-  { path: 'onnx/model_quantized.onnx', size: 92361116 },
-]
+export const KOKORO_MODEL_REVISION = revision
+export const KOKORO_REMOTE_ASSETS = remoteAssets
+export const KOKORO_VOICE_ASSETS = voiceAssets
 
-if (!targetRoot.startsWith(`${distRoot}${sep}`)) {
-  console.error(`Refusing to sync Kokoro assets outside dist/: ${targetRoot}`)
-  process.exit(1)
+export async function syncKokoroAssets(targetRoot = resolve(repoRoot, 'dist', 'models', modelId)) {
+  if (!targetRoot.startsWith(`${distRoot}${sep}`)) {
+    throw new Error(`Refusing to sync Kokoro assets outside dist/: ${targetRoot}`)
+  }
+
+  const voiceEntries = [...readFileSync(join(repoRoot, 'src', 'lib', 'voices.ts'), 'utf8')
+    .matchAll(/\{\s*id: '([^']+)'.*?locale: '([^']+)'/g)]
+    .map((match) => ({ id: match[1], locale: match[2] }))
+  const voiceIds = voiceEntries
+    .filter((voice) => voice.locale === 'en-us' || voice.locale === 'en-gb')
+    .map((voice) => voice.id)
+  if (voiceEntries.length !== 54 || voiceIds.length !== voiceAssets.length) {
+    throw new Error(`Expected 54 wired Kokoro voices with ${voiceAssets.length} self-hosted English bins, found ${voiceEntries.length}/${voiceIds.length}`)
+  }
+
+  const voiceAssetByPath = new Map(voiceAssets.map((asset) => [asset.path, asset]))
+  mkdirSync(targetRoot, { recursive: true })
+  rmSync(targetRoot, { recursive: true, force: true })
+  mkdirSync(targetRoot, { recursive: true })
+
+  let totalBytes = 0
+  for (const asset of remoteAssets) {
+    validatePagesFileSize(asset.path, asset.size)
+    const cached = await ensureRemoteAsset(asset)
+    const target = join(targetRoot, asset.path)
+    await copyAsset(cached, target, asset)
+    totalBytes += asset.size
+  }
+
+  for (const voiceId of voiceIds) {
+    const relativePath = `voices/${voiceId}.bin`
+    const asset = voiceAssetByPath.get(relativePath)
+    if (!asset) throw new Error(`No integrity metadata for ${relativePath}`)
+    const source = join(voiceSourceRoot, `${voiceId}.bin`)
+    await verifyFile(source, asset, `Installed ${relativePath}`)
+    validatePagesFileSize(relativePath, asset.size)
+    const target = join(targetRoot, relativePath)
+    await copyAsset(source, target, asset)
+    totalBytes += asset.size
+  }
+
+  if (totalBytes > pagesSiteCap) {
+    throw new Error(`Kokoro asset bundle is ${formatBytes(totalBytes)}, above the GitHub Pages 1 GB site cap`)
+  }
+
+  return {
+    count: remoteAssets.length + voiceIds.length,
+    totalBytes,
+    targetRoot,
+  }
 }
-if (voiceEntries.length !== 54 || voiceIds.length !== 28) {
-  console.error(`Expected 54 wired Kokoro voices with 28 self-hosted English bins, found ${voiceEntries.length}/${voiceIds.length}`)
-  process.exit(1)
-}
-
-mkdirSync(targetRoot, { recursive: true })
-rmSync(targetRoot, { recursive: true, force: true })
-mkdirSync(targetRoot, { recursive: true })
-
-let totalBytes = 0
-
-for (const asset of remoteAssets) {
-  validatePagesFileSize(asset.path, asset.size)
-  const cached = await ensureRemoteAsset(asset)
-  copyAsset(cached, join(targetRoot, asset.path), asset.size)
-  totalBytes += asset.size
-}
-
-for (const voiceId of voiceIds) {
-  const relativePath = `voices/${voiceId}.bin`
-  const source = join(voiceSourceRoot, `${voiceId}.bin`)
-  const size = statSync(source).size
-  validatePagesFileSize(relativePath, size)
-  copyAsset(source, join(targetRoot, relativePath), size)
-  totalBytes += size
-}
-
-if (totalBytes > pagesSiteCap) {
-  console.error(`Kokoro asset bundle is ${formatBytes(totalBytes)}, above the GitHub Pages 1 GB site cap`)
-  process.exit(1)
-}
-
-console.log(`Synced ${remoteAssets.length + voiceIds.length} Kokoro assets (${formatBytes(totalBytes)}) to ${targetRoot}`)
 
 async function ensureRemoteAsset(asset) {
+  assertAssetMetadata(asset)
   const cachedPath = join(cacheRoot, asset.path)
-  if (existsSync(cachedPath) && statSync(cachedPath).size === asset.size) return cachedPath
+  if (existsSync(cachedPath)) {
+    try {
+      await verifyFile(cachedPath, asset, `Cached ${asset.path}`)
+      return cachedPath
+    } catch {
+      rmSync(cachedPath, { force: true })
+    }
+  }
 
   mkdirSync(dirname(cachedPath), { recursive: true })
   const tempPath = `${cachedPath}.tmp-${process.pid}`
   const url = `${hfResolveBase}/${asset.path}`
   const response = await fetchWithRetry(url)
   if (!response.body) throw new Error(`No response body for ${url}`)
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath))
-  if (statSync(tempPath).size !== asset.size) {
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath))
+    await verifyFile(tempPath, asset, `Downloaded ${asset.path}`)
+    rmSync(cachedPath, { force: true })
+    renameSync(tempPath, cachedPath)
+    return cachedPath
+  } catch (error) {
     rmSync(tempPath, { force: true })
-    throw new Error(`Downloaded ${asset.path} with unexpected size`)
+    throw error
   }
-  rmSync(cachedPath, { force: true })
-  renameSync(tempPath, cachedPath)
-  return cachedPath
 }
 
 async function fetchWithRetry(url) {
@@ -123,16 +143,13 @@ function parseRateLimitWindow(value) {
 }
 
 function validatePagesFileSize(path, size) {
-  if (size > pagesFileCap) {
-    console.error(`${path} is ${formatBytes(size)}, above the GitHub Pages 100 MB per-file cap`)
-    process.exit(1)
-  }
+  if (size > pagesFileCap) throw new Error(`${path} is ${formatBytes(size)}, above the GitHub Pages 100 MB per-file cap`)
 }
 
-function copyAsset(source, target, expectedSize) {
+async function copyAsset(source, target, asset) {
   mkdirSync(dirname(target), { recursive: true })
   copyFileSync(source, target)
-  if (statSync(target).size !== expectedSize) throw new Error(`Copied ${target} with unexpected size`)
+  await verifyFile(target, asset, `Copied ${asset.path}`)
 }
 
 function formatBytes(bytes) {
@@ -142,4 +159,9 @@ function formatBytes(bytes) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const result = await syncKokoroAssets(process.argv[2] ? resolve(repoRoot, process.argv[2]) : undefined)
+  console.log(`Synced ${result.count} Kokoro assets (${formatBytes(result.totalBytes)}) to ${result.targetRoot}`)
 }

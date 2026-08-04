@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-489%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-496%20passing-53d889.svg)](#)
 
 **Private local text-to-speech studio for web and Windows.** Kokoro 82M, native MeloTTS, Supertonic, KittenTTS, Chatterbox, an experimental Piper-plus path, optional desktop Qwen3-TTS, narrator mode, and an opt-in desktop RVC post-stage run on your device — no account, cloud synthesis, or usage caps (5,000 characters per run, unlimited runs). The Windows model manager also supports explicit metadata-only registration of self-supplied restricted weights. Export WAV, MP3, Opus, or chaptered M4B while keeping scripts and audio local.
 
@@ -52,7 +52,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
 - **Multilingual Kokoro pack** — ephone/eSpeak NG phonemization routes `ja`, `cmn`, `es`, `fr`, `it`, `pt-BR`, and `hi` through the direct Kokoro model path
 - **Cross-browser WebGPU acceleration** with adapter probing, automatic WASM q8 fallback, a local bad-audio denylist, and a persisted experimental fp16 opt-in; fp32 remains the default
-- **Pages-hosted WASM q8 model** with Hugging Face fallback and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
+- **Pages-hosted WASM q8 model** with immutable revision + SHA-256-verified deployment assets, Hugging Face fallback, and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
@@ -218,7 +218,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (489 tests across 83 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (496 tests across 84 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -239,7 +239,8 @@ src/
 │   ├── object-urls.ts        # Output/caption blob URL ownership
 │   ├── kokoro.ts            # Model loader, WebGPU probe, WASM fallback
 │   ├── engine-registry.ts   # Engine capability flags and queue boundaries
-│   ├── kokoro-assets.ts     # Pages-hosted q8 asset routing + HF fallback
+│   ├── kokoro-assets.ts     # SHA-verified Pages q8 routing + HF fallback
+│   ├── model-assets.json     # Immutable model revisions and asset digests
 │   ├── kokoro-multilingual.ts # ephone + direct Kokoro model path for ja/cmn/es/fr/it/pt-BR/hi
 │   ├── kokoro-timestamps.ts # Timestamped Kokoro loader, short-input pad/crop, and word cue alignment
 │   ├── kokoro-worker.ts     # Web Worker client interface
@@ -309,7 +310,7 @@ sidecar/
 ```
 
 **Key design decisions:**
-- WASM q8 model files (~107 MB including tokenizer and 28 voice bins) load from the GitHub Pages site first, then fall back to Hugging Face with 429-aware retry
+- WASM q8 model files (~107 MB including tokenizer and 28 voice bins) are synced from immutable Hugging Face revisions with SHA-256 verification, load from the GitHub Pages site first, and fall back to the same verified revision with 429-aware retry; offline prefetch re-verifies cached responses
 - Word-level SRT/VTT is opt-in and uses the HF-hosted `Kokoro-82M-v1.0-ONNX-timestamped` q8 graph plus duration-output alignment
 - Desktop imported-audio word-level SRT/VTT uses whisper.cpp `-ml 1 -sow` forced alignment; the CLI is pinned and bundled by the Windows build, while `ggml-base.bin` remains a user-managed multilingual model
 - Qwen3-TTS stays outside the browser bundle: Electron owns a private Python environment, the sidecar accepts bounded JSON-lines messages without opening a listener, and each synthesis runs in a disposable worker so cancellation or a crash cannot take down the desktop shell
@@ -391,7 +392,7 @@ Supertonic is available as a separate English speed engine: 66M parameters, 10 v
 
 KittenTTS is available as a separate English lightweight engine: Nano 15M / 24 MB by default, Micro 40M / 41 MB, Mini 80M / 78 MB, 8 voices, 24,000 Hz output, WebGPU-only shader inference, MIT package code, and Apache-2.0 model weights. The package is lazy-loaded and model weights stay HF-hosted until the engine is selected.
 
-Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected. On Windows, the native backend's English path uses `sherpa-onnx-node` with the pinned en-GB Cori model; non-English native selections remain on Piper-plus web. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to Hugging Face when that asset has not been synced.
+Piper-plus is available behind **Enable experimental Piper-plus** under Voice chain -> Engine -> System & diagnostics: `piper-plus` 0.6.0, Tsukuyomi-chan (`ayousanz/piper-plus-tsukuyomi-chan`), 22,050 Hz output, JA/EN/ZH/KO/ES/FR/PT/SV language targets, MIT package/runtime path, and ONNX Runtime Web. Piper package code, the multilingual WASM G2P, ONNX Runtime, and the model are lazy-loaded only after the flag is enabled and Piper-plus is selected; the browser fallback uses an immutable revision, while deployment sync verifies the model and config digests. On Windows, the native backend's English path uses `sherpa-onnx-node` with the pinned en-GB Cori model; non-English native selections remain on Piper-plus web. Deployed builds prefer the same-origin `dist/models/ayousanz/piper-plus-tsukuyomi-chan/` copy; local builds fall back to the same immutable Hugging Face revision when that asset has not been synced.
 
 MeloTTS is available as a Windows desktop-only native engine: the pinned MIT `myshell-ai/MeloTTS-Chinese` Chinese + English VITS archive is verified by SHA-256 and loaded through Sherpa-ONNX at 44,100 Hz. It exposes one default speaker, chooses the language from the input text, participates in the resumable queue and local OpenAI-compatible API, and remains hidden in web/PWA builds. The exact archive and model revision are recorded in diagnostics after first use.
 

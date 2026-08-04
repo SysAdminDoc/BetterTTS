@@ -1,4 +1,4 @@
-import { installKokoroAssetFallback, kokoroRemoteAssetUrl } from './kokoro-assets.ts'
+import { installKokoro, kokoroRemoteAssetUrl } from './kokoro-assets.ts'
 import { readLruEntry, writeLruEntry } from './bounded-cache.ts'
 import type { VoiceId } from './voices.ts'
 
@@ -12,7 +12,7 @@ const binCache = new Map<string, Float32Array>()
 export async function fetchVoiceBin(voiceId: string): Promise<Float32Array> {
   const memoryCached = readLruEntry(binCache, voiceId)
   if (memoryCached) return memoryCached
-  installKokoroAssetFallback()
+  await installKokoro()
   const url = kokoroRemoteAssetUrl(`voices/${voiceId}.bin`)
 
   let cache: Cache | undefined

@@ -1,64 +1,79 @@
 #!/usr/bin/env node
-import { createWriteStream, existsSync, mkdirSync, rmSync, statSync, copyFileSync, renameSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, rmSync, copyFileSync, renameSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
+import modelAssets from '../src/lib/model-assets.json' with { type: 'json' }
+import { assertAssetMetadata, verifyFile } from './model-integrity.mjs'
 
 const repoRoot = resolve(import.meta.dirname, '..')
-const modelId = 'ayousanz/piper-plus-tsukuyomi-chan'
-const hfResolveBase = `https://huggingface.co/${modelId}/resolve/main`
+const modelId = modelAssets.piper.modelId
+const revision = modelAssets.piper.revision
+const hfResolveBase = `https://huggingface.co/${modelId}/resolve/${revision}`
 const pagesFileCap = 100 * 1000 * 1000
-const targetRoot = resolve(repoRoot, process.argv[2] ?? join('dist', 'models', modelId))
 const distRoot = resolve(repoRoot, 'dist')
 const cacheRoot = resolve(repoRoot, 'node_modules', '.cache', 'bettertts-model-assets', modelId)
-const onnxFile = 'tsukuyomi-chan-6lang-fp16.onnx'
+const onnxAsset = modelAssets.piper.onnx
+const configAsset = modelAssets.piper.config
+const remoteAssets = [onnxAsset, configAsset]
 
-const remoteAssets = [
-  { path: onnxFile, size: 39_652_717 },
-  { path: 'config.json', size: null },
-]
+export const PIPER_MODEL_REVISION = revision
+export const PIPER_REMOTE_ASSETS = remoteAssets
 
-if (!targetRoot.startsWith(`${distRoot}${sep}`)) {
-  console.error(`Refusing to sync Piper assets outside dist/: ${targetRoot}`)
-  process.exit(1)
+export async function syncPiperAssets(targetRoot = resolve(repoRoot, 'dist', 'models', modelId)) {
+  if (!targetRoot.startsWith(`${distRoot}${sep}`)) {
+    throw new Error(`Refusing to sync Piper assets outside dist/: ${targetRoot}`)
+  }
+
+  mkdirSync(targetRoot, { recursive: true })
+  rmSync(targetRoot, { recursive: true, force: true })
+  mkdirSync(targetRoot, { recursive: true })
+
+  let totalBytes = 0
+  for (const asset of remoteAssets) {
+    validatePagesFileSize(asset.path, asset.size)
+    const cached = await ensureRemoteAsset(asset)
+    const target = join(targetRoot, asset.path)
+    await copyAsset(cached, target, asset)
+    totalBytes += asset.size
+  }
+
+  const sidecar = join(targetRoot, `${onnxAsset.path}.json`)
+  copyFileSync(join(targetRoot, configAsset.path), sidecar)
+  await verifyFile(sidecar, configAsset, `Copied ${onnxAsset.path}.json`)
+  totalBytes += configAsset.size
+
+  return { count: remoteAssets.length + 1, totalBytes, targetRoot }
 }
-
-mkdirSync(targetRoot, { recursive: true })
-rmSync(targetRoot, { recursive: true, force: true })
-mkdirSync(targetRoot, { recursive: true })
-
-let totalBytes = 0
-
-for (const asset of remoteAssets) {
-  if (asset.size != null) validatePagesFileSize(asset.path, asset.size)
-  const cached = await ensureRemoteAsset(asset)
-  const target = join(targetRoot, asset.path)
-  copyAsset(cached, target, asset.size)
-  totalBytes += statSync(target).size
-}
-
-copyFileSync(join(targetRoot, 'config.json'), join(targetRoot, `${onnxFile}.json`))
-totalBytes += statSync(join(targetRoot, `${onnxFile}.json`)).size
-
-console.log(`Synced Piper-plus assets (${formatBytes(totalBytes)}) to ${targetRoot}`)
 
 async function ensureRemoteAsset(asset) {
+  assertAssetMetadata(asset)
   const cachedPath = join(cacheRoot, asset.path)
-  if (existsSync(cachedPath) && (asset.size == null || statSync(cachedPath).size === asset.size)) return cachedPath
+  if (existsSync(cachedPath)) {
+    try {
+      await verifyFile(cachedPath, asset, `Cached ${asset.path}`)
+      return cachedPath
+    } catch {
+      rmSync(cachedPath, { force: true })
+    }
+  }
 
   mkdirSync(dirname(cachedPath), { recursive: true })
   const tempPath = `${cachedPath}.tmp-${process.pid}`
   const url = `${hfResolveBase}/${asset.path}`
   const response = await fetchWithRetry(url)
   if (!response.body) throw new Error(`No response body for ${url}`)
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath))
-  if (asset.size != null && statSync(tempPath).size !== asset.size) {
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath))
+    await verifyFile(tempPath, asset, `Downloaded ${asset.path}`)
+    rmSync(cachedPath, { force: true })
+    renameSync(tempPath, cachedPath)
+    return cachedPath
+  } catch (error) {
     rmSync(tempPath, { force: true })
-    throw new Error(`Downloaded ${asset.path} with unexpected size`)
+    throw error
   }
-  rmSync(cachedPath, { force: true })
-  renameSync(tempPath, cachedPath)
-  return cachedPath
 }
 
 async function fetchWithRetry(url) {
@@ -74,19 +89,21 @@ async function fetchWithRetry(url) {
 }
 
 function validatePagesFileSize(path, size) {
-  if (size > pagesFileCap) {
-    console.error(`${path} is ${formatBytes(size)}, above the GitHub Pages 100 MB per-file cap`)
-    process.exit(1)
-  }
+  if (size > pagesFileCap) throw new Error(`${path} is ${formatBytes(size)}, above the GitHub Pages 100 MB per-file cap`)
 }
 
-function copyAsset(source, target, expectedSize) {
+async function copyAsset(source, target, asset) {
   mkdirSync(dirname(target), { recursive: true })
   copyFileSync(source, target)
-  if (expectedSize != null && statSync(target).size !== expectedSize) throw new Error(`Copied ${target} with unexpected size`)
+  await verifyFile(target, asset, `Copied ${asset.path}`)
 }
 
 function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const result = await syncPiperAssets(process.argv[2] ? resolve(repoRoot, process.argv[2]) : undefined)
+  console.log(`Synced Piper-plus assets (${formatBytes(result.totalBytes)}) to ${result.targetRoot}`)
 }

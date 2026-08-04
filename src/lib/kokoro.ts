@@ -1,4 +1,4 @@
-import { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE, installKokoroAssetFallback } from './kokoro-assets.ts'
+import { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE, installKokoro } from './kokoro-assets.ts'
 import { probeWebGpuCapability, type WebGpuProbeResult } from './runtime-readiness.ts'
 
 export { KOKORO_MODEL_ID, KOKORO_SAMPLE_RATE }
@@ -62,7 +62,7 @@ export async function probeWebGpuDetails(): Promise<WebGpuProbeResult> {
 export async function loadKokoro(onProgress: (info: ProgressInfo) => void, webGpuDtype: KokoroWebGpuDtype = getKokoroWebGpuDtype()): Promise<KokoroInstance> {
   if (kokoroPromise) return kokoroPromise
 
-  installKokoroAssetFallback()
+  await installKokoro()
 
   const [{ KokoroTTS }, hasWebGpu] = await Promise.all([
     import('kokoro-js'),

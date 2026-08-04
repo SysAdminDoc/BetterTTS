@@ -1,11 +1,12 @@
 import type { ProgressInfo } from './kokoro.ts'
+import { piper } from './kokoro-assets.ts'
 import { wavBlobToFloat32 } from './kitten.ts'
 
 export const PIPER_PLUS_PACKAGE_VERSION = '0.6.0'
 export const PIPER_PLUS_MODEL_ID = 'ayousanz/piper-plus-tsukuyomi-chan'
 export const PIPER_PLUS_MODEL_LABEL = 'Tsukuyomi-chan'
 export const PIPER_PLUS_SAMPLE_RATE = 22050
-const PIPER_PLUS_ONNX_FILE = 'tsukuyomi-chan-6lang-fp16.onnx'
+export const PIPER_PLUS_ONNX_FILE = 'tsukuyomi-chan-6lang-fp16.onnx'
 
 export type PiperPlusLanguage = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'fr' | 'pt' | 'sv'
 
@@ -144,7 +145,7 @@ async function resolvePiperModelIdentifier(): Promise<string> {
   } catch {
     /* fall back to Hugging Face */
   }
-  return PIPER_PLUS_MODEL_ID
+  return piper()
 }
 
 function piperOrtWithCachedModel(ort: OnnxRuntimeModule, modelData: ArrayBuffer): OnnxRuntimeModule {

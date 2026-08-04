@@ -16,18 +16,9 @@ export const SELF_HOSTED_KOKORO_MODEL_PATHS = [
 
 const hostedModelPaths = new Set<string>(SELF_HOSTED_KOKORO_MODEL_PATHS)
 const hostedVoicePaths = new Set([...SELF_HOSTED_KOKORO_VOICE_IDS].map((voiceId) => `voices/${voiceId}.bin`))
-const maxHfRetries = 2
 const defaultRetryDelays = [1_000, 2_500]
 const maxRetryDelayMs = 60_000
-const stateKey = Symbol.for('bettertts.kokoroAssets.fetch')
-
-type FetchState = {
-  installed: boolean
-}
-
-type KokoroAssetGlobal = typeof globalThis & {
-  [stateKey]?: FetchState
-}
+const loadKokoroIntegrity = () => import('./kokoro-integrity.ts')
 
 export function kokoroRemoteAssetUrl(relativePath: string): string {
   return `${KOKORO_HF_RESOLVE_PREFIX}${relativePath}`
@@ -51,6 +42,14 @@ export function isSelfHostedKokoroAsset(relativePath: string): boolean {
   return hostedModelPaths.has(relativePath) || hostedVoicePaths.has(relativePath)
 }
 
+export async function verifyKokoro(relativePath: string, response: Response): Promise<Response> {
+  return (await loadKokoroIntegrity()).verifyKokoro(relativePath, response)
+}
+
+export async function piper(): Promise<string> {
+  return (await loadKokoroIntegrity()).piper()
+}
+
 export function kokoroLocalAssetUrl(relativePath: string, baseUrl = import.meta.env.BASE_URL): string {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
   const pathname = `${normalizedBase}${KOKORO_LOCAL_MODEL_PREFIX}${relativePath}`
@@ -66,62 +65,6 @@ export function rateLimitRetryDelayMs(headers: Headers, attempt: number, now = D
     ?? parseRateLimitWindow(headers.get('ratelimit'))
     ?? defaultRetryDelays[Math.min(attempt, defaultRetryDelays.length - 1)]
   return Math.max(250, Math.min(parsed, maxRetryDelayMs))
-}
-
-export function installKokoroAssetFallback(): void {
-  if (typeof fetch !== 'function') return
-
-  const target = globalThis as KokoroAssetGlobal
-  if (target[stateKey]?.installed) return
-
-  const originalFetch = fetch.bind(globalThis)
-  target[stateKey] = { installed: true }
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const relativePath = kokoroRemoteAssetPath(input)
-    if (!relativePath) return originalFetch(input, init)
-
-    if (isFetchableAssetRequest(input, init) && isSelfHostedKokoroAsset(relativePath)) {
-      try {
-        const localResponse = await originalFetch(kokoroLocalAssetUrl(relativePath), localFetchInit(input, init))
-        if (localResponse.ok && !isHtmlFallback(localResponse)) return localResponse
-      } catch {
-        /* fall through to Hugging Face */
-      }
-    }
-
-    return fetchHfWithRetry(originalFetch, input, init)
-  }) as typeof fetch
-}
-
-function isHtmlFallback(response: Response): boolean {
-  return response.headers.get('content-type')?.toLowerCase().includes('text/html') ?? false
-}
-
-function isFetchableAssetRequest(input: RequestInfo | URL, init?: RequestInit): boolean {
-  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
-  return method === 'GET' || method === 'HEAD'
-}
-
-function localFetchInit(input: RequestInfo | URL, init?: RequestInit): RequestInit | undefined {
-  if (!(input instanceof Request)) return init
-  return {
-    ...init,
-    method: init?.method ?? input.method,
-    signal: init?.signal ?? input.signal,
-  }
-}
-
-async function fetchHfWithRetry(
-  originalFetch: typeof fetch,
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  let response = await originalFetch(input, init)
-  for (let attempt = 0; attempt < maxHfRetries && response.status === 429; attempt += 1) {
-    await wait(rateLimitRetryDelayMs(response.headers, attempt))
-    response = await originalFetch(input, init)
-  }
-  return response
 }
 
 function parseRetryAfter(value: string | null, now: number): number | null {
@@ -140,6 +83,6 @@ function parseRateLimitWindow(value: string | null): number | null {
   return match ? Number(match[1]) * 1000 : null
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+export async function installKokoro(): Promise<void> {
+  return (await import('./kokoro-fetch.ts')).installKokoro()
 }

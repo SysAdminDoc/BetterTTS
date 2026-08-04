@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeWav } from './wav.ts'
+import { piper } from './kokoro-assets.ts'
 import {
   PIPER_PLUS_MODEL_ID,
   PIPER_PLUS_PACKAGE_VERSION,
@@ -30,6 +31,14 @@ describe('Piper-plus metadata and controls', () => {
     expect(piperLocalModelUrl()).toBe(
       'https://sysadmindoc.github.io/BetterTTS/models/ayousanz/piper-plus-tsukuyomi-chan/tsukuyomi-chan-6lang-fp16.onnx',
     )
+  })
+
+  it('uses an immutable Hugging Face revision for the runtime fallback', async () => {
+    const remoteUrl = await piper()
+    expect(remoteUrl).toBe(
+      'https://huggingface.co/ayousanz/piper-plus-tsukuyomi-chan/resolve/36b59c825c36bd386b8960cf3f604382f52f2a87/tsukuyomi-chan-6lang-fp16.onnx',
+    )
+    expect(remoteUrl).toMatch(/resolve\/[a-f0-9]{40}\//)
   })
 })
 
