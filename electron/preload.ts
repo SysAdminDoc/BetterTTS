@@ -8,6 +8,7 @@ const FFMPEG_CHANNEL = 'bettertts:ffmpeg'
 const WHISPER_CHANNEL = 'bettertts:whisper'
 const SIDECAR_CHANNEL = 'bettertts:sidecar'
 const BYO_WEIGHTS_CHANNEL = 'bettertts:byo-weights'
+const OPENAI_TTS_CHANNEL = 'bettertts:openai-tts'
 
 // The single, narrow bridge the renderer sees. Native TTS messages relay
 // through main to the inference utilityProcess; payloads are structured-clone
@@ -99,6 +100,17 @@ const bridge = {
   byoWeights: {
     choose(modelId: string): Promise<unknown> {
       return ipcRenderer.invoke(BYO_WEIGHTS_CHANNEL, { modelId })
+    },
+  },
+  openAiServer: {
+    status(): Promise<unknown> {
+      return ipcRenderer.invoke(OPENAI_TTS_CHANNEL, { action: 'status' })
+    },
+    start(port: number): Promise<unknown> {
+      return ipcRenderer.invoke(OPENAI_TTS_CHANNEL, { action: 'start', port })
+    },
+    stop(): Promise<unknown> {
+      return ipcRenderer.invoke(OPENAI_TTS_CHANNEL, { action: 'stop' })
     },
   },
 }

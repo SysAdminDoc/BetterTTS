@@ -78,6 +78,21 @@ export type ByoWeightsBridge = {
   }>
 }
 
+export type OpenAiTtsServerStatus = {
+  running: boolean
+  host: '127.0.0.1'
+  port: number | null
+  endpoint: string | null
+  models: string[]
+  lastError?: string
+}
+
+export type OpenAiTtsServerBridge = {
+  status: () => Promise<OpenAiTtsServerStatus>
+  start: (port: number) => Promise<OpenAiTtsServerStatus>
+  stop: () => Promise<OpenAiTtsServerStatus>
+}
+
 export type DesktopBridge = {
   isDesktop: true
   kind: 'desktop'
@@ -89,6 +104,7 @@ export type DesktopBridge = {
   whisper?: WhisperBridge
   sidecar?: SidecarBridge
   byoWeights?: ByoWeightsBridge
+  openAiServer?: OpenAiTtsServerBridge
 }
 
 declare global {
@@ -147,4 +163,9 @@ export function getSidecarBridge(): SidecarBridge | null {
 export function getByoWeightsBridge(): ByoWeightsBridge | null {
   if (typeof window === 'undefined') return null
   return window.betterttsPlatform?.byoWeights ?? null
+}
+
+export function getOpenAiTtsServerBridge(): OpenAiTtsServerBridge | null {
+  if (typeof window === 'undefined') return null
+  return window.betterttsPlatform?.openAiServer ?? null
 }

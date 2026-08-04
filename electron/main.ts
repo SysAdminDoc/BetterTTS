@@ -10,8 +10,11 @@ import {
 } from './project-files.mjs'
 import { buildM4bAudiobook, probeFfmpeg, transcodePcm } from './ffmpeg.mjs'
 import { getByoModelOption } from '../src/lib/byo-models.ts'
+import { encodeWav } from '../src/lib/wav.ts'
 import { BYO_WEIGHTS_CHANNEL, validateByoWeightsRequest } from './byo-ipc.ts'
 import { validateNativeTtsRequest } from './native-ipc.ts'
+import { OPENAI_TTS_CHANNEL, validateOpenAiTtsRequest } from './openai-ipc.ts'
+import { createOpenAiTtsServer, type OpenAiSpeechRequest } from './openai-server.ts'
 import { SIDECAR_CHANNEL, validateSidecarRequest } from './sidecar-ipc.ts'
 import { WHISPER_CHANNEL, validateWhisperRequest } from './whisper-ipc.ts'
 import { resolveRendererRequest } from './app-protocol.ts'
@@ -326,6 +329,17 @@ ipcMain.handle(BYO_WEIGHTS_CHANNEL, async (event, message: unknown) => {
   }
 })
 
+const openAiTtsServer = createOpenAiTtsServer({ synthesize: synthesizeOpenAiSpeech })
+
+ipcMain.handle(OPENAI_TTS_CHANNEL, async (event, message: unknown) => {
+  if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid local TTS server request.')
+  const request = validateOpenAiTtsRequest(message)
+  if (!request) throw new Error('Invalid local TTS server request.')
+  if (request.action === 'status') return openAiTtsServer.status()
+  if (request.action === 'start') return openAiTtsServer.start(request.port)
+  return openAiTtsServer.stop()
+})
+
 type UpdateStatus = {
   state: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
   version?: string
@@ -625,6 +639,128 @@ function probeTtsHostGenerate(text: string, id: number, timeoutMs = 180000): Pro
   })
 }
 
+let nextOpenAiTtsId = 1_000_000
+let openAiGenerationTail: Promise<void> = Promise.resolve()
+
+function waitForTtsHostMessage<T>(
+  host: UtilityProcess,
+  predicate: (message: unknown) => boolean,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      host.removeListener('message', onMessage)
+      host.removeListener('exit', onExit)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    const onMessage = (message: unknown) => {
+      if (predicate(message)) finish(() => resolve(message as T))
+    }
+    const onExit = () => finish(() => reject(new Error('The native inference host stopped while serving the local API.')))
+    const onAbort = () => finish(() => reject(new Error('The local API request was cancelled.')))
+    const timer = setTimeout(() => finish(() => reject(new Error('The native inference host timed out.'))), timeoutMs)
+    host.on('message', onMessage)
+    host.once('exit', onExit)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+  })
+}
+
+async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: AbortSignal): Promise<{ samples: Float32Array; sampleRate: number }> {
+  const operation = openAiGenerationTail.then(async () => {
+    if (signal.aborted) throw new Error('The local API request was cancelled.')
+    const host = ensureTtsHost()
+    const key = request.engine === 'piper' ? 'sherpa:piper' : 'cpu:q8'
+    const load = waitForTtsHostMessage<{ type: 'loaded'; key: string } | { type: 'loadError'; key: string; message: string }>(
+      host,
+      (message) => {
+        if (!message || typeof message !== 'object') return false
+        const response = message as { type?: string; key?: string }
+        return (response.type === 'loaded' || response.type === 'loadError') && response.key === key
+      },
+      180_000,
+      signal,
+    )
+    host.postMessage({ type: 'load', dtype: 'q8', ...(request.engine === 'piper' ? { engine: 'piper' } : {}) })
+    const loaded = await load
+    if (loaded.type === 'loadError') throw new Error(loaded.message)
+
+    const id = nextOpenAiTtsId++
+    const generated = waitForTtsHostMessage<{ type: 'generated'; samples: Float32Array; sampleRate: number } | { type: 'generateError'; id: number; message: string }>(
+      host,
+      (message) => {
+        if (!message || typeof message !== 'object') return false
+        const response = message as { type?: string; id?: number }
+        return (response.type === 'generated' || response.type === 'generateError') && response.id === id
+      },
+      180_000,
+      signal,
+    )
+    host.postMessage({
+      type: 'generate',
+      text: request.input,
+      voice: request.engine === 'piper' ? 'en' : request.voice,
+      speed: request.speed,
+      id,
+      ...(request.engine === 'piper' ? { engine: 'piper' } : {}),
+    })
+    try {
+      const result = await generated
+      if (result.type === 'generateError') throw new Error(result.message)
+      const samples = result.samples instanceof Float32Array ? result.samples : new Float32Array(result.samples)
+      if (samples.length === 0 || samples.some((sample) => !Number.isFinite(sample))) throw new Error('The native inference host returned invalid audio.')
+      return { samples, sampleRate: result.sampleRate }
+    } finally {
+      if (signal.aborted) host.postMessage({ type: 'cancel', id })
+    }
+  })
+  openAiGenerationTail = operation.then(() => undefined, () => undefined)
+  return operation
+}
+
+async function synthesizeOpenAiSpeech(request: OpenAiSpeechRequest, signal: AbortSignal) {
+  const generated = await synthesizeNativeOpenAi(request, signal)
+  if (request.responseFormat === 'wav') {
+    return {
+      bytes: new Uint8Array(encodeWav(generated.samples, generated.sampleRate)),
+      mime: 'audio/wav',
+      extension: '.wav',
+      sampleRate: generated.sampleRate,
+    }
+  }
+  const encoded = await transcodePcm({
+    samples: generated.samples,
+    sampleRate: generated.sampleRate,
+    format: request.responseFormat,
+    bitrate: 128,
+    title: 'BetterTTS local speech',
+  }) as { bytes: Uint8Array; extension: string; mime: string }
+  return { ...encoded, sampleRate: generated.sampleRate }
+}
+
+async function probeOpenAiTtsServer(): Promise<unknown> {
+  const before = openAiTtsServer.status()
+  const started = await openAiTtsServer.start(0)
+  try {
+    if (!started.endpoint) throw new Error('Local API smoke server did not expose an endpoint.')
+    const healthResponse = await fetch(`${started.endpoint}/health`)
+    const health = await healthResponse.json() as { ok?: boolean }
+    const stopped = await openAiTtsServer.stop()
+    return { before, started, health, stopped }
+  } finally {
+    if (openAiTtsServer.status().running) await openAiTtsServer.stop()
+  }
+}
+
 async function probeTtsHostCancellation(): Promise<void> {
   const id = 91001
   const pending = probeTtsHostGenerate(
@@ -752,9 +888,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       railItems: document.querySelectorAll('.rail-link').length,
       generate: !!document.querySelector('.generate-button'),
       platform: window.betterttsPlatform
-        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights }
+        ? { kind: window.betterttsPlatform.kind, nativeTts: !!window.betterttsPlatform.nativeTts, updater: !!window.betterttsPlatform.updater, projects: !!window.betterttsPlatform.projects, ffmpeg: !!window.betterttsPlatform.ffmpeg, whisper: !!window.betterttsPlatform.whisper, sidecar: !!window.betterttsPlatform.sidecar, byoWeights: !!window.betterttsPlatform.byoWeights, openAiServer: !!window.betterttsPlatform.openAiServer }
         : null,
-    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean } | null }
+    }))()`)) as { brand: string | null; railItems: number; generate: boolean; platform: { kind: string; nativeTts: boolean; updater: boolean; projects: boolean; ffmpeg: boolean; whisper: boolean; sidecar: boolean; byoWeights: boolean; openAiServer: boolean } | null }
 
     try {
       const image = await win.webContents.capturePage()
@@ -780,6 +916,24 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         projectActions: Array.from(projectPanel?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
       }
     })()`)
+    result.openAiUi = await win.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector('[aria-label="Local OpenAI-compatible TTS server"]')
+      panel?.scrollIntoView({ block: 'center' })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return {
+        panel: !!panel,
+        startAction: !!Array.from(panel?.querySelectorAll('button') ?? []).find((button) => button.textContent?.includes('Start server')),
+        stoppedByDefault: panel?.querySelector('[role="status"]')?.textContent?.includes('Stopped') ?? false,
+      }
+    })()`)
+    const openAiImage = await win.webContents.capturePage()
+    const openAiScreenshotPath = join(smokeOutputDirectory, 'openai-smoke.png')
+    await writeFile(openAiScreenshotPath, openAiImage.toPNG())
+    result.openAiScreenshot = openAiScreenshotPath
+    await win.webContents.executeJavaScript(`(() => {
+      document.querySelector('[aria-label="Desktop project"]')?.scrollIntoView({ block: 'center' })
+    })()`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
     const systemImage = await win.webContents.capturePage()
     const systemScreenshotPath = join(smokeOutputDirectory, 'system-smoke.png')
     await writeFile(systemScreenshotPath, systemImage.toPNG())
@@ -805,6 +959,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       const output = await bridge.transcode({ samples, sampleRate: 24000, format: 'flac', bitrate: 128, title: 'Smoke' })
       return { ...status, outputBytes: output.bytes.byteLength, extension: output.extension }
     })()`)
+    result.openAiServer = await probeOpenAiTtsServer()
 
     try {
       const nativeHost = (await probeTtsHostInfo()) as { runtime?: unknown }
@@ -860,10 +1015,14 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       probe.platform?.updater === true &&
       probe.platform?.projects === true &&
       probe.platform?.ffmpeg === true &&
+      probe.platform?.openAiServer === true &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.panel) &&
       Boolean((result.updaterUi as { panel?: boolean; checkAction?: boolean } | undefined)?.checkAction) &&
       Boolean((result.updaterUi as { projectPanel?: boolean } | undefined)?.projectPanel) &&
       ((result.updaterUi as { projectActions?: string[] } | undefined)?.projectActions?.some((label) => label?.includes('Create project')) ?? false) &&
+      Boolean((result.openAiUi as { panel?: boolean; startAction?: boolean; stoppedByDefault?: boolean } | undefined)?.panel) &&
+      Boolean((result.openAiUi as { startAction?: boolean } | undefined)?.startAction) &&
+      Boolean((result.openAiUi as { stoppedByDefault?: boolean } | undefined)?.stoppedByDefault) &&
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.saved) &&
       Boolean((result.projectIo as { saved?: boolean; opened?: boolean } | undefined)?.opened) &&
       JSON.stringify((result.projectIo as { bytes?: number[] } | undefined)?.bytes) === '[80,75,3,4,5]' &&
@@ -874,6 +1033,11 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean(result.nativeHost) &&
       Boolean(result.whisperStatus) &&
       Boolean(result.sidecarStatus) &&
+      Boolean((result.openAiServer as { before?: { running?: boolean }; started?: { running?: boolean; host?: string }; health?: { ok?: boolean }; stopped?: { running?: boolean } } | undefined)?.before?.running === false) &&
+      Boolean((result.openAiServer as { started?: { running?: boolean; host?: string } } | undefined)?.started?.running === true) &&
+      (result.openAiServer as { started?: { host?: string } } | undefined)?.started?.host === '127.0.0.1' &&
+      Boolean((result.openAiServer as { health?: { ok?: boolean } } | undefined)?.health?.ok) &&
+      Boolean((result.openAiServer as { stopped?: { running?: boolean } } | undefined)?.stopped?.running === false) &&
       (!LOAD_NATIVE_IN_SMOKE || (
         Boolean(result.nativeLoad)
         && Boolean((result.nativeCancellation as { ok?: boolean } | undefined)?.ok)

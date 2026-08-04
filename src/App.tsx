@@ -71,8 +71,9 @@ import { loadTimestampedKokoro, resetTimestampedKokoroSession, synthesizeTimesta
 import { needsDirectKokoroPath } from './lib/kokoro-direct.ts'
 import { cancelWorkerGeneration, generateWorker, loadKokoroWorker, resetWorker } from './lib/kokoro-worker.ts'
 import { cancelNativeGeneration, generateNative, getNativeRuntimeInfo, loadNativeKokoro, loadNativePiper, nativeTtsAvailable, resetNativeTts } from './platform/native-tts.ts'
-import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge } from './platform/index.ts'
+import { type DesktopProjectResult, getDesktopFfmpegBridge, getDesktopProjectBridge, getDesktopUpdaterBridge, getOpenAiTtsServerBridge, type OpenAiTtsServerStatus } from './platform/index.ts'
 import { byoWeightsAvailable, chooseByoWeights } from './platform/byo.ts'
+import { DEFAULT_OPENAI_TTS_PORT, MAX_OPENAI_TTS_PORT, MIN_OPENAI_TTS_PORT, OPENAI_TTS_PORT_STORAGE_KEY, getOpenAiTtsServerStatus, openAiTtsServerAvailable, startOpenAiTtsServer, stopOpenAiTtsServer } from './platform/openai.ts'
 import { getWhisperRuntimeStatus, transcribeWhisper, whisperDesktopAvailable } from './platform/whisper.ts'
 import { getQwenSidecarStatus, qwenSidecarAvailable, setupQwenSidecar, synthesizeQwen, QWEN_LANGUAGES, QWEN_MODEL_ID, QWEN_SPEAKERS, type QwenLanguage, type QwenSpeaker, type SidecarStatus } from './platform/qwen.ts'
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
@@ -321,6 +322,18 @@ function getInitialByoModels(): ByoModelRecord[] {
     return parseByoModelRecords(window.localStorage.getItem(BYO_MODELS_STORAGE_KEY))
   } catch {
     return []
+  }
+}
+
+function getInitialOpenAiTtsPort(): number {
+  if (typeof window === 'undefined') return DEFAULT_OPENAI_TTS_PORT
+  try {
+    const saved = Number(window.localStorage.getItem(OPENAI_TTS_PORT_STORAGE_KEY))
+    return Number.isSafeInteger(saved) && saved >= MIN_OPENAI_TTS_PORT && saved <= MAX_OPENAI_TTS_PORT
+      ? saved
+      : DEFAULT_OPENAI_TTS_PORT
+  } catch {
+    return DEFAULT_OPENAI_TTS_PORT
   }
 }
 
@@ -1239,6 +1252,9 @@ function App() {
   const [projectDirty, setProjectDirty] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; version?: string; message?: string } | null>(null)
+  const [openAiTtsPort, setOpenAiTtsPort] = useState(getInitialOpenAiTtsPort)
+  const [openAiTtsStatus, setOpenAiTtsStatus] = useState<OpenAiTtsServerStatus | null>(null)
+  const [openAiTtsAction, setOpenAiTtsAction] = useState<'start' | 'stop' | 'refresh' | null>(null)
   const [loudnessNormalization, setLoudnessNormalization] = useState(false)
   const [m4bCoverFile, setM4bCoverFile] = useState<File | null>(null)
   const [pendingBackup, setPendingBackup] = useState<{ file: File; preview: BackupPreview } | null>(null)
@@ -1369,6 +1385,8 @@ function App() {
   const desktopFfmpeg = useMemo(() => getDesktopFfmpegBridge(), [])
   const desktopSidecar = useMemo(() => qwenSidecarAvailable(), [])
   const desktopByoWeights = useMemo(() => byoWeightsAvailable(), [])
+  const desktopOpenAiServer = useMemo(() => getOpenAiTtsServerBridge(), [])
+  const openAiServerSupported = useMemo(() => openAiTtsServerAvailable(), [])
   const normalizedProjectSearch = projectSearch.trim().toLocaleLowerCase()
   const visibleQueueJobs = useMemo(() => normalizedProjectSearch
     ? queueJobs.filter((job) =>
@@ -1605,6 +1623,34 @@ function App() {
   useEffect(() => {
     persistSetting(BYO_MODELS_STORAGE_KEY, serializeByoModelRecords(byoModels))
   }, [byoModels])
+
+  useEffect(() => {
+    persistSetting(OPENAI_TTS_PORT_STORAGE_KEY, String(openAiTtsPort))
+  }, [openAiTtsPort])
+
+  useEffect(() => {
+    if (!openAiServerSupported) return
+    let cancelled = false
+    getOpenAiTtsServerStatus()
+      .then((status) => {
+        if (!cancelled) setOpenAiTtsStatus(status)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setOpenAiTtsStatus({
+            running: false,
+            host: '127.0.0.1',
+            port: null,
+            endpoint: null,
+            models: [],
+            lastError: error instanceof Error ? error.message : 'Could not inspect the local TTS server.',
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [openAiServerSupported])
 
   useEffect(() => {
     if (forceNative) {
@@ -2263,6 +2309,51 @@ function App() {
     } finally {
       setQwenSetupBusy(false)
       setQwenSetupProgress(0)
+    }
+  }
+
+  async function handleRefreshOpenAiTtsStatus() {
+    if (!desktopOpenAiServer || openAiTtsAction !== null) return
+    setOpenAiTtsAction('refresh')
+    try {
+      setOpenAiTtsStatus(await getOpenAiTtsServerStatus())
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not inspect the local TTS server.' })
+    } finally {
+      setOpenAiTtsAction(null)
+    }
+  }
+
+  async function handleStartOpenAiTtsServer() {
+    if (!desktopOpenAiServer || openAiTtsAction !== null) return
+    if (!Number.isSafeInteger(openAiTtsPort) || openAiTtsPort < MIN_OPENAI_TTS_PORT || openAiTtsPort > MAX_OPENAI_TTS_PORT) {
+      showToast({ tone: 'warn', message: `Choose a local server port from ${MIN_OPENAI_TTS_PORT} to ${MAX_OPENAI_TTS_PORT}.` })
+      return
+    }
+    setOpenAiTtsAction('start')
+    try {
+      const status = await startOpenAiTtsServer(openAiTtsPort)
+      setOpenAiTtsStatus(status)
+      showToast({ tone: 'ok', message: `Local TTS server listening at ${status.endpoint}.` })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not start the local TTS server.'
+      showToast({ tone: 'error', message })
+      setOpenAiTtsStatus((current) => current ? { ...current, running: false, lastError: message } : current)
+    } finally {
+      setOpenAiTtsAction(null)
+    }
+  }
+
+  async function handleStopOpenAiTtsServer() {
+    if (!desktopOpenAiServer || openAiTtsAction !== null) return
+    setOpenAiTtsAction('stop')
+    try {
+      setOpenAiTtsStatus(await stopOpenAiTtsServer())
+      showToast({ tone: 'ok', message: 'Local TTS server stopped.' })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not stop the local TTS server.' })
+    } finally {
+      setOpenAiTtsAction(null)
     }
   }
 
@@ -4955,6 +5046,53 @@ function App() {
                     <small className="byo-note">The restricted model catalog and all registered locations stay inactive until this acknowledgement is enabled.</small>
                   )}
                 </div>
+                {desktopOpenAiServer ? (
+                  <div className="diagnostics-panel openai-panel" aria-label="Local OpenAI-compatible TTS server">
+                    <div className="cache-manager-head">
+                      <span>
+                        <strong>Local OpenAI-compatible TTS server</strong>
+                        <small>Off by default. When enabled, it binds only to 127.0.0.1 and exposes native Kokoro plus English Piper.</small>
+                      </span>
+                      <span className={`openai-status ${openAiTtsStatus?.running ? 'running' : ''}`} role="status">
+                        <span className="status-dot" aria-hidden="true" />
+                        {openAiTtsStatus === null ? 'Checking' : openAiTtsStatus.running ? 'Running' : 'Stopped'}
+                      </span>
+                    </div>
+                    <div className="openai-server-controls">
+                      <label>
+                        Port
+                        <input
+                          type="number"
+                          min={MIN_OPENAI_TTS_PORT}
+                          max={MAX_OPENAI_TTS_PORT}
+                          value={openAiTtsPort}
+                          onChange={(event) => setOpenAiTtsPort(Number(event.target.value))}
+                          disabled={openAiTtsStatus?.running === true || openAiTtsAction !== null}
+                        />
+                      </label>
+                      <div className="diagnostics-actions">
+                        <button type="button" onClick={() => void handleStartOpenAiTtsServer()} disabled={openAiTtsStatus?.running === true || openAiTtsAction !== null}>
+                          {openAiTtsAction === 'start' ? <Loader2 size={13} aria-hidden="true" /> : <Waves size={13} aria-hidden="true" />}
+                          Start server
+                        </button>
+                        <button type="button" onClick={() => void handleStopOpenAiTtsServer()} disabled={openAiTtsStatus?.running !== true || openAiTtsAction !== null}>
+                          {openAiTtsAction === 'stop' ? <Loader2 size={13} aria-hidden="true" /> : <X size={13} aria-hidden="true" />}
+                          Stop server
+                        </button>
+                        <button type="button" onClick={() => void handleRefreshOpenAiTtsStatus()} disabled={openAiTtsAction !== null}>
+                          {openAiTtsAction === 'refresh' ? <Loader2 size={13} aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
+                          Refresh
+                        </button>
+                      </div>
+                    </div>
+                    <small className="openai-endpoint">
+                      {openAiTtsStatus?.running && openAiTtsStatus.endpoint
+                        ? `Endpoint: ${openAiTtsStatus.endpoint}/v1/audio/speech`
+                        : `Choose ${MIN_OPENAI_TTS_PORT}–${MAX_OPENAI_TTS_PORT}; the listener remains stopped until you start it.`}
+                    </small>
+                    {openAiTtsStatus?.lastError ? <small className="openai-error">{shortUiLabel(openAiTtsStatus.lastError, 180)}</small> : null}
+                  </div>
+                ) : null}
                 <div className="cache-manager" aria-label="Offline pack manager">
                 <div className="cache-manager-head">
                   <span>

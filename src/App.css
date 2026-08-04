@@ -1714,6 +1714,71 @@ ul.queue-chunk-list > li {
   outline-offset: 1px;
 }
 
+.openai-panel {
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
+}
+
+.openai-status {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.openai-status.running {
+  color: var(--success);
+}
+
+.openai-status:not(.running) .status-dot {
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.openai-server-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.openai-server-controls label {
+  display: grid;
+  flex: 0 1 120px;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.openai-server-controls input {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.openai-server-controls input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.openai-endpoint,
+.openai-error {
+  overflow-wrap: anywhere;
+}
+
+.openai-error {
+  color: var(--warning) !important;
+}
+
 .cache-manager,
 .diagnostics-panel {
   display: grid;
