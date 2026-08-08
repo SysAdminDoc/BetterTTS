@@ -104,7 +104,6 @@ import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
 import { DEFAULT_UI_LOCALE, UI_LOCALE_STORAGE_KEY, UI_LOCALES, parseUiLocale, readUiLocale, uiText, type UiLocale } from './lib/ui-locale.ts'
-import { readArticleResponseText } from './lib/article-import.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
 import { subscribeToStoreChanges, withJobLease } from './lib/coordination.ts'
@@ -257,7 +256,7 @@ const MELO_MODEL_REVISION = 'af5d207a364ea4208c6f589c89f57f88414bdd16'
 const MELO_SAMPLE_RATE = 44_100
 const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
-const ARTICLE_IMPORT_TIMEOUT_MS = 15000
+const ARTICLE_IMPORT_TIMEOUT_MS = 15_000
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 const PUNCTUATION_PAUSE_FIELDS: ReadonlyArray<{ key: PunctuationPauseKey; symbol: string; label: string }> = [
   { key: 'comma', symbol: ',', label: 'Comma' },
@@ -4628,9 +4627,14 @@ function App() {
       ARTICLE_IMPORT_TIMEOUT_MS,
     )
     try {
-      const target = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`)
-      if (target.protocol !== 'https:' && target.protocol !== 'http:') throw new Error('Unsupported protocol')
-      const res = await fetch(target.toString(), { mode: 'cors', signal: controller.signal })
+      const {
+        fetchArticleResponse,
+        formatArticleImportDestination,
+        normalizeArticleImportUrl,
+        readArticleResponseText,
+      } = await import('./lib/article-import.ts')
+      const target = normalizeArticleImportUrl(url)
+      const { response: res, finalUrl, redirectCount } = await fetchArticleResponse(target, { signal: controller.signal })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const html = await readArticleResponseText(res)
       const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -4646,8 +4650,8 @@ function App() {
       setImportUrlValue('')
       showToast(
         truncated
-          ? { tone: 'warn', message: `Imported "${title}" — review cleanup before synthesis; the editor is trimmed to ${MAX_TEXT_CHARS} characters.` }
-          : { tone: 'ok', message: `Imported "${title}" — review cleanup before synthesis.` },
+          ? { tone: 'warn', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''} — review cleanup before synthesis; the editor is trimmed to ${MAX_TEXT_CHARS} characters.` }
+          : { tone: 'ok', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''} — review cleanup before synthesis.` },
       )
     } catch (err) {
       // Tell the user what actually failed — timeout, HTTP status, unreadable
@@ -4658,12 +4662,15 @@ function App() {
         message = controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError'
           ? 'Article import timed out. Paste the text instead.'
           : 'Article import cancelled. The current script was kept.'
+      } else if (err instanceof DOMException && err.name === 'TimeoutError') {
+        message = 'Article import timed out. Paste the text instead.'
+      } else if (err instanceof Error && err.name === 'ArticleImportPolicyError') {
+        const { formatArticleImportPolicyMessage } = await import('./lib/article-import.ts')
+        message = formatArticleImportPolicyMessage(err)
       } else if (err instanceof Error && /^HTTP \d+$/.test(err.message)) {
         message = `The site answered ${err.message} for that URL. Check the address or paste the text instead.`
       } else if (err instanceof Error && err.message === 'No readable text found') {
         message = 'No readable article text found on that page. Paste the text instead.'
-      } else if (err instanceof Error && (err.message === 'Unsupported protocol' || err instanceof TypeError && /Invalid URL/i.test(err.message))) {
-        message = 'That does not look like a valid http(s) URL.'
       }
       showToast({ tone: 'warn', message })
     } finally {

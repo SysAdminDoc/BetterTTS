@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-547%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-552%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 547 tests across 94 test files
+- **Tests:** 552 tests across 94 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -107,7 +107,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, durable resume, and previous/next sentence controls
 - **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, PDF files containing JavaScript actions are rejected before text extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis or Reader mode
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer menu plus “Open with BetterTTS” registrations for TXT/EPUB/PDF/DOCX, bounded folder import, optional Tesseract screen OCR, tray render status, and completion notifications; every OS hook is independently disableable and the web/PWA build remains unchanged
-- **Article import** — paste any URL and Readability extracts the text (plus Android share-target support)
+- **Article import** — paste a public HTTPS URL and Readability extracts the text; embedded credentials, HTTP/local/private destinations, and redirects the browser cannot inspect are rejected, and successful imports disclose the final destination (plus Android share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis; the persisted rules are previewable and reversible
 - **Voice preview** — one-click preview for each voice with a bounded 20-entry session LRU cache and object-URL disposal
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (547 tests across 94 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (552 tests across 94 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
