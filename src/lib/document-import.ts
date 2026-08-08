@@ -61,6 +61,9 @@ export async function extractPdfTextFromArrayBuffer(
   } as Parameters<typeof pdfjs.getDocument>[0] & { disableWorker?: boolean; isEvalSupported: boolean })
   const pdf = await loadingTask.promise
   try {
+    if (await pdf.getJSActions()) {
+      throw new Error('PDF contains JavaScript actions and cannot be imported locally.')
+    }
     const pages: string[] = []
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber)

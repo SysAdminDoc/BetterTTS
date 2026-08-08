@@ -35,7 +35,7 @@ function makePdf(text: string): ArrayBuffer {
   return makePdfFromStream(stream)
 }
 
-function makePdfFromStream(stream: string): ArrayBuffer {
+function makePdfFromStream(stream: string, catalogSuffix = '', extraObjects: Array<{ id: number; body: string }> = []): ArrayBuffer {
   const parts = ['%PDF-1.4\n']
   const offsets: number[] = [0]
   const addObject = (id: number, body: string) => {
@@ -43,19 +43,29 @@ function makePdfFromStream(stream: string): ArrayBuffer {
     parts.push(`${id} 0 obj\n${body}\nendobj\n`)
   }
 
-  addObject(1, '<< /Type /Catalog /Pages 2 0 R >>')
+  addObject(1, `<< /Type /Catalog /Pages 2 0 R${catalogSuffix} >>`)
   addObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
   addObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>')
   addObject(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
   addObject(5, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
+  for (const object of extraObjects) addObject(object.id, object.body)
 
+  const size = Math.max(5, ...extraObjects.map(({ id }) => id))
   const xref = parts.join('').length
-  parts.push('xref\n0 6\n0000000000 65535 f \n')
-  for (let id = 1; id <= 5; id += 1) {
+  parts.push(`xref\n0 ${size + 1}\n0000000000 65535 f \n`)
+  for (let id = 1; id <= size; id += 1) {
     parts.push(`${String(offsets[id]).padStart(10, '0')} 00000 n \n`)
   }
-  parts.push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
+  parts.push(`trailer\n<< /Size ${size + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
   return bytesToBuffer(new TextEncoder().encode(parts.join('')))
+}
+
+function makeJavaScriptPdf(): ArrayBuffer {
+  return makePdfFromStream(
+    'BT /F1 24 Tf 100 700 Td (Safe text) Tj ET',
+    ' /Names << /JavaScript << /Names [(malicious) 6 0 R] >> >>',
+    [{ id: 6, body: '<< /S /JavaScript /JS (this code must never execute) >>' }],
+  )
 }
 
 function makeTwoColumnPdf(): ArrayBuffer {
@@ -83,6 +93,10 @@ describe('document import adapters', () => {
 
   it('reports scanned or textless PDFs clearly', async () => {
     await expect(extractPdfTextFromArrayBuffer(makePdf(''))).rejects.toThrow('No selectable text')
+  })
+
+  it('rejects PDFs that contain JavaScript actions before extracting text', async () => {
+    await expect(extractPdfTextFromArrayBuffer(makeJavaScriptPdf())).rejects.toThrow('JavaScript actions')
   })
 
   it('extracts DOCX paragraphs and ignores header/footer parts', () => {
