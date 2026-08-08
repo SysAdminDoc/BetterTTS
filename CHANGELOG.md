@@ -6,6 +6,7 @@
 - Remediated the current npm audit findings by upgrading PDF.js and vulnerable transitive dependencies, added a production audit gate to the build, and rejected PDF files containing JavaScript actions before local text extraction.
 - Sherpa model archives now preflight verbose entry types, reject links/devices/FIFOs, detect listing mismatches, and validate required files plus the complete staged tree before installation.
 - Article import now requires public HTTPS destinations, omits credentials and referrers, rejects local/private targets where the browser can identify them, manually validates exposed redirect hops, applies per-hop and total timeouts, and discloses the final destination without query credentials.
+- The opt-in loopback OpenAI-compatible server now issues a fresh Bearer token per start, uses an exact browser-origin allowlist instead of wildcard CORS, bounds concurrent/rate-limited requests, enforces deadlines, and revokes active work and credentials on shutdown.
 
 ## v0.23.0 - 2026-08-03
 

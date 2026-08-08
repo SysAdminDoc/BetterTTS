@@ -20,7 +20,7 @@ describe('local OpenAI-compatible TTS bridge', () => {
   })
 
   it('delegates status, start, and stop to the desktop bridge', async () => {
-    const status = { running: true, host: '127.0.0.1' as const, port: 8765, endpoint: 'http://127.0.0.1:8765', models: ['kokoro'] }
+    const status = { running: true, host: '127.0.0.1' as const, port: 8765, endpoint: 'http://127.0.0.1:8765', authToken: 'token', models: ['kokoro'] }
     const calls: string[] = []
     window.betterttsPlatform = {
       isDesktop: true,
@@ -29,7 +29,7 @@ describe('local OpenAI-compatible TTS bridge', () => {
       openAiServer: {
         status: async () => { calls.push('status'); return status },
         start: async (port) => { calls.push(`start:${port}`); return status },
-        stop: async () => { calls.push('stop'); return { ...status, running: false, port: null, endpoint: null } },
+        stop: async () => { calls.push('stop'); return { ...status, running: false, port: null, endpoint: null, authToken: null } },
       },
     }
     expect(openAiTtsServerAvailable()).toBe(true)
@@ -44,7 +44,7 @@ describe('local OpenAI-compatible TTS bridge', () => {
       isDesktop: true,
       kind: 'desktop',
       versions: { electron: '43', chrome: '134', node: '22' },
-      openAiServer: { status: async () => ({ running: false, host: '127.0.0.1', port: null, endpoint: null, models: [] }), start: async () => { throw new Error('should not call') }, stop: async () => ({ running: false, host: '127.0.0.1', port: null, endpoint: null, models: [] }) },
+      openAiServer: { status: async () => ({ running: false, host: '127.0.0.1', port: null, endpoint: null, authToken: null, models: [] }), start: async () => { throw new Error('should not call') }, stop: async () => ({ running: false, host: '127.0.0.1', port: null, endpoint: null, authToken: null, models: [] }) },
     }
     await expect(startOpenAiTtsServer(1023)).rejects.toThrow('1024')
     await expect(startOpenAiTtsServer(65_536)).rejects.toThrow('65535')

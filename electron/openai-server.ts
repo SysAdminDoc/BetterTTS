@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 
@@ -7,6 +7,17 @@ export const DEFAULT_OPENAI_TTS_PORT = 8765
 export const MAX_OPENAI_INPUT_CHARS = 10_000
 export const MAX_OPENAI_BODY_BYTES = 128 * 1024
 export const OPENAI_SSE_CHUNK_BYTES = 64 * 1024
+export const OPENAI_MAX_CONCURRENT_REQUESTS = 2
+export const OPENAI_MAX_REQUESTS_PER_MINUTE = 30
+export const OPENAI_RATE_WINDOW_MS = 60_000
+export const OPENAI_REQUEST_TIMEOUT_MS = 180_000
+export const OPENAI_DEFAULT_ALLOWED_ORIGINS = [
+  'app://bettertts',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+] as const
 
 export const OPENAI_MODEL_OPTIONS = [
   { id: 'kokoro', label: 'Kokoro local', engine: 'kokoro' },
@@ -47,6 +58,7 @@ export type OpenAiTtsServerStatus = {
   host: typeof OPENAI_TTS_HOST
   port: number | null
   endpoint: string | null
+  authToken: string | null
   models: OpenAiModelId[]
   lastError?: string
 }
@@ -57,6 +69,10 @@ export type OpenAiParseResult =
 
 export type OpenAiTtsServerOptions = {
   synthesize: OpenAiSpeechSynthesizer
+  allowedOrigins?: readonly string[]
+  maxConcurrentRequests?: number
+  maxRequestsPerMinute?: number
+  requestTimeoutMs?: number
 }
 
 const RESPONSE_FORMATS: readonly OpenAiResponseFormat[] = ['wav', 'mp3', 'opus', 'flac']
@@ -115,27 +131,56 @@ export function parseOpenAiSpeechRequest(value: unknown): OpenAiParseResult {
   }
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
+function corsHeaders(origin: string | undefined, allowedOrigins: ReadonlySet<string>): Record<string, string> {
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-store',
   }
+  if (origin && allowedOrigins.has(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin
+    headers.Vary = 'Origin'
+  }
+  return headers
 }
 
-function writeJson(response: ServerResponse, status: number, body: unknown): void {
+function validBearerToken(value: string | string[] | undefined, expected: string | null): boolean {
+  if (!expected || typeof value !== 'string') return false
+  const match = /^Bearer\s+([A-Za-z0-9_-]+)$/iu.exec(value)
+  if (!match) return false
+  const actual = Buffer.from(match[1], 'utf8')
+  const target = Buffer.from(expected, 'utf8')
+  return actual.byteLength === target.byteLength && timingSafeEqual(actual, target)
+}
+
+function writeJson(response: ServerResponse, status: number, body: unknown, headers: Record<string, string>): void {
   const bytes = Buffer.from(JSON.stringify(body))
   response.writeHead(status, {
-    ...corsHeaders(),
+    ...headers,
     'Content-Length': String(bytes.byteLength),
     'Content-Type': 'application/json; charset=utf-8',
   })
   response.end(bytes)
 }
 
-function writeError(response: ServerResponse, status: number, message: string, code = 'invalid_request_error'): void {
-  writeJson(response, status, { error: { message, type: status >= 500 ? 'server_error' : 'invalid_request_error', code } })
+function writeError(response: ServerResponse, status: number, message: string, code = 'invalid_request_error', headers: Record<string, string> = {}): void {
+  writeJson(response, status, { error: { message, type: status >= 500 ? 'server_error' : 'invalid_request_error', code } }, headers)
+}
+
+function isAllowedOrigin(origin: string | undefined, allowedOrigins: ReadonlySet<string>): boolean {
+  return !origin || allowedOrigins.has(origin)
+}
+
+/*
+ * A response header origin is deliberately reflected only after an exact set
+ * membership check.  The token is required independently, so CORS is not an
+ * authentication mechanism.
+ */
+function unauthenticatedHeaders(headers: Record<string, string>): Record<string, string> {
+  return {
+    ...headers,
+    'WWW-Authenticate': 'Bearer',
+  }
 }
 
 async function readJsonBody(request: IncomingMessage, signal: AbortSignal): Promise<unknown> {
@@ -189,9 +234,9 @@ function waitForDrain(response: ServerResponse): Promise<void> {
   return new Promise((resolve) => response.once('drain', resolve))
 }
 
-async function writeSse(response: ServerResponse, audio: OpenAiAudio, signal: AbortSignal): Promise<void> {
+async function writeSse(response: ServerResponse, audio: OpenAiAudio, signal: AbortSignal, headers: Record<string, string>): Promise<void> {
   response.writeHead(200, {
-    ...corsHeaders(),
+    ...headers,
     Connection: 'keep-alive',
     'Content-Type': 'text/event-stream; charset=utf-8',
     'X-Accel-Buffering': 'no',
@@ -217,13 +262,25 @@ async function writeSse(response: ServerResponse, audio: OpenAiAudio, signal: Ab
 
 export class OpenAiTtsServer {
   private readonly synthesize: OpenAiSpeechSynthesizer
+  private readonly allowedOrigins: ReadonlySet<string>
+  private readonly maxConcurrentRequests: number
+  private readonly maxRequestsPerMinute: number
+  private readonly requestTimeoutMs: number
   private server: Server | null = null
   private port: number | null = null
+  private authToken: string | null = null
   private lastError: string | undefined
   private readonly sockets = new Set<Socket>()
+  private readonly activeControllers = new Set<AbortController>()
+  private activeRequests = 0
+  private recentRequestTimes: number[] = []
 
   constructor(options: OpenAiTtsServerOptions) {
     this.synthesize = options.synthesize
+    this.allowedOrigins = new Set(options.allowedOrigins ?? OPENAI_DEFAULT_ALLOWED_ORIGINS)
+    this.maxConcurrentRequests = Math.max(1, Math.floor(options.maxConcurrentRequests ?? OPENAI_MAX_CONCURRENT_REQUESTS))
+    this.maxRequestsPerMinute = Math.max(1, Math.floor(options.maxRequestsPerMinute ?? OPENAI_MAX_REQUESTS_PER_MINUTE))
+    this.requestTimeoutMs = Math.max(1, Math.floor(options.requestTimeoutMs ?? OPENAI_REQUEST_TIMEOUT_MS))
   }
 
   status(): OpenAiTtsServerStatus {
@@ -232,6 +289,7 @@ export class OpenAiTtsServer {
       host: OPENAI_TTS_HOST,
       port: this.port,
       endpoint: this.port === null ? null : `http://${OPENAI_TTS_HOST}:${this.port}`,
+      authToken: this.authToken,
       models: OPENAI_MODEL_OPTIONS.map((option) => option.id),
       ...(this.lastError ? { lastError: this.lastError } : {}),
     }
@@ -245,12 +303,15 @@ export class OpenAiTtsServer {
     const server = createServer((request, response) => {
       void this.handleRequest(request, response)
     })
+    server.headersTimeout = 10_000
+    server.requestTimeout = this.requestTimeoutMs + 10_000
     server.on('connection', (socket) => {
       this.sockets.add(socket)
       socket.once('close', () => this.sockets.delete(socket))
     })
     this.server = server
     this.port = null
+    this.authToken = null
     this.lastError = undefined
 
     try {
@@ -270,11 +331,13 @@ export class OpenAiTtsServer {
       const address = server.address()
       if (!address || typeof address === 'string') throw new Error('The local TTS server did not expose a TCP port.')
       this.port = address.port
+      this.authToken = randomBytes(32).toString('base64url')
       return this.status()
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
       this.server = null
       this.port = null
+      this.authToken = null
       server.close()
       throw error
     }
@@ -284,6 +347,8 @@ export class OpenAiTtsServer {
     const server = this.server
     this.server = null
     this.port = null
+    this.authToken = null
+    for (const controller of this.activeControllers) controller.abort()
     if (server) {
       for (const socket of this.sockets) socket.destroy()
       await new Promise<void>((resolve) => {
@@ -295,34 +360,74 @@ export class OpenAiTtsServer {
       })
     }
     this.sockets.clear()
+    this.recentRequestTimes = []
     return this.status()
+  }
+
+  private admissionFailure(): 'busy' | 'rate' | null {
+    const now = Date.now()
+    this.recentRequestTimes = this.recentRequestTimes.filter((timestamp) => now - timestamp < OPENAI_RATE_WINDOW_MS)
+    if (this.activeRequests >= this.maxConcurrentRequests) return 'busy'
+    if (this.recentRequestTimes.length >= this.maxRequestsPerMinute) return 'rate'
+    this.activeRequests += 1
+    this.recentRequestTimes.push(now)
+    return null
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', `http://${OPENAI_TTS_HOST}`)
-    const headers = corsHeaders()
+    const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined
+    const headers = corsHeaders(origin, this.allowedOrigins)
     if (request.method === 'OPTIONS') {
-      response.writeHead(204, headers)
-      response.end()
+      if (!isAllowedOrigin(origin, this.allowedOrigins)) {
+        writeError(response, 403, 'Browser origin is not allowed.', 'origin_not_allowed', headers)
+      } else {
+        response.writeHead(204, headers)
+        response.end()
+      }
+      return
+    }
+    if (!isAllowedOrigin(origin, this.allowedOrigins)) {
+      writeError(response, 403, 'Browser origin is not allowed.', 'origin_not_allowed', headers)
+      return
+    }
+    if (!validBearerToken(request.headers.authorization, this.authToken)) {
+      writeError(response, 401, 'A valid Bearer token is required.', 'authentication_error', unauthenticatedHeaders(headers))
       return
     }
     if (request.method === 'GET' && url.pathname === '/health') {
-      writeJson(response, 200, { ok: true, ...this.status() })
+      const { authToken: _authToken, ...publicStatus } = this.status()
+      writeJson(response, 200, { ok: true, ...publicStatus }, headers)
       return
     }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
       writeJson(response, 200, {
         object: 'list',
         data: OPENAI_MODEL_OPTIONS.map((option) => ({ id: option.id, object: 'model', owned_by: 'bettertts' })),
-      })
+      }, headers)
       return
     }
     if (request.method !== 'POST' || url.pathname !== '/v1/audio/speech') {
-      writeError(response, 404, 'Route not found.', 'not_found')
+      writeError(response, 404, 'Route not found.', 'not_found', headers)
+      return
+    }
+    const admissionFailure = this.admissionFailure()
+    if (admissionFailure === 'busy') {
+      writeError(response, 429, 'The local TTS server is at its concurrent request limit.', 'server_busy', { ...headers, 'Retry-After': '5' })
+      return
+    }
+    if (admissionFailure === 'rate') {
+      writeError(response, 429, 'The local TTS server rate limit was reached.', 'rate_limit_error', { ...headers, 'Retry-After': '60' })
       return
     }
 
     const controller = new AbortController()
+    this.activeControllers.add(controller)
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.requestTimeoutMs)
     const onAborted = () => controller.abort()
     const onResponseClose = () => {
       if (!response.writableEnded) controller.abort()
@@ -333,13 +438,13 @@ export class OpenAiTtsServer {
       const body = await readJsonBody(request, controller.signal)
       const parsed = parseOpenAiSpeechRequest(body)
       if (!parsed.ok) {
-        writeError(response, 400, parsed.message)
+        writeError(response, 400, parsed.message, 'invalid_request_error', headers)
         return
       }
       const audio = await this.synthesize(parsed.request, controller.signal)
       if (controller.signal.aborted || response.destroyed) return
       if (parsed.request.stream) {
-        await writeSse(response, audio, controller.signal)
+        await writeSse(response, audio, controller.signal, headers)
       } else {
         const bytes = Buffer.from(audio.bytes)
         response.writeHead(200, {
@@ -350,11 +455,18 @@ export class OpenAiTtsServer {
         response.end(bytes)
       }
     } catch (error) {
-      if (controller.signal.aborted || response.destroyed) return
+      if (response.destroyed) return
+      if (controller.signal.aborted) {
+        if (timedOut) writeError(response, 504, 'The local TTS request timed out.', 'timeout_error', headers)
+        return
+      }
       const message = error instanceof Error ? error.message : 'Speech synthesis failed.'
       const status = message.includes('limit') || message.includes('JSON') ? 400 : 500
-      writeError(response, status, message, status >= 500 ? 'synthesis_error' : 'invalid_request_error')
+      writeError(response, status, message, status >= 500 ? 'synthesis_error' : 'invalid_request_error', headers)
     } finally {
+      clearTimeout(timeout)
+      this.activeControllers.delete(controller)
+      this.activeRequests = Math.max(0, this.activeRequests - 1)
       request.off('aborted', onAborted)
       response.off('close', onResponseClose)
     }

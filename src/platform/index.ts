@@ -108,6 +108,7 @@ export type OpenAiTtsServerStatus = {
   host: '127.0.0.1'
   port: number | null
   endpoint: string | null
+  authToken: string | null
   models: string[]
   lastError?: string
 }

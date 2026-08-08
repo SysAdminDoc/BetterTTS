@@ -2428,6 +2428,7 @@ function App() {
             host: '127.0.0.1',
             port: null,
             endpoint: null,
+            authToken: null,
             models: [],
             lastError: error instanceof Error ? error.message : 'Could not inspect the local TTS server.',
           })
@@ -7251,6 +7252,7 @@ function App() {
                         ? `Endpoint: ${openAiTtsStatus.endpoint}/v1/audio/speech`
                         : `Choose ${MIN_OPENAI_TTS_PORT}–${MAX_OPENAI_TTS_PORT}; the listener remains stopped until you start it.`}
                     </small>
+                    {openAiTtsStatus?.running && openAiTtsStatus.authToken ? <small className="openai-endpoint">Bearer token: <code>{openAiTtsStatus.authToken}</code> · stopping the server revokes it.</small> : null}
                     {openAiTtsStatus?.lastError ? <small className="openai-error">{shortUiLabel(openAiTtsStatus.lastError, 180)}</small> : null}
                   </div>
                 ) : null}

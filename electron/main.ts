@@ -1020,7 +1020,16 @@ ipcMain.handle(RVC_WEIGHTS_CHANNEL, async (event, message: unknown) => {
   }
 })
 
-const openAiTtsServer = createOpenAiTtsServer({ synthesize: synthesizeOpenAiSpeech })
+const openAiAllowedOrigins = new Set(['app://bettertts', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'])
+if (DEV_URL) {
+  try {
+    openAiAllowedOrigins.add(new URL(DEV_URL).origin)
+  } catch {
+    // The dev URL is validated by the desktop launcher; keep the explicit
+    // default origin set if an invalid override reaches this process.
+  }
+}
+const openAiTtsServer = createOpenAiTtsServer({ synthesize: synthesizeOpenAiSpeech, allowedOrigins: [...openAiAllowedOrigins] })
 
 ipcMain.handle(OPENAI_TTS_CHANNEL, async (event, message: unknown) => {
   if (!BrowserWindow.fromWebContents(event.sender)) throw new Error('Invalid local TTS server request.')
@@ -1454,8 +1463,8 @@ async function probeOpenAiTtsServer(): Promise<unknown> {
   const before = openAiTtsServer.status()
   const started = await openAiTtsServer.start(0)
   try {
-    if (!started.endpoint) throw new Error('Local API smoke server did not expose an endpoint.')
-    const healthResponse = await fetch(`${started.endpoint}/health`)
+    if (!started.endpoint || !started.authToken) throw new Error('Local API smoke server did not expose an authenticated endpoint.')
+    const healthResponse = await fetch(`${started.endpoint}/health`, { headers: { Authorization: `Bearer ${started.authToken}` } })
     const health = await healthResponse.json() as { ok?: boolean }
     const stopped = await openAiTtsServer.stop()
     return { before, started, health, stopped }

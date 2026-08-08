@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-552%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-557%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 552 tests across 94 test files
+- **Tests:** 557 tests across 94 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -68,7 +68,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Pages-hosted WASM q8 model** with immutable revision + SHA-256-verified deployment assets, Hugging Face fallback, and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
 - **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; archive preflight allows only regular files/directories and staging is validated before installation; the runtime reports the verified Windows x64 addon and active pack
-- **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
+- **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with a per-start Bearer token, explicit browser-origin allowlist, bounded SSE base64 streaming, concurrency/rate limits, and request deadlines; it is off by default and stopping it revokes the token and closes active work
 - **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
 - **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
 - **Headless native CLI** — `bettertts synth` converts TXT or EPUB input to WAV, MP3, Opus, FLAC, or chaptered M4B with SRT/VTT captions and machine-readable progress, without launching the GUI
@@ -210,7 +210,7 @@ The **RVC voice conversion** post-stage is available only in the Windows desktop
 
 **Narrator mode** is available in the Voice chain for local engines. Enable it in Advanced options to split ordinary quoted speech and explicit `[speaker:Name]` lines from narration, then choose the narration and dialogue voices. Plain text remains a single narration segment. Queue jobs persist the role, optional speaker, and exact voice on each chunk; ZIP manifests include the same metadata and M4B export uses the already-rendered role-specific audio. Engines with one active voice use the narration voice for both roles.
 
-The **Local OpenAI-compatible TTS server** is also desktop-only and starts only from **Voice chain -> Engine -> System & diagnostics**. It binds to `127.0.0.1` on the selected port (default `8765`) and exposes `GET /health`, `GET /v1/models`, and `POST /v1/audio/speech`. A minimal request is `{"input":"Hello","model":"kokoro","voice":"af_heart","response_format":"wav"}`; add `"stream":true` or `"stream_format":"sse"` for SSE events containing base64 audio chunks followed by `data: [DONE]`. Supported models are `kokoro`, `kokoro-82m`, `piper`, and `piper-plus`; the native provider currently maps Piper voices to English Cori. The server does not expose browser-only engines and never listens on a non-loopback interface.
+The **Local OpenAI-compatible TTS server** is also desktop-only and starts only from **Voice chain -> Engine -> System & diagnostics**. It binds to `127.0.0.1` on the selected port (default `8765`) and exposes `GET /health`, `GET /v1/models`, and `POST /v1/audio/speech`. Each start displays a fresh Bearer token; send it as `Authorization: Bearer <token>` and stop/restart the server to revoke it. A minimal request is `{"input":"Hello","model":"kokoro","voice":"af_heart","response_format":"wav"}`; add `"stream":true` or `"stream_format":"sse"` for SSE events containing base64 audio chunks followed by `data: [DONE]`. Supported models are `kokoro`, `kokoro-82m`, `piper`, `piper-plus`, and `melo`; the native provider currently maps Piper voices to English Cori. Browser CORS is limited to the packaged `app://bettertts` origin and the explicit local development origins; unauthenticated, disallowed-origin, overloaded, and timed-out requests are rejected. The server does not expose browser-only engines and never listens on a non-loopback interface.
 
 The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
 
@@ -232,7 +232,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | RVC post-stage | Optional Windows-only Python 3.10 environment; `rvc-python` and user-selected `.pth`/`.index` files remain outside the installer |
 | Narrator segmentation | Bounded local quote/speaker parser with per-queue-chunk role and voice metadata |
 | Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
-| Local API | Opt-in loopback-only Electron server for OpenAI-compatible speech requests, native Kokoro/Piper output, and SSE audio chunks |
+| Local API | Opt-in authenticated loopback-only Electron server for OpenAI-compatible speech requests, native output, explicit CORS, and bounded SSE audio chunks |
 | Headless CLI | Plain Node `bettertts synth` entrypoint reusing the verified Sherpa host, bounded text/EPUB chunking, FFmpeg export, and SRT/VTT serializers |
 | Native addon | `sherpa-onnx-win-x64` 1.13.4, Apache-2.0; unpacked from the unsigned Windows installer beside the Sherpa `.node` module and companion DLLs |
 | MP3 Encoding | `@breezystack/lamejs` (LGPL-3.0, browser LAME) |
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (552 tests across 94 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (557 tests across 94 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -345,7 +345,7 @@ sidecar/
 - Desktop imported-audio word-level SRT/VTT uses whisper.cpp `-ml 1 -sow` forced alignment; the CLI is pinned and bundled by the Windows build, while `ggml-base.bin` remains a user-managed multilingual model
 - Qwen3-TTS stays outside the browser bundle: Electron owns a private Python environment, the sidecar accepts bounded JSON-lines messages without opening a listener, and each synthesis runs in a disposable worker so cancellation or a crash cannot take down the desktop shell
 - Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
-- The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, bounds request/input/audio surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that closes the listener and active sockets
+- The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, requires a per-start Bearer capability, reflects only an explicit browser-origin allowlist, bounds request/input/audio/concurrency/rate/time surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that revokes the token and closes active work
 - RVC is an explicit desktop-only post-stage: consent and model provenance are required, model paths are user-managed, optional blending performs two bounded inference passes, and converted clips retain the selected model metadata
 - New engines enter through the v1 adapter SDK: a local manifest declares immutable model files, runtime/license/safety metadata, hardware needs, queue/export capabilities, and required diagnostics fields before an adapter can be registered
 - Narrator mode is a bounded text transformation before synthesis: quoted and explicit-speaker segments receive per-chunk role/voice metadata, plain text remains narration, and queue/M4B exports consume the persisted rendered chunks
