@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -10,6 +10,10 @@ import {
   SHERPA_MELO_PACK,
   SHERPA_PIPER_PACK,
   validateArchiveEntry,
+  validateArchiveEntries,
+  validateArchiveEntryType,
+  validateArchiveListingTypes,
+  recoverInterruptedSherpaExtraction,
   validateSherpaModelPack,
 } from './sherpa-models.ts'
 
@@ -57,6 +61,27 @@ describe('Sherpa model packs', () => {
     expect(() => validateArchiveEntry('model/./outside')).toThrow(/Unsafe Sherpa archive entry/)
     expect(() => validateArchiveEntry('C:/outside')).toThrow(/Unsafe Sherpa archive entry/)
     expect(() => validateArchiveEntry('/outside')).toThrow(/Unsafe Sherpa archive entry/)
+    expect(() => validateArchiveEntry(`model/${'x'.repeat(4097)}`)).toThrow(/Unsafe Sherpa archive entry/)
+    expect(() => validateArchiveEntry('model/\u0000unsafe')).toThrow(/Unsafe Sherpa archive entry/)
+  })
+
+  it('rejects duplicate entries after archive path normalization and Windows case folding', () => {
+    expect(() => validateArchiveEntries(['model/file.onnx', './model/file.onnx'])).toThrow(/Duplicate Sherpa archive entry/)
+    expect(() => validateArchiveEntries(['model/File.onnx', 'model/file.onnx'])).toThrow(/Duplicate Sherpa archive entry/)
+  })
+
+  it('permits only regular files and directories in verbose tar listings', () => {
+    expect(validateArchiveEntryType('-rw-r--r-- 0/0 10 2026-08-08 12:00 model/file.onnx')).toBe('file')
+    expect(validateArchiveEntryType('drwxr-xr-x 0/0 0 2026-08-08 12:00 model')).toBe('directory')
+    for (const type of ['lrwxrwxrwx', 'hrw-r--r--', 'crw-r--r--', 'prw-r--r--', 'srwxr-xr-x']) {
+      expect(() => validateArchiveEntryType(`${type} 0/0 0 2026-08-08 12:00 model/unsafe`)).toThrow(/Unsupported Sherpa archive entry type/)
+    }
+  })
+
+  it('rejects verbose archive listings whose entry count changes between preflight passes', () => {
+    const file = '-rw-r--r-- 0/0 10 2026-08-08 12:00 model/file.onnx'
+    expect(() => validateArchiveListingTypes(file, 2)).toThrow(/listing mismatch/)
+    expect(() => validateArchiveListingTypes(`${file}\n${file}`, 2)).not.toThrow()
   })
 
   it('reports an uninstalled pack without touching the network', async () => {
@@ -69,5 +94,20 @@ describe('Sherpa model packs', () => {
       expectedBytes: SHERPA_PIPER_PACK.archive.size,
     })
     expect(status.sourceSha256).toBe(SHERPA_PIPER_PACK.archive.sha256)
+  })
+
+  it('recovers a previous model when staging was interrupted before the swap', () => {
+    const packDir = join(root, 'sherpa-packs', `${SHERPA_PIPER_PACK.id}@${SHERPA_PIPER_PACK.revision.slice(0, 12)}`)
+    mkdirSync(join(packDir, 'model.previous'), { recursive: true })
+    writeFileSync(join(packDir, 'model.previous', 'tokens.txt'), 'restored')
+    mkdirSync(join(packDir, '.extract-crashed'), { recursive: true })
+    mkdirSync(join(packDir, 'model.staged'), { recursive: true })
+
+    recoverInterruptedSherpaExtraction(root, SHERPA_PIPER_PACK)
+
+    expect(existsSync(join(packDir, 'model', 'tokens.txt'))).toBe(true)
+    expect(existsSync(join(packDir, 'model.previous'))).toBe(false)
+    expect(existsSync(join(packDir, 'model.staged'))).toBe(false)
+    expect(existsSync(join(packDir, '.extract-crashed'))).toBe(false)
   })
 })

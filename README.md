@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-542%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-547%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 542 tests across 94 test files
+- **Tests:** 547 tests across 94 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -21,7 +21,7 @@
 
 [**Try it live**](https://sysadmindoc.github.io/BetterTTS/) | [Changelog](CHANGELOG.md)
 
-> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro, MeloTTS, and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Optional RVC conversion uses user-selected `.pth`/`.index` files through a separate Python adapter; the app stores their paths and provenance, never copies them, and only installs `rvc-python` after explicit setup. Native model archives are pinned to immutable revisions and SHA-256 verified before extraction and use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
+> **Windows desktop app.** The Electron build reuses the same studio inside a version-locked Chromium shell and can synthesize Kokoro, MeloTTS, and English Piper through **Sherpa-ONNX** in an isolated utility process. It also bundles the pinned whisper.cpp x64 CLI for optional imported-audio word alignment; multilingual GGML weights stay in the user model folder and are never bundled. Optional Qwen3-TTS runs in a private Python sidecar: its torch/qwen-tts environment and model weights are downloaded into the desktop user-data folder only after the user starts setup or synthesis. Optional RVC conversion uses user-selected `.pth`/`.index` files through a separate Python adapter; the app stores their paths and provenance, never copies them, and only installs `rvc-python` after explicit setup. Native model archives are pinned to immutable revisions, reject non-regular archive entries before extraction, and are SHA-256 verified and validated in staging before use. Enable **Native engine (desktop)** under Voice chain -> Engine -> System & diagnostics. The unsigned NSIS build checks a static HTTPS update feed; downloads and restart installs require an explicit user action. Run `npm run desktop:dev` for development or `npm run desktop:dist` to build the installer.
 
 ---
 
@@ -67,7 +67,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Cross-browser WebGPU acceleration** with adapter probing, automatic WASM q8 fallback, a local bad-audio denylist, and a persisted experimental fp16 opt-in; fp32 remains the default
 - **Pages-hosted WASM q8 model** with immutable revision + SHA-256-verified deployment assets, Hugging Face fallback, and 429-aware retry; WebGPU fp32/fp16 assets stay HF-hosted because they exceed the Pages file cap
 - **Web Worker inference** — generation runs off the main thread so the UI stays responsive
-- **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; the runtime reports the verified Windows x64 addon and active pack
+- **Native desktop inference** — the Electron build runs Kokoro, MeloTTS, and English Piper on `sherpa-onnx-node` 1.13.4 (CPU EP) in an isolated utility process, loading SHA-256-verified archives pinned to immutable revisions; archive preflight allows only regular files/directories and staging is validated before installation; the runtime reports the verified Windows x64 addon and active pack
 - **Local OpenAI-compatible API** — the Windows app can opt into a loopback-only `POST /v1/audio/speech` server for native Kokoro, MeloTTS, and English Piper, with WAV/MP3/Opus/FLAC output and bounded SSE base64 streaming; it is off by default and fully stops when disabled
 - **RVC post-stage** — desktop-only timbre conversion runs after TTS and before pitch/BGM/export; it waits for the complete clip and is unavailable to the persistent queue while enabled
 - **Narrator mode** — quote-aware long-form segmentation uses distinct narration/dialogue voices, while plain text falls back to one narration voice
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (542 tests across 94 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (547 tests across 94 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

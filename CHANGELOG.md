@@ -4,6 +4,7 @@
 
 ### Security
 - Remediated the current npm audit findings by upgrading PDF.js and vulnerable transitive dependencies, added a production audit gate to the build, and rejected PDF files containing JavaScript actions before local text extraction.
+- Sherpa model archives now preflight verbose entry types, reject links/devices/FIFOs, detect listing mismatches, and validate required files plus the complete staged tree before installation.
 
 ## v0.23.0 - 2026-08-03
 

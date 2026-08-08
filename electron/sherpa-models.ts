@@ -34,6 +34,7 @@ import {
 const execFile = promisify(execFileCallback)
 const SHERPA_RELEASE_BASE = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models'
 const MAX_ARCHIVE_LIST_BYTES = 8 * 1024 * 1024
+const MAX_ARCHIVE_ENTRY_BYTES = 4096
 const MAX_ARCHIVE_ENTRIES = 20_000
 
 export type SherpaEngineId = 'kokoro' | 'piper' | 'melo'
@@ -227,10 +228,6 @@ function markerPath(rootDir: string, pack: SherpaModelPack): string {
   return join(packInstallDir(rootDir, pack), '.verified.json')
 }
 
-function modelPath(rootDir: string, pack: SherpaModelPack, path: string): string {
-  return join(extractionRoot(rootDir, pack), path)
-}
-
 export function sherpaModelPaths(rootDir: string, pack: SherpaModelPack): SherpaModelPaths {
   validateSherpaModelPack(pack)
   const root = extractionRoot(rootDir, pack)
@@ -284,15 +281,19 @@ function requiredModelPaths(pack: SherpaModelPack): string[] {
   ]
 }
 
-function assertRequiredPaths(rootDir: string, pack: SherpaModelPack): void {
+function assertRequiredPathsAtRoot(root: string, pack: SherpaModelPack): void {
   for (const required of requiredModelPaths(pack)) {
-    const absolute = modelPath(rootDir, pack, required)
+    const absolute = join(root, required)
     if (!existsSync(absolute)) throw new NativeModelPackError('integrity', `Sherpa model archive is missing ${required}.`)
     const stat = lstatSync(absolute)
     if (required === pack.layout.dataDir ? !stat.isDirectory() : !stat.isFile()) {
       throw new NativeModelPackError('integrity', `Sherpa model entry has the wrong type: ${required}`)
     }
   }
+}
+
+function assertRequiredPaths(rootDir: string, pack: SherpaModelPack): void {
+  assertRequiredPathsAtRoot(extractionRoot(rootDir, pack), pack)
 }
 
 async function readExtractionFiles(rootDir: string, pack: SherpaModelPack): Promise<Record<string, string>> {
@@ -434,8 +435,14 @@ async function downloadArchive(
 export function validateArchiveEntry(entry: string): string {
   const normalized = entry.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '')
   const parts = normalized.split('/')
+  const hasControlCharacter = [...normalized].some((character) => {
+    const code = character.codePointAt(0) ?? 0
+    return code <= 0x1f || code === 0x7f
+  })
   if (
     !normalized
+    || Buffer.byteLength(normalized, 'utf8') > MAX_ARCHIVE_ENTRY_BYTES
+    || hasControlCharacter
     || isAbsolute(normalized)
     || normalized.startsWith('/')
     || /^[a-z]:\//i.test(normalized)
@@ -446,11 +453,68 @@ export function validateArchiveEntry(entry: string): string {
   return normalized
 }
 
+export function validateArchiveEntries(entries: readonly string[]): string[] {
+  const seen = new Set<string>()
+  return entries.map((entry) => {
+    const normalized = validateArchiveEntry(entry)
+    const key = normalized.toLocaleLowerCase('en-US')
+    if (seen.has(key)) throw new NativeModelPackError('integrity', `Duplicate Sherpa archive entry: ${entry}`)
+    seen.add(key)
+    return normalized
+  })
+}
+
+export function validateArchiveEntryType(line: string): 'file' | 'directory' {
+  const type = line.trimStart()[0]
+  if (type === '-') return 'file'
+  if (type === 'd') return 'directory'
+  throw new NativeModelPackError('integrity', `Unsupported Sherpa archive entry type: ${line.trim() || '(empty)'}`)
+}
+
+export function validateArchiveListingTypes(verboseListing: string, expectedEntries: number): void {
+  if (Buffer.byteLength(verboseListing, 'utf8') > MAX_ARCHIVE_LIST_BYTES) {
+    throw new NativeModelPackError('integrity', 'Sherpa archive metadata listing is too large.')
+  }
+  const lines = verboseListing.split(/\r?\n/).filter(Boolean)
+  if (lines.length !== expectedEntries) {
+    throw new NativeModelPackError('integrity', `Sherpa archive entry listing mismatch: expected ${expectedEntries}, got ${lines.length}`)
+  }
+  for (const line of lines) validateArchiveEntryType(line)
+}
+
+function modelStagingPath(packDir: string): string {
+  return join(packDir, 'model.staged')
+}
+
+function modelPreviousPath(packDir: string): string {
+  return join(packDir, 'model.previous')
+}
+
+function cleanupStagingDirectories(packDir: string): void {
+  for (const entry of readdirSync(packDir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.extract-')) rmSync(join(packDir, entry.name), { recursive: true, force: true })
+  }
+}
+
+export function recoverInterruptedSherpaExtraction(rootDir: string, pack: SherpaModelPack): void {
+  const packDir = packInstallDir(rootDir, pack)
+  const currentRoot = extractionRoot(rootDir, pack)
+  const stagedRoot = modelStagingPath(packDir)
+  const previousRoot = modelPreviousPath(packDir)
+  cleanupStagingDirectories(packDir)
+
+  if (!existsSync(currentRoot) && existsSync(previousRoot)) {
+    renameSync(previousRoot, currentRoot)
+  } else if (existsSync(currentRoot) && existsSync(previousRoot)) {
+    rmSync(previousRoot, { recursive: true, force: true })
+  }
+  rmSync(stagedRoot, { recursive: true, force: true })
+}
+
 async function extractArchive(rootDir: string, pack: SherpaModelPack, archive: string): Promise<void> {
-  const listed = (await execFile('tar', ['-tjf', archive], { windowsHide: true, maxBuffer: MAX_ARCHIVE_LIST_BYTES })).stdout
+  const listed = validateArchiveEntries((await execFile('tar', ['-tjf', archive], { windowsHide: true, maxBuffer: MAX_ARCHIVE_LIST_BYTES })).stdout
     .split(/\r?\n/)
-    .filter(Boolean)
-    .map(validateArchiveEntry)
+    .filter(Boolean))
   if (listed.length === 0 || listed.length > MAX_ARCHIVE_ENTRIES) {
     throw new NativeModelPackError('integrity', `Unexpected Sherpa archive entry count: ${listed.length}`)
   }
@@ -458,19 +522,41 @@ async function extractArchive(rootDir: string, pack: SherpaModelPack, archive: s
   if (!listed.some((entry) => entry === `${requiredPrefix}${pack.layout.model}`)) {
     throw new NativeModelPackError('integrity', `Sherpa archive does not contain the expected ${pack.layout.rootDir} layout.`)
   }
+  const verbose = (await execFile('tar', ['-tvjf', archive], { windowsHide: true, maxBuffer: MAX_ARCHIVE_LIST_BYTES })).stdout
+  validateArchiveListingTypes(verbose, listed.length)
 
   const packDir = packInstallDir(rootDir, pack)
+  recoverInterruptedSherpaExtraction(rootDir, pack)
   const staging = mkdtempSync(join(packDir, '.extract-'))
   try {
     await execFile('tar', ['-xjf', archive, '-C', staging], { windowsHide: true, maxBuffer: MAX_ARCHIVE_LIST_BYTES })
     const stagedRoot = join(staging, pack.layout.rootDir)
     if (!existsSync(stagedRoot)) throw new NativeModelPackError('integrity', `Sherpa archive root is missing: ${pack.layout.rootDir}`)
-    const stagedModelRoot = join(packDir, 'model.staged')
+    const stagedRootStat = lstatSync(stagedRoot)
+    if (!stagedRootStat.isDirectory()) throw new NativeModelPackError('integrity', `Sherpa archive root has the wrong type: ${pack.layout.rootDir}`)
+    assertRequiredPathsAtRoot(stagedRoot, pack)
+    collectFiles(stagedRoot)
+    const stagedModelRoot = modelStagingPath(packDir)
     rmSync(stagedModelRoot, { recursive: true, force: true })
     renameSync(stagedRoot, stagedModelRoot)
     const currentRoot = extractionRoot(rootDir, pack)
-    rmSync(currentRoot, { recursive: true, force: true })
-    renameSync(stagedModelRoot, currentRoot)
+    const previousRoot = modelPreviousPath(packDir)
+    let previousRootMoved = false
+    try {
+      rmSync(previousRoot, { recursive: true, force: true })
+      if (existsSync(currentRoot)) {
+        renameSync(currentRoot, previousRoot)
+        previousRootMoved = true
+      }
+      renameSync(stagedModelRoot, currentRoot)
+      rmSync(previousRoot, { recursive: true, force: true })
+      previousRootMoved = false
+    } catch (error) {
+      if (previousRootMoved && !existsSync(currentRoot) && existsSync(previousRoot)) {
+        renameSync(previousRoot, currentRoot)
+      }
+      throw error
+    }
   } finally {
     rmSync(staging, { recursive: true, force: true })
     rmSync(join(packDir, 'model.staged'), { recursive: true, force: true })
