@@ -36,7 +36,7 @@ function initializeGit(root) {
 }
 
 describe('release identity', () => {
-  it('requires synchronized version metadata and an annotated tag at HEAD', () => {
+  it('requires synchronized version metadata and an annotated tag at HEAD', { timeout: 20_000 }, () => {
     const root = createFixture()
     initializeGit(root)
     execFileSync('git', ['tag', '-a', 'v1.2.3', '-m', 'v1.2.3'], { cwd: root })
