@@ -9,11 +9,14 @@ stuck torch generation without taking down the sidecar supervisor.
 from __future__ import annotations
 
 import base64
+import ctypes
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
 import math
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -24,10 +27,17 @@ from pathlib import Path
 from typing import Any
 
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+MODEL_REVISION = "85e237c12c027371202489a0ec509ded67b5e4b5"
+MODEL_MANIFEST_NAME = "bettertts-qwen-model.json"
+RUNTIME_MANIFEST_NAME = "qwen-runtime-manifest.json"
+RUNTIME_MANIFEST_SCHEMA = 1
 MAX_TEXT_CHARS = 5_000
 MAX_INSTRUCT_CHARS = 500
 MAX_PCM_BYTES = 80 * 1024 * 1024
 TEST_SAMPLE_RATE = 24_000
+MAX_MODEL_FILES = 256
+MAX_MODEL_BYTES = 8 * 1024 * 1024 * 1024
+GENERATION_TIMEOUT_SECONDS = 600.0
 TEST_MODE = os.environ.get("BETTERTTS_SIDECAR_TEST_MODE") == "1"
 LANGUAGES = {
     "Auto", "Chinese", "English", "Japanese", "Korean", "German",
@@ -61,14 +71,177 @@ def model_cache_dir() -> Path:
     return Path.home() / ".bettertts" / "models" / "qwen"
 
 
-def model_is_ready() -> bool:
+def runtime_manifest_path() -> Path:
+    configured = os.environ.get("BETTERTTS_SIDECAR_MANIFEST")
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().with_name(RUNTIME_MANIFEST_NAME)
+
+
+def load_runtime_manifest() -> dict[str, Any] | None:
+    try:
+        value = json.loads(runtime_manifest_path().read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("schemaVersion") != RUNTIME_MANIFEST_SCHEMA:
+            return None
+        return value
+    except Exception:
+        return None
+
+
+def runtime_contract_errors(manifest: dict[str, Any] | None = None) -> list[str]:
+    manifest = manifest or load_runtime_manifest()
+    if manifest is None:
+        return ["The pinned Qwen runtime manifest is missing or invalid."]
+    errors: list[str] = []
+    if manifest.get("platform") != "win32-x64" or manifest.get("python") != "3.12":
+        errors.append("The Qwen runtime manifest targets a different platform or Python version.")
+    model = manifest.get("model")
+    if not isinstance(model, dict) or model.get("id") != MODEL_ID or model.get("revision") != MODEL_REVISION:
+        errors.append("The Qwen model identity is not pinned to the supported revision.")
+    packages = manifest.get("packages")
+    expected_qwen = packages.get("qwenTts") if isinstance(packages, dict) else None
+    expected_torch = packages.get("torch") if isinstance(packages, dict) else None
+    qwen_version = package_version("qwen-tts")
+    torch_version = package_version("torch")
+    if qwen_version != expected_qwen:
+        errors.append(f"qwen-tts {expected_qwen or 'the pinned version'} is required (found {qwen_version or 'missing'}).")
+    if torch_version != expected_torch:
+        errors.append(f"torch {expected_torch or 'the pinned version'} is required (found {torch_version or 'missing'}).")
+    requirements = manifest.get("requirements")
+    requirements_value = os.environ.get("BETTERTTS_SIDECAR_REQUIREMENTS")
+    requirements_file = Path(requirements_value) if requirements_value else None
+    if isinstance(requirements, dict) and requirements_file and requirements_file.is_file():
+        digest = hashlib.sha256(requirements_file.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")).hexdigest()
+        if digest != requirements.get("sha256"):
+            errors.append("The Qwen requirements file does not match its pinned SHA-256.")
+    elif isinstance(requirements, dict):
+        errors.append("The pinned Qwen requirements file is missing.")
+    return errors
+
+
+def model_snapshot_dir(root: Path | None = None) -> Path:
+    root = root or model_cache_dir()
+    cache_name = MODEL_ID.replace("/", "--")
+    return root / f"models--{cache_name}" / "snapshots" / MODEL_REVISION
+
+
+def model_manifest_path(root: Path | None = None) -> Path:
+    return (root or model_cache_dir()) / MODEL_MANIFEST_NAME
+
+
+def model_relative_path(path: Path, root: Path) -> str:
+    relative = path.relative_to(root).as_posix()
+    if not relative or relative.startswith("/") or "\\" in relative or any(part in {"", ".", ".."} for part in relative.split("/")):
+        raise ValueError("The Qwen model cache contains an unsafe path.")
+    return relative
+
+
+def model_files(root: Path | None = None) -> list[tuple[str, Path, int]]:
+    snapshot = model_snapshot_dir(root)
+    if not snapshot.is_dir() or snapshot.is_symlink():
+        raise ValueError("The pinned Qwen model snapshot is missing.")
+    files: list[tuple[str, Path, int]] = []
+    total_bytes = 0
+    for path in snapshot.rglob("*"):
+        if path.is_symlink():
+            try:
+                resolved = path.resolve(strict=True)
+                resolved.relative_to(root.resolve())
+            except (OSError, ValueError):
+                raise ValueError("The Qwen model cache contains a symlink outside its cache root.") from None
+            if not resolved.is_file():
+                raise ValueError("The Qwen model cache contains a symlink to a non-regular entry.")
+        elif path.is_dir():
+            continue
+        elif not path.is_file():
+            raise ValueError("The Qwen model cache contains a non-regular entry.")
+        relative = model_relative_path(path, snapshot)
+        size = path.stat().st_size
+        total_bytes += size
+        if len(files) >= MAX_MODEL_FILES or total_bytes > MAX_MODEL_BYTES:
+            raise ValueError("The Qwen model cache exceeds the bounded file or size limit.")
+        files.append((relative, path, size))
+    if not files:
+        raise ValueError("The pinned Qwen model snapshot contains no files.")
+    files.sort(key=lambda item: item[0])
+    required = {"config.json", "model.safetensors", "speech_tokenizer/model.safetensors"}
+    if not required.issubset({item[0] for item in files}):
+        raise ValueError("The pinned Qwen model snapshot is missing required model files.")
+    return files
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_model_manifest() -> dict[str, Any]:
     root = model_cache_dir()
-    if not root.exists():
+    root.mkdir(parents=True, exist_ok=True)
+    files = model_files(root)
+    entries = [
+        {"path": relative, "sizeBytes": size, "sha256": sha256_file(path)}
+        for relative, path, size in files
+    ]
+    manifest = {
+        "schemaVersion": 1,
+        "modelId": MODEL_ID,
+        "revision": MODEL_REVISION,
+        "snapshot": MODEL_REVISION,
+        "totalBytes": sum(entry["sizeBytes"] for entry in entries),
+        "files": entries,
+        "verifiedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    marker = model_manifest_path(root)
+    temporary = root / f".{MODEL_MANIFEST_NAME}.part"
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, marker)
+    return manifest
+
+
+def verify_model_manifest(root: Path | None = None) -> bool:
+    root = root or model_cache_dir()
+    try:
+        manifest = json.loads(model_manifest_path(root).read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
+            return False
+        if manifest.get("modelId") != MODEL_ID or manifest.get("revision") != MODEL_REVISION or manifest.get("snapshot") != MODEL_REVISION:
+            return False
+        entries = manifest.get("files")
+        if not isinstance(entries, list) or not entries or len(entries) > MAX_MODEL_FILES:
+            return False
+        expected: dict[str, tuple[int, str]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            relative = entry.get("path")
+            size = entry.get("sizeBytes")
+            digest = entry.get("sha256")
+            if not isinstance(relative, str) or not isinstance(size, int) or size < 0 or not isinstance(digest, str) or len(digest) != 64:
+                return False
+            if relative in expected or "\\" in relative or relative.startswith("/") or any(part in {"", ".", ".."} for part in relative.split("/")):
+                return False
+            expected[relative] = (size, digest.lower())
+        actual = model_files(root)
+        actual_names = {relative for relative, _, _ in actual}
+        if actual_names != set(expected):
+            return False
+        total_bytes = 0
+        for relative, path, size in actual:
+            expected_size, expected_digest = expected[relative]
+            if size != expected_size or sha256_file(path) != expected_digest:
+                return False
+            total_bytes += size
+        return manifest.get("totalBytes") == total_bytes and {"config.json", "model.safetensors", "speech_tokenizer/model.safetensors"}.issubset(actual_names)
+    except Exception:
         return False
-    return any(
-        candidate.is_dir()
-        for candidate in root.glob("models--Qwen--Qwen3-TTS-12Hz-0.6B-CustomVoice*")
-    ) or (root / "config.json").exists()
+
+
+def model_is_ready() -> bool:
+    return verify_model_manifest()
 
 
 def package_version(name: str) -> str | None:
@@ -80,6 +253,55 @@ def package_version(name: str) -> str | None:
         return None
 
 
+def available_memory_bytes() -> int:
+    if os.name == "nt":
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_uint32),
+                ("dwMemoryLoad", ctypes.c_uint32),
+                ("ullTotalPhys", ctypes.c_uint64),
+                ("ullAvailPhys", ctypes.c_uint64),
+                ("ullTotalPageFile", ctypes.c_uint64),
+                ("ullAvailPageFile", ctypes.c_uint64),
+                ("ullTotalVirtual", ctypes.c_uint64),
+                ("ullAvailVirtual", ctypes.c_uint64),
+                ("ullAvailExtendedVirtual", ctypes.c_uint64),
+            ]
+
+        status = MemoryStatus()
+        status.dwLength = ctypes.sizeof(status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.ullAvailPhys)
+    try:
+        pages = os.sysconf("SC_AVPHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        return int(pages * page_size)
+    except (AttributeError, ValueError, OSError):
+        return 0
+
+
+def free_disk_bytes() -> int:
+    root = model_cache_dir()
+    probe = root
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        return int(shutil.disk_usage(probe).free)
+    except OSError:
+        return 0
+
+
+def gpu_available(torch_installed: bool) -> bool | None:
+    if not torch_installed:
+        return None
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 def sidecar_status() -> dict[str, Any]:
     python_version = ".".join(str(part) for part in sys.version_info[:3])
     if TEST_MODE:
@@ -87,41 +309,58 @@ def sidecar_status() -> dict[str, Any]:
             "available": True,
             "pythonPath": sys.executable,
             "pythonVersion": python_version,
+            "qwenVersion": "0.1.1",
+            "torchVersion": "2.7.1",
             "qwenInstalled": True,
             "torchInstalled": True,
             "modelReady": True,
             "modelId": MODEL_ID,
+            "modelRevision": MODEL_REVISION,
+            "freeDiskBytes": free_disk_bytes(),
+            "freeMemoryBytes": available_memory_bytes(),
+            "gpuAvailable": False,
             "message": "The sidecar test adapter is ready.",
             "recovery": "Test mode is disabled in production builds.",
             "testMode": True,
         }
 
-    qwen_installed = importlib.util.find_spec("qwen_tts") is not None
-    torch_installed = importlib.util.find_spec("torch") is not None
-    model_ready = model_is_ready()
+    manifest = load_runtime_manifest()
+    contract_errors = runtime_contract_errors(manifest)
     qwen_version = package_version("qwen-tts")
-    if not qwen_installed or not torch_installed:
-        message = "The Qwen3-TTS Python runtime is not installed yet."
+    torch_version = package_version("torch")
+    expected_packages = manifest.get("packages", {}) if isinstance(manifest, dict) else {}
+    qwen_installed = importlib.util.find_spec("qwen_tts") is not None and qwen_version == expected_packages.get("qwenTts")
+    torch_installed = importlib.util.find_spec("torch") is not None and torch_version == expected_packages.get("torch")
+    model_ready = model_is_ready()
+    if contract_errors:
+        message = contract_errors[0]
     elif not model_ready:
-        message = "Qwen3-TTS is installed; model weights will download on first use."
+        message = f"Qwen3-TTS {qwen_version} is installed; pinned model weights will download on first use."
     else:
         message = f"Qwen3-TTS {qwen_version or 'runtime'} is ready."
     recovery = (
-        "Use Set up Qwen3-TTS to create the private Python environment and install "
-        "torch/qwen-tts. Model weights are downloaded only on first synthesis and "
+        "Use Set up Qwen3-TTS to create the private Python environment from the pinned "
+        "Windows runtime manifest. Set BETTERTTS_QWEN_WHEELHOUSE to a local wheel folder "
+        "for offline repair. Model weights are downloaded only on first synthesis and "
         "stored outside the app package."
     )
+    gpu = gpu_available(torch_installed)
     return {
         "available": qwen_installed and torch_installed,
         "pythonPath": sys.executable,
         "pythonVersion": python_version,
+        "qwenVersion": qwen_version,
+        "torchVersion": torch_version,
         "qwenInstalled": qwen_installed,
         "torchInstalled": torch_installed,
         "modelReady": model_ready,
         "modelId": MODEL_ID,
+        "modelRevision": MODEL_REVISION,
+        "freeDiskBytes": free_disk_bytes(),
+        "freeMemoryBytes": available_memory_bytes(),
+        **({"gpuAvailable": gpu} if gpu is not None else {}),
         "message": message,
         "recovery": recovery,
-        "qwenVersion": qwen_version,
     }
 
 
@@ -179,6 +418,17 @@ def test_pcm16(text: str, speed: float) -> bytes:
     return bytes(frames)
 
 
+def verify_runtime_installation() -> dict[str, Any]:
+    manifest = load_runtime_manifest()
+    errors = runtime_contract_errors(manifest)
+    return {
+        "ok": not errors,
+        "qwenVersion": package_version("qwen-tts"),
+        "torchVersion": package_version("torch"),
+        "errors": errors,
+    }
+
+
 def worker_main(payload: dict[str, Any], output: Any) -> None:
     """Run one inference in an independently terminable process."""
     try:
@@ -196,7 +446,7 @@ def worker_main(payload: dict[str, Any], output: Any) -> None:
             })
             return
 
-        output.put({"kind": "progress", "progress": 0.15, "stage": "Loading model weights"})
+        output.put({"kind": "progress", "progress": 0.15, "stage": "Loading pinned model weights"})
         import numpy as np
         import torch
         from qwen_tts import Qwen3TTSModel
@@ -205,9 +455,12 @@ def worker_main(payload: dict[str, Any], output: Any) -> None:
         model = Qwen3TTSModel.from_pretrained(
             MODEL_ID,
             cache_dir=str(model_cache_dir()),
+            revision=MODEL_REVISION,
             device_map="cuda:0" if use_cuda else "cpu",
             dtype=torch.bfloat16 if use_cuda else torch.float32,
         )
+        output.put({"kind": "progress", "progress": 0.54, "stage": "Verifying model files"})
+        write_model_manifest()
         output.put({"kind": "progress", "progress": 0.62, "stage": "Synthesizing with Qwen3-TTS"})
         kwargs: dict[str, Any] = {
             "text": text,
@@ -272,6 +525,30 @@ def worker_entry() -> int:
     return 0
 
 
+def generation_timeout(request_id: int, process: subprocess.Popen[str], active: dict[int, Any], lock: threading.Lock) -> None:
+    try:
+        process.wait(timeout=GENERATION_TIMEOUT_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    with lock:
+        if request_id not in active:
+            return
+        active.pop(request_id, None)
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    emit({
+        "type": "error",
+        "id": request_id,
+        "code": "failed",
+        "message": "Qwen3-TTS generation timed out after 10 minutes.",
+    })
+
+
 def monitor_generation(request_id: int, process: subprocess.Popen[str], active: dict[int, Any], lock: threading.Lock) -> None:
     result_seen = False
     stderr = ""
@@ -329,6 +606,19 @@ def start_generation(request_id: int, payload: dict[str, Any], active: dict[int,
             if not status["available"]:
                 emit({"type": "error", "id": request_id, "code": "missing-package", "message": status["recovery"]})
                 return
+            manifest = load_runtime_manifest()
+            resources = manifest.get("resources", {}) if isinstance(manifest, dict) else {}
+            if (
+                free_disk_bytes() < int(resources.get("minFreeDiskBytes", 0))
+                or available_memory_bytes() < int(resources.get("minFreeMemoryBytes", 0))
+            ):
+                emit({
+                    "type": "error",
+                    "id": request_id,
+                    "code": "missing-model",
+                    "message": "Qwen3-TTS needs more free disk space or available memory before downloading the pinned model.",
+                })
+                return
         with lock:
             if active:
                 emit({"type": "error", "id": request_id, "code": "failed", "message": "The Qwen3-TTS sidecar is already generating audio."})
@@ -348,6 +638,11 @@ def start_generation(request_id: int, payload: dict[str, Any], active: dict[int,
             process.stdin.close()
         threading.Thread(
             target=monitor_generation,
+            args=(request_id, process, active, lock),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=generation_timeout,
             args=(request_id, process, active, lock),
             daemon=True,
         ).start()
@@ -410,4 +705,8 @@ def main() -> int:
 if __name__ == "__main__":
     if "--worker" in sys.argv[1:]:
         raise SystemExit(worker_entry())
+    if "--verify-runtime" in sys.argv[1:]:
+        result = verify_runtime_installation()
+        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        raise SystemExit(0 if result["ok"] else 1)
     raise SystemExit(main())

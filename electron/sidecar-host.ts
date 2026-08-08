@@ -3,8 +3,9 @@
 // transport, sidecar crash reporting, and PCM conversion; the renderer never
 // receives a process handle or a localhost listener.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { existsSync, renameSync, rmSync, statfsSync } from 'node:fs'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { freemem } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -13,6 +14,13 @@ import {
   type SidecarStatus,
   validateSidecarRequest,
 } from './sidecar-ipc.ts'
+import {
+  evaluateQwenResourcePreflight,
+  QWEN_GENERATION_TIMEOUT_MS,
+  QWEN_SETUP_TIMEOUT_MS,
+  readQwenRuntimeManifest,
+  validateQwenInstallReport,
+} from './qwen-runtime.ts'
 
 type ParentPortLike = {
   postMessage: (message: unknown) => void
@@ -52,6 +60,7 @@ const port = getPort()
 const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 const statusWaiters = new Map<number, StatusWaiter>()
 const activeRequestIds = new Set<number>()
+const requestTimeouts = new Map<number, ReturnType<typeof setTimeout>>()
 let sidecarProcess: ChildProcessWithoutNullStreams | null = null
 let setupProcess: ChildProcessWithoutNullStreams | null = null
 let setupRequestId: number | null = null
@@ -76,10 +85,36 @@ function modelDirectory(): string {
   return process.env.BETTERTTS_SIDECAR_MODEL_DIR ?? join(sidecarDirectory(), 'models', 'qwen')
 }
 
+function runtimeManifestPath(): string {
+  return process.env.BETTERTTS_SIDECAR_MANIFEST ?? resolve(dirname(requirementsPath()), 'qwen-runtime-manifest.json')
+}
+
+function venvDirectory(): string {
+  return join(sidecarDirectory(), 'venv')
+}
+
+function stagedVenvDirectory(): string {
+  return join(sidecarDirectory(), 'venv.staged')
+}
+
+function previousVenvDirectory(): string {
+  return join(sidecarDirectory(), 'venv.previous')
+}
+
+function stagedVenvReadyPath(): string {
+  return join(sidecarDirectory(), 'venv.staged.ready')
+}
+
+function pythonPathForVenv(root: string): string {
+  return process.platform === 'win32' ? join(root, 'Scripts', 'python.exe') : join(root, 'bin', 'python')
+}
+
 function venvPythonPath(): string {
-  return process.platform === 'win32'
-    ? join(sidecarDirectory(), 'venv', 'Scripts', 'python.exe')
-    : join(sidecarDirectory(), 'venv', 'bin', 'python')
+  return pythonPathForVenv(venvDirectory())
+}
+
+function stagedVenvPythonPath(): string {
+  return pythonPathForVenv(stagedVenvDirectory())
 }
 
 function sidecarScriptPath(): string {
@@ -114,6 +149,51 @@ function setupPython(): PythonCommand {
     : { file: 'python3', args: [] }
 }
 
+function recoverVenvLayout(): void {
+  if (configuredPython()) return
+  const current = venvDirectory()
+  const staged = stagedVenvDirectory()
+  const previous = previousVenvDirectory()
+  const ready = stagedVenvReadyPath()
+  const currentReady = existsSync(venvPythonPath())
+
+  if (!currentReady && existsSync(current)) rmSync(current, { recursive: true, force: true })
+  if (existsSync(venvPythonPath())) {
+    if (existsSync(staged)) rmSync(staged, { recursive: true, force: true })
+    if (existsSync(ready)) rmSync(ready, { force: true })
+    if (existsSync(previous)) rmSync(previous, { recursive: true, force: true })
+    return
+  }
+
+  if (existsSync(staged)) {
+    if (existsSync(ready)) {
+      renameSync(staged, current)
+      rmSync(ready, { force: true })
+      if (existsSync(previous)) rmSync(previous, { recursive: true, force: true })
+      return
+    }
+    rmSync(staged, { recursive: true, force: true })
+  }
+  if (existsSync(previous)) renameSync(previous, current)
+  if (existsSync(ready)) rmSync(ready, { force: true })
+}
+
+function qwenResourcePreflight() {
+  let freeDiskBytes = 0
+  try {
+    const stats = statfsSync(sidecarDirectory())
+    freeDiskBytes = Number(stats.bavail) * Number(stats.bsize)
+  } catch {
+    freeDiskBytes = 0
+  }
+  return evaluateQwenResourcePreflight({ freeDiskBytes, freeMemoryBytes: freemem() })
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'unknown'
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
 function unavailableStatus(message: string): SidecarStatus {
   return {
     available: false,
@@ -126,8 +206,15 @@ function unavailableStatus(message: string): SidecarStatus {
   }
 }
 
+function clearRequestTimeout(id: number): void {
+  const timer = requestTimeouts.get(id)
+  if (timer) clearTimeout(timer)
+  requestTimeouts.delete(id)
+}
+
 function sendError(id: number, code: 'missing-python' | 'missing-package' | 'missing-model' | 'cancelled' | 'failed' | 'crashed', message: string): void {
   activeRequestIds.delete(id)
+  clearRequestTimeout(id)
   port.post({ type: 'error', id, code, message: safeMessage(message, 'The Qwen3-TTS sidecar request failed.') })
 }
 
@@ -172,6 +259,7 @@ function handleSidecarMessage(message: unknown): void {
   }
   if (value.type === 'result' && Number.isSafeInteger(id)) {
     activeRequestIds.delete(id)
+    clearRequestTimeout(id)
     try {
       port.post({ type: 'generated', id, samples: decodePcm16(value.pcm16), sampleRate: Number(value.sample_rate) || 24_000 })
     } catch (error) {
@@ -195,18 +283,26 @@ function rejectSidecarRequests(message: string): void {
   port.post({ type: 'crashed', message })
 }
 
-function stopSidecar(): void {
+async function stopSidecar(): Promise<void> {
   const child = sidecarProcess
   if (!child) return
   intentionalStop = true
   sidecarProcess = null
-  child.stdin.end()
-  child.kill()
+  await new Promise<void>((resolveStop) => {
+    const timer = setTimeout(resolveStop, 2_000)
+    child.once('exit', () => {
+      clearTimeout(timer)
+      resolveStop()
+    })
+    child.stdin.end()
+    child.kill()
+  })
   intentionalStop = false
 }
 
 function startSidecar(): ChildProcessWithoutNullStreams {
   if (sidecarProcess) return sidecarProcess
+  recoverVenvLayout()
   const script = sidecarScriptPath()
   if (!existsSync(script)) throw new Error(`The Qwen3-TTS sidecar script is missing: ${script}`)
   const command = sidecarPython()
@@ -214,6 +310,7 @@ function startSidecar(): ChildProcessWithoutNullStreams {
     ...process.env,
     BETTERTTS_SIDECAR_MODEL_DIR: modelDirectory(),
     BETTERTTS_SIDECAR_REQUIREMENTS: requirementsPath(),
+    BETTERTTS_SIDECAR_MANIFEST: runtimeManifestPath(),
     PYTHONUNBUFFERED: '1',
   }
   const child = spawn(command.file, [...command.args, '-u', script], {
@@ -303,7 +400,7 @@ function requestStatusInternal(): Promise<SidecarStatus> {
   })
 }
 
-function runExternal(command: PythonCommand, args: string[], onLine: (line: string) => void): Promise<void> {
+function runExternal(command: PythonCommand, args: string[], onLine: (line: string) => void, timeoutMs = QWEN_SETUP_TIMEOUT_MS): Promise<void> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(command.file, [...command.args, ...args], {
       cwd: sidecarDirectory(),
@@ -312,21 +409,57 @@ function runExternal(command: PythonCommand, args: string[], onLine: (line: stri
       windowsHide: true,
     })
     setupProcess = child
+    let settled = false
+    const timer = setTimeout(() => {
+      child.kill()
+      settled = true
+      rejectRun(new Error(`Qwen setup exceeded its ${Math.round(timeoutMs / 60_000)} minute timeout.`))
+    }, timeoutMs)
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      rejectRun(error)
+    }
+    const succeed = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolveRun()
+    }
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer | string) => {
-      for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) onLine(line.trim().slice(0, 240))
+      for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) onLine(safeMessage(line.trim().slice(0, 240), 'Qwen setup progress'))
     })
     child.stderr.on('data', (chunk: Buffer | string) => {
       stderr = `${stderr}${String(chunk)}`.slice(-2_000)
-      for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) onLine(line.trim().slice(0, 240))
+      for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) onLine(safeMessage(line.trim().slice(0, 240), 'Qwen setup progress'))
     })
-    child.once('error', rejectRun)
+    child.once('error', (error) => fail(error))
     child.once('exit', (code, signal) => {
       if (setupProcess === child) setupProcess = null
-      if (code === 0) resolveRun()
-      else rejectRun(new Error(`${stderr.trim() || 'Python setup failed'} (${code ?? signal ?? 'unknown'}).`))
+      if (code === 0) succeed()
+      else fail(new Error(`${stderr.trim() || 'Python setup failed'} (${code ?? signal ?? 'unknown'}).`))
     })
   })
+}
+
+async function promoteStagedVenv(): Promise<void> {
+  const current = venvDirectory()
+  const staged = stagedVenvDirectory()
+  const previous = previousVenvDirectory()
+  const ready = stagedVenvReadyPath()
+  await stopSidecar()
+  await rm(previous, { recursive: true, force: true })
+  if (existsSync(current)) await rename(current, previous)
+  try {
+    await rename(staged, current)
+    await rm(ready, { force: true })
+    await rm(previous, { recursive: true, force: true })
+  } catch (error) {
+    if (!existsSync(current) && existsSync(previous)) await rename(previous, current)
+    throw error
+  }
 }
 
 async function setupEnvironment(id: number): Promise<void> {
@@ -336,26 +469,73 @@ async function setupEnvironment(id: number): Promise<void> {
     return
   }
   setupRequestId = id
+  let staged = false
+  let reportPart: string | null = null
   try {
     await mkdir(sidecarDirectory(), { recursive: true })
-    const configured = Boolean(configuredPython())
-    const venv = venvPythonPath()
-    if (!configured && !existsSync(venv)) {
-      port.post({ type: 'setup-progress', id, progress: 0.08, stage: 'Creating an isolated Python 3.12 environment' })
-      await runExternal(setupPython(), ['-m', 'venv', join(sidecarDirectory(), 'venv')], () => undefined)
-    }
+    recoverVenvLayout()
     const requirementFile = requirementsPath()
-    const installArgs = existsSync(requirementFile)
-      ? ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', requirementFile]
-      : ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'qwen-tts==0.1.1', 'torch']
-    port.post({ type: 'setup-progress', id, progress: 0.35, stage: 'Downloading torch and Qwen3-TTS dependencies' })
-    await runExternal(sidecarPython(), installArgs, (line) => {
+    if (!existsSync(requirementFile)) throw new Error(`The pinned Qwen requirements file is missing: ${requirementFile}`)
+    const manifest = readQwenRuntimeManifest(runtimeManifestPath(), requirementFile)
+    const preflight = qwenResourcePreflight()
+    if (!preflight.ok) {
+      throw new Error(`Qwen setup cannot start: ${preflight.issues.join('; ')} (free disk ${formatBytes(preflight.freeDiskBytes)}, free memory ${formatBytes(preflight.freeMemoryBytes)}).`)
+    }
+    port.post({ type: 'setup-progress', id, progress: 0.04, stage: `Preflight passed: ${formatBytes(preflight.freeDiskBytes)} disk, ${formatBytes(preflight.freeMemoryBytes)} memory; GPU will be detected after torch install.` })
+    const configured = Boolean(configuredPython())
+    let python: PythonCommand
+    if (!configured) {
+      staged = true
+      await rm(stagedVenvDirectory(), { recursive: true, force: true })
+      await rm(stagedVenvReadyPath(), { force: true })
+      port.post({ type: 'setup-progress', id, progress: 0.08, stage: 'Creating an isolated Python 3.12 environment' })
+      await runExternal(setupPython(), ['-m', 'venv', stagedVenvDirectory()], () => undefined, manifest.resources.setupTimeoutMs)
+      python = { file: stagedVenvPythonPath(), args: [] }
+    } else {
+      python = setupPython()
+    }
+    reportPart = join(sidecarDirectory(), 'qwen-runtime-install.json.part')
+    await rm(reportPart, { force: true })
+    const wheelhouse = process.env.BETTERTTS_QWEN_WHEELHOUSE?.trim()
+    if (wheelhouse && !existsSync(wheelhouse)) throw new Error(`The offline Qwen wheelhouse is missing: ${wheelhouse}`)
+    const installArgs = [
+      '-m', 'pip', 'install',
+      '--disable-pip-version-check',
+      '--no-input',
+      '--require-hashes',
+      '--upgrade',
+      '--report', reportPart,
+      ...(wheelhouse ? ['--no-index', '--find-links', wheelhouse] : ['--index-url', 'https://pypi.org/simple']),
+      '-r', requirementFile,
+    ]
+    port.post({ type: 'setup-progress', id, progress: 0.35, stage: wheelhouse ? 'Repairing Qwen from the offline wheelhouse' : 'Downloading pinned torch and Qwen3-TTS dependencies' })
+    await runExternal(python, installArgs, (line) => {
       port.post({ type: 'setup-progress', id, progress: 0.45, stage: line })
-    })
-    stopSidecar()
+    }, manifest.resources.setupTimeoutMs)
+    if (!reportPart || !existsSync(reportPart)) throw new Error('pip did not produce a Qwen runtime install report.')
+    validateQwenInstallReport(JSON.parse(await readFile(reportPart, 'utf8')), manifest)
+    port.post({ type: 'setup-progress', id, progress: 0.82, stage: 'Verifying pinned Python package versions' })
+    await runExternal(python, ['-u', sidecarScriptPath(), '--verify-runtime'], (line) => {
+      port.post({ type: 'setup-progress', id, progress: 0.86, stage: line })
+    }, manifest.resources.setupTimeoutMs)
+    if (!configured) {
+      await writeFile(stagedVenvReadyPath(), JSON.stringify({ schemaVersion: 1, runtime: 'qwen' }), 'utf8')
+      await promoteStagedVenv()
+    } else {
+      await stopSidecar()
+    }
+    const reportPath = join(sidecarDirectory(), 'qwen-runtime-install.json')
+    await rm(reportPath, { force: true })
+    await rename(reportPart, reportPath)
+    reportPart = null
     const status = await requestStatusInternal()
     port.post({ type: 'setup-result', id, status })
   } catch (error) {
+    if (staged) {
+      await rm(stagedVenvDirectory(), { recursive: true, force: true }).catch(() => undefined)
+      await rm(stagedVenvReadyPath(), { force: true }).catch(() => undefined)
+    }
+    if (reportPart) await rm(reportPart, { force: true }).catch(() => undefined)
     if (setupRequestId === id) sendError(id, 'failed', safeMessage(error, 'Qwen3-TTS setup failed.'))
   } finally {
     if (setupRequestId === id) setupRequestId = null
@@ -379,12 +559,18 @@ port.onMessage((value) => {
       sendError(request.id, 'cancelled', 'Qwen3-TTS setup cancelled.')
       setupRequestId = null
     } else if (activeRequestIds.has(request.id)) {
+      clearRequestTimeout(request.id)
       sendLine({ type: 'cancel', id: request.id })
     }
   } else if (request.type === 'synthesize') {
     try {
       startSidecar()
       activeRequestIds.add(request.id)
+      requestTimeouts.set(request.id, setTimeout(() => {
+        if (!activeRequestIds.has(request.id)) return
+        sendLine({ type: 'cancel', id: request.id })
+        sendError(request.id, 'failed', 'Qwen3-TTS generation timed out after 10 minutes.')
+      }, QWEN_GENERATION_TIMEOUT_MS))
       if (!sendLine(request)) sendError(request.id, 'crashed', 'The Qwen3-TTS sidecar is not running.')
     } catch (error) {
       sendError(request.id, 'missing-python', safeMessage(error, 'Python 3.12 is not installed.'))

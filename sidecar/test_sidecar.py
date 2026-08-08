@@ -2,9 +2,11 @@ import base64
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
-from bettertts_sidecar import TEST_SAMPLE_RATE, test_pcm16, validate_synthesis
+from bettertts_sidecar import MODEL_ID, MODEL_REVISION, TEST_SAMPLE_RATE, model_is_ready, test_pcm16, validate_synthesis, write_model_manifest
 
 
 class SidecarContractTests(unittest.TestCase):
@@ -71,6 +73,29 @@ class SidecarContractTests(unittest.TestCase):
         process.stderr.close()
         self.assertTrue(any('"type":"status"' in line and '"available":true' in line for line in lines))
         self.assertTrue(any('"type":"result"' in line and '"pcm16"' in line for line in lines))
+
+    def test_model_readiness_requires_the_pinned_snapshot_and_file_digests(self):
+        previous = os.environ.get("BETTERTTS_SIDECAR_MODEL_DIR")
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                snapshot = root / "models--Qwen--Qwen3-TTS-12Hz-0.6B-CustomVoice" / "snapshots" / MODEL_REVISION
+                (snapshot / "speech_tokenizer").mkdir(parents=True)
+                (snapshot / "config.json").write_bytes(b"{}")
+                (snapshot / "model.safetensors").write_bytes(b"model")
+                (snapshot / "speech_tokenizer" / "model.safetensors").write_bytes(b"tokenizer")
+                os.environ["BETTERTTS_SIDECAR_MODEL_DIR"] = directory
+                self.assertFalse(model_is_ready())
+                manifest = write_model_manifest()
+                self.assertEqual(manifest["modelId"], MODEL_ID)
+                self.assertTrue(model_is_ready())
+                (snapshot / "model.safetensors").write_bytes(b"tampered")
+                self.assertFalse(model_is_ready())
+        finally:
+            if previous is None:
+                os.environ.pop("BETTERTTS_SIDECAR_MODEL_DIR", None)
+            else:
+                os.environ["BETTERTTS_SIDECAR_MODEL_DIR"] = previous
 
 
 if __name__ == "__main__":

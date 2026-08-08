@@ -69,6 +69,7 @@ extraResources:
     filter:
       - bettertts_sidecar.py
       - requirements-qwen.txt
+      - qwen-runtime-manifest.json
       - bettertts_rvc.py
       - requirements-rvc.txt
 

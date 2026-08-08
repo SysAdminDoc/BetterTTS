@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "platform": "win32-x64",
+  "python": "3.12",
+  "requirements": {
+    "file": "requirements-qwen.txt",
+    "sha256": "e4feb8df67b9cca03a7a72681c7ba69382da4b0428638ef01147295207adf9a1"
+  },
+  "wheels": [
+    {
+      "distribution": "qwen-tts",
+      "version": "0.1.1",
+      "filename": "qwen_tts-0.1.1-py3-none-any.whl",
+      "sha256": "11a290d8dabc7ef91a90c54478c8ab19b3edb1d85c0882313721892bdc4af15d"
+    },
+    {
+      "distribution": "torch",
+      "version": "2.7.1",
+      "filename": "torch-2.7.1-cp312-cp312-win_amd64.whl",
+      "sha256": "d8bf6e1856ddd1807e79dc57e54d3335f2b62e6f316ed13ed3ecfe1fc1df3d8b"
+    }
+  ],
+  "packages": {
+    "qwenTts": "0.1.1",
+    "torch": "2.7.1"
+  },
+  "model": {
+    "id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "revision": "85e237c12c027371202489a0ec509ded67b5e4b5",
+    "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice/tree/85e237c12c027371202489a0ec509ded67b5e4b5",
+    "manifestFile": "bettertts-qwen-model.json"
+  },
+  "resources": {
+    "minFreeDiskBytes": 6442450944,
+    "minFreeMemoryBytes": 2147483648,
+    "setupTimeoutMs": 1800000,
+    "generationTimeoutMs": 600000
+  }
+}

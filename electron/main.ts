@@ -883,6 +883,7 @@ function ensureSidecarHost(): UtilityProcess {
     BETTERTTS_SIDECAR_MODEL_DIR: join(app.getPath('userData'), 'models', 'qwen'),
     BETTERTTS_SIDECAR_SCRIPT: join(packagedSidecarRoot, 'bettertts_sidecar.py'),
     BETTERTTS_SIDECAR_REQUIREMENTS: join(packagedSidecarRoot, 'requirements-qwen.txt'),
+    BETTERTTS_SIDECAR_MANIFEST: join(packagedSidecarRoot, 'qwen-runtime-manifest.json'),
   }
   delete env.ELECTRON_RUN_AS_NODE
   const host = utilityProcess.fork(join(__dirname, 'sidecar-host.mjs'), [], {

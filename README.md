@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-557%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-560%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 557 tests across 94 test files
+- **Tests:** 560 tests across 95 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -202,7 +202,7 @@ Desktop audio captioning is available from the generated-output panel. `npm run 
 
 Desktop workflow integrations are available from **Voice chain -> Engine -> System & diagnostics** and are off by default. The read-selection hotkey reads the current clipboard after you copy a selection; it never injects keyboard input. The Explorer option registers per-user context-menu and “Open with BetterTTS” entries for TXT, EPUB, PDF, and DOCX and queues the imported file in BetterTTS. **Import folder** walks supported documents with 100-file/100 MB bounds and sends file bytes through the isolated bridge. Screen OCR requires a local Tesseract installation or `BETTERTTS_TESSERACT_PATH`; capture runs only when you request it. Tray status and completion/error notifications are opt-in. Disable each option independently to remove its OS hook; web/PWA builds do not expose OS integrations.
 
-Qwen3-TTS is available only in the Windows desktop app. Select it under Voice chain -> Engine to inspect the sidecar status, then choose **Set up Qwen3-TTS** when the private Python 3.12 environment is not installed. Setup downloads `torch` and `qwen-tts` into the desktop user-data folder; the 0.6B model weights download on first synthesis into `models/qwen/` and are never bundled in the installer. A disposable worker isolates inference and reports setup, progress, cancellation, and crash recovery. The web/PWA build remains unchanged when the desktop bridge is absent.
+Qwen3-TTS is available only in the Windows desktop app. Select it under Voice chain -> Engine to inspect the sidecar status, then choose **Set up Qwen3-TTS** when the private Python 3.12 environment is not installed. Windows x64 setup uses the checked-in `sidecar/qwen-runtime-manifest.json` and the fully hashed `pip-compile` lock (`qwen-tts` 0.1.1, `torch` 2.7.1, and its transitive wheels); a new environment is installed in a staging directory and promoted only after the pip report and package versions verify. Set `BETTERTTS_QWEN_WHEELHOUSE` to a complete local wheelhouse for offline repair. The 0.6B model weights download on first synthesis from immutable Hugging Face revision `85e237c12c027371202489a0ec509ded67b5e4b5` into `models/qwen/`; a sidecar-generated manifest hashes every snapshot file before the model is reported ready. Setup requires 6 GB free disk and 2 GB available memory, reports GPU availability for the CPU fallback, and enforces 30-minute setup and 10-minute generation deadlines. A disposable worker isolates inference and reports setup, progress, cancellation, and crash recovery. The web/PWA build remains unchanged when the desktop bridge is absent.
 
 The **Bring-your-own weights** panel is disabled by default and is available in the Windows desktop app after an explicit non-commercial/restricted-terms acknowledgement. Choose a local file or directory for F5-TTS, XTTS-v2, Fish/OpenAudio S1, Higgs Audio, MaskGCT, Silero, or another compatible model, then record its exact license and provenance. BetterTTS stores only that metadata and the selected path, never downloads or copies the weights, and keeps registered models adapter-gated rather than silently activating them. Unchecking the acknowledgement hides the registered models until it is enabled again.
 
@@ -226,9 +226,9 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 |---|---|
 | Framework | React 19 + TypeScript 6 |
 | Build | Vite 8 |
-| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/MeloTTS/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via `qwen-tts` 0.1.1 + PyTorch sidecar |
+| TTS Model | Kokoro 82M via `kokoro-js` 1.2.1 + Transformers.js 4.2.0; timestamped Kokoro via direct ONNX output; Supertonic via Transformers.js 4.2.0; KittenTTS via `kitten-tts-webgpu`; opt-in Chatterbox English/multilingual via Transformers.js 4.2.0; experimental Piper-plus via `piper-plus` 0.6.0 + ONNX Runtime Web; Windows native Kokoro/MeloTTS/Piper via `sherpa-onnx-node` 1.13.4; optional desktop Qwen3-TTS 0.6B via the pinned `qwen-tts` 0.1.1 / PyTorch 2.7.1 sidecar contract |
 | Caption runtime | Pinned whisper.cpp v1.9.1 Windows x64 CLI (MIT) with user-supplied multilingual GGML model weights |
-| Sidecar runtime | Optional Windows-only Python 3.12 environment; `torch` and `qwen-tts` install into user data and model weights are downloaded on demand |
+| Sidecar runtime | Optional Windows x64 Python 3.12 environment staged from `sidecar/qwen-runtime-manifest.json`; direct wheels are hash-recorded, model revision/file digests are verified, and a local wheelhouse can repair the runtime offline |
 | RVC post-stage | Optional Windows-only Python 3.10 environment; `rvc-python` and user-selected `.pth`/`.index` files remain outside the installer |
 | Narrator segmentation | Bounded local quote/speaker parser with per-queue-chunk role and voice metadata |
 | Restricted-weight manager | Consent-gated local metadata registry plus Windows file/folder picker; no default downloads, copies, or activation |
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (557 tests across 94 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (560 tests across 95 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

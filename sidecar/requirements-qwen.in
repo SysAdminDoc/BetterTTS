@@ -1,0 +1,3 @@
+# Windows x64 / CPython 3.12 direct runtime inputs for the generated lock.
+qwen-tts==0.1.1
+torch==2.7.1

@@ -38,10 +38,13 @@ const status = {
   available: true,
   pythonPath: 'C:/BetterTTS/sidecar/venv/Scripts/python.exe',
   pythonVersion: '3.12.10',
+  qwenVersion: '0.1.1',
+  torchVersion: '2.7.1',
   qwenInstalled: true,
   torchInstalled: true,
   modelReady: false,
   modelId: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
+  modelRevision: '85e237c12c027371202489a0ec509ded67b5e4b5',
   message: 'Model weights will download on first use.',
   recovery: 'The model is user-managed.',
 }

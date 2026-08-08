@@ -36,10 +36,16 @@ export type SidecarStatus = {
   available: boolean
   pythonPath?: string
   pythonVersion?: string
+  qwenVersion?: string
+  torchVersion?: string
   qwenInstalled: boolean
   torchInstalled: boolean
   modelReady: boolean
   modelId: string
+  modelRevision?: string
+  freeDiskBytes?: number
+  freeMemoryBytes?: number
+  gpuAvailable?: boolean
   message: string
   recovery: string
   testMode?: boolean
