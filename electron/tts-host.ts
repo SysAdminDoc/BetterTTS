@@ -19,6 +19,13 @@ import {
 } from './sherpa-models.ts'
 import type { NativePackFailure } from './native-pack-policy.ts'
 import type { PackProgress, PackStatus } from './native-models.ts'
+import {
+  MAX_NATIVE_PCM_BYTES,
+  NativeGenerationCoordinator,
+  NativePcmBudget,
+  NATIVE_GENERATION_WATCHDOG_MS,
+  validateNativePcm,
+} from './native-tts-runtime.ts'
 
 type SherpaGeneratedAudio = {
   samples: Float32Array
@@ -75,6 +82,8 @@ export type NativeRuntimeInfo = {
   sampleRate?: number
   modelPack?: PackStatus
   modelPackFailure?: NativePackFailure
+  activePcmBytes: number
+  maxPcmBytes: number
 }
 
 export type HostRequest =
@@ -178,6 +187,8 @@ function runtimeInfo(
     },
     node: process.versions.node,
     modelCacheDir: modelCacheDir(),
+    activePcmBytes: pcmBudget.activeBytes,
+    maxPcmBytes: MAX_NATIVE_PCM_BYTES,
     ...(engine ? { engine } : {}),
     ...(sampleRate ? { sampleRate } : {}),
     ...(modelPack ? { modelPack } : {}),
@@ -191,6 +202,11 @@ function packForEngine(engine: SherpaEngineId): SherpaModelPack {
 
 function keyForEngine(engine: SherpaEngineId): string {
   return engine === 'piper' ? 'sherpa:piper' : engine === 'melo' ? 'sherpa:melo' : 'cpu:q8'
+}
+
+type LoadedRuntime = {
+  key: string
+  runtime: NativeRuntimeInfo
 }
 
 function createSherpaConfig(engine: SherpaEngineId, root: string): unknown {
@@ -242,19 +258,177 @@ let loadedKey = ''
 let loadedSampleRate = 0
 let lastPackStatus: PackStatus | undefined
 let lastPackFailure: NativePackFailure | undefined
-const cancelledIds = new Set<number>()
+const generationCoordinator = new NativeGenerationCoordinator()
+const pcmBudget = new NativePcmBudget()
+let loadFlight: { key: string; promise: Promise<LoadedRuntime> } | null = null
 
 const port = getPort()
 
-port.onMessage(async (msg) => {
-  if (!msg || typeof msg !== 'object') return
+function clearLoadedRuntime(): void {
+  tts = null
+  loadedEngine = null
+  loadedKey = ''
+  loadedSampleRate = 0
+}
 
-  if (msg.type === 'cancel') {
-    cancelledIds.add(msg.id)
+function postProgress(info: PackProgress | SherpaProgress | unknown): void {
+  if (info && typeof info === 'object' && 'samples' in info && info.samples instanceof Float32Array) {
+    const samples = validateNativePcm(info.samples, loadedSampleRate)
+    pcmBudget.reserve(samples.bytes)
+    try {
+      port.post({ type: 'progress', info })
+    } finally {
+      pcmBudget.release(samples.bytes)
+    }
+    return
+  }
+  port.post({ type: 'progress', info })
+}
+
+function ensureLoaded(engine: SherpaEngineId): Promise<LoadedRuntime> {
+  const key = keyForEngine(engine)
+  if (tts && loadedEngine === engine && loadedKey === key) {
+    return Promise.resolve({ key, runtime: runtimeInfo(engine, loadedSampleRate, lastPackStatus, lastPackFailure) })
+  }
+  if (generationCoordinator.activeRequestId !== null) {
+    return Promise.reject(new Error('Native model cannot change while a generation is active.'))
+  }
+  if (loadFlight) {
+    return loadFlight.key === key
+      ? loadFlight.promise
+      : Promise.reject(new Error('Another native model load is already in progress.'))
+  }
+
+  const promise = (async (): Promise<LoadedRuntime> => {
+    try {
+      const pack = packForEngine(engine)
+      const ensured = await ensureSherpaModelPack(modelCacheDir(), pack, {
+        onProgress: postProgress,
+      })
+      const module = await loadSherpaModule()
+      const instance = new module.OfflineTts(createSherpaConfig(engine, ensured.modelRoot))
+      tts = instance
+      loadedEngine = engine
+      loadedKey = key
+      loadedSampleRate = engine === 'piper' ? PIPER_SAMPLE_RATE : engine === 'melo' ? MELO_SAMPLE_RATE : KOKORO_SAMPLE_RATE
+      lastPackStatus = ensured.status
+      lastPackFailure = undefined
+      return {
+        key,
+        runtime: runtimeInfo(engine, instance.sampleRate || loadedSampleRate, lastPackStatus),
+      }
+    } catch (err) {
+      clearLoadedRuntime()
+      const failure: NativePackFailure = {
+        kind: err instanceof Error && 'kind' in err && (err as { kind?: unknown }).kind === 'integrity' ? 'integrity' : 'unavailable',
+        message: err instanceof Error ? err.message : 'Sherpa model load failed',
+      }
+      lastPackFailure = failure
+      throw new Error(failure.message)
+    }
+  })()
+  loadFlight = { key, promise }
+  promise.then(
+    () => {
+      if (loadFlight?.promise === promise) loadFlight = null
+    },
+    () => {
+      if (loadFlight?.promise === promise) loadFlight = null
+    },
+  )
+  return promise
+}
+
+async function handleGenerate(msg: Extract<HostRequest, { type: 'generate' }>): Promise<void> {
+  const started = generationCoordinator.start(msg.id)
+  if (started === 'cancelled') {
+    port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
+    return
+  }
+  if (started === 'busy') {
+    port.post({ type: 'generateError', message: 'Native generation already in progress.', id: msg.id })
     return
   }
 
-  if (msg.type === 'cancel-all') return
+  if (!tts || loadedEngine !== (msg.engine ?? 'kokoro')) {
+    generationCoordinator.finish(msg.id)
+    port.post({ type: 'generateError', message: 'Native model not loaded', id: msg.id })
+    return
+  }
+
+  let watchdogExpired = false
+  const watchdog = setTimeout(() => {
+    watchdogExpired = true
+    generationCoordinator.cancel(msg.id)
+    clearLoadedRuntime()
+    port.post({ type: 'generateError', message: 'Native generation watchdog timed out; restart the native engine and try again.', id: msg.id })
+    // A native addon can leave an async promise permanently unsettled. Exit so
+    // Electron's supervisor cannot reuse a poisoned utility process.
+    setImmediate(() => process.exit(1))
+  }, NATIVE_GENERATION_WATCHDOG_MS)
+
+  try {
+    const engine = msg.engine ?? 'kokoro'
+    if (engine === 'piper' && !['en', 'en-gb', 'en-us'].includes(msg.voice.toLowerCase())) {
+      throw new Error('Native Sherpa Piper currently exposes the English Cori voice; choose English or use the web Piper engine.')
+    }
+    const module = await loadSherpaModule()
+    const generationConfig = new module.GenerationConfig({
+      sid: engine === 'piper' || engine === 'melo' ? 0 : sherpaKokoroSpeakerId(msg.voice),
+      speed: msg.speed,
+      silenceScale: 0.2,
+    })
+    const instance = tts
+    if (!instance) throw new Error('Native model not loaded')
+    const generated = instance.generateAsync
+      ? await instance.generateAsync({
+        text: msg.text,
+        generationConfig,
+        onProgress: (info) => {
+          postProgress(info)
+          return generationCoordinator.isCancelled(msg.id) ? 0 : 1
+        },
+      })
+      : instance.generate({ text: msg.text, generationConfig })
+    if (watchdogExpired) return
+    if (generationCoordinator.isCancelled(msg.id)) {
+      port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
+      return
+    }
+    const audio = validateNativePcm(generated.samples, generated.sampleRate || loadedSampleRate)
+    pcmBudget.reserve(audio.bytes)
+    try {
+      port.post({ type: 'generated', samples: audio.samples, sampleRate: audio.sampleRate, id: msg.id })
+    } finally {
+      pcmBudget.release(audio.bytes)
+    }
+  } catch (err) {
+    if (watchdogExpired) return
+    port.post({
+      type: 'generateError',
+      message: generationCoordinator.isCancelled(msg.id)
+        ? 'Generation cancelled.'
+        : err instanceof Error ? err.message : 'Native Sherpa generation failed',
+      id: msg.id,
+    })
+  } finally {
+    clearTimeout(watchdog)
+    generationCoordinator.finish(msg.id)
+  }
+}
+
+async function handleMessage(msg: HostRequest): Promise<void> {
+  if (!msg || typeof msg !== 'object') return
+
+  if (msg.type === 'cancel') {
+    generationCoordinator.cancel(msg.id)
+    return
+  }
+
+  if (msg.type === 'cancel-all') {
+    generationCoordinator.cancelAll()
+    return
+  }
 
   if (msg.type === 'info') {
     let modelPack = lastPackStatus
@@ -268,84 +442,20 @@ port.onMessage(async (msg) => {
   if (msg.type === 'load') {
     const engine = msg.engine ?? 'kokoro'
     const key = keyForEngine(engine)
-    if (tts && loadedEngine === engine && loadedKey === key) {
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(engine, loadedSampleRate, lastPackStatus, lastPackFailure) })
-      return
-    }
     try {
-      const pack = packForEngine(engine)
-      const ensured = await ensureSherpaModelPack(modelCacheDir(), pack, {
-        onProgress: (info) => port.post({ type: 'progress', info }),
-      })
-      const module = await loadSherpaModule()
-      const instance = new module.OfflineTts(createSherpaConfig(engine, ensured.modelRoot))
-      tts = instance
-      loadedEngine = engine
-      loadedKey = key
-      loadedSampleRate = engine === 'piper' ? PIPER_SAMPLE_RATE : engine === 'melo' ? MELO_SAMPLE_RATE : KOKORO_SAMPLE_RATE
-      lastPackStatus = ensured.status
-      lastPackFailure = undefined
-      port.post({ type: 'loaded', key, runtime: runtimeInfo(engine, instance.sampleRate || loadedSampleRate, lastPackStatus) })
+      const loaded = await ensureLoaded(engine)
+      port.post({ type: 'loaded', key: loaded.key, runtime: loaded.runtime })
     } catch (err) {
-      tts = null
-      loadedEngine = null
-      loadedKey = ''
-      loadedSampleRate = 0
-      const failure: NativePackFailure = {
-        kind: err instanceof Error && 'kind' in err && (err as { kind?: unknown }).kind === 'integrity' ? 'integrity' : 'unavailable',
-        message: err instanceof Error ? err.message : 'Sherpa model load failed',
-      }
-      lastPackFailure = failure
-      port.post({ type: 'loadError', message: failure.message, key })
+      port.post({ type: 'loadError', message: err instanceof Error ? err.message : 'Sherpa model load failed', key })
     }
     return
   }
 
   if (msg.type === 'generate') {
-    const engine = msg.engine ?? 'kokoro'
-    if (cancelledIds.delete(msg.id)) {
-      port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
-      return
-    }
-    if (!tts || loadedEngine !== engine) {
-      port.post({ type: 'generateError', message: 'Native model not loaded', id: msg.id })
-      return
-    }
-    try {
-      if (engine === 'piper' && !['en', 'en-gb', 'en-us'].includes(msg.voice.toLowerCase())) {
-        throw new Error('Native Sherpa Piper currently exposes the English Cori voice; choose English or use the web Piper engine.')
-      }
-      const module = await loadSherpaModule()
-      const generationConfig = new module.GenerationConfig({
-        sid: engine === 'piper' || engine === 'melo' ? 0 : sherpaKokoroSpeakerId(msg.voice),
-        speed: msg.speed,
-        silenceScale: 0.2,
-      })
-      const generated = tts.generateAsync
-        ? await tts.generateAsync({
-          text: msg.text,
-          generationConfig,
-          onProgress: (info) => {
-            port.post({ type: 'progress', info })
-            return cancelledIds.has(msg.id) ? 0 : 1
-          },
-        })
-        : tts.generate({ text: msg.text, generationConfig })
-      if (cancelledIds.delete(msg.id)) {
-        port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
-      } else if (generated.samples instanceof Float32Array && generated.samples.length > 0) {
-        port.post({ type: 'generated', samples: generated.samples, sampleRate: generated.sampleRate || loadedSampleRate, id: msg.id })
-      } else {
-        port.post({ type: 'generateError', message: 'No audio produced', id: msg.id })
-      }
-    } catch (err) {
-      port.post({
-        type: 'generateError',
-        message: cancelledIds.delete(msg.id)
-          ? 'Generation cancelled.'
-          : err instanceof Error ? err.message : 'Native Sherpa generation failed',
-        id: msg.id,
-      })
-    }
+    await handleGenerate(msg)
   }
+}
+
+port.onMessage((msg) => {
+  void handleMessage(msg)
 })

@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-560%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-565%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 560 tests across 95 test files
+- **Tests:** 565 tests across 96 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -196,7 +196,7 @@ Run `npm run smoke` for a local production-build browser check. It serves `dist/
 
 `npm run release:smoke` is the slower, networked release gate. It uses the immutable Apache-2.0 Kokoro q8 revision to synthesize and decode real browser and packaged-Electron WAV output, validates SRT/VTT cues, cancellation, and partial-queue resume, rebuilds the unsigned Windows installer, and removes its temporary native model cache. The ordinary `npm run smoke` command remains model-free.
 
-The headless CLI is built by `npm run desktop:build` and runs the same verified Sherpa native host as the Windows app, but never opens a window. `bettertts synth --in book.epub --voice af_heart --m4b --out book.m4b` writes the audiobook plus sibling `book.srt` and `book.vtt` files; TXT input, WAV/MP3/Opus/FLAC formats, `--dry-run`, `--json`, `--force`, and `--no-captions` are also supported. Native model packs live in the user cache (override with `BETTERTTS_MODEL_CACHE`), and M4B output plus Studio cleanup require FFmpeg on `PATH` or `BETTERTTS_FFMPEG_PATH`.
+The headless CLI is built by `npm run desktop:build` and runs the same verified Sherpa native host as the Windows app, but never opens a window. `bettertts synth --in book.epub --voice af_heart --m4b --out book.m4b` writes the audiobook plus sibling `book.srt` and `book.vtt` files; TXT input, WAV/MP3/Opus/FLAC formats, `--dry-run`, `--json`, `--force`, and `--no-captions` are also supported. Native model packs live in the user cache (override with `BETTERTTS_MODEL_CACHE`) and concurrent setup calls share one verified install per pinned pack. Each native host serializes synthesis, supports request cancellation, limits returned PCM to 512 MiB, and is replaced after a hung generation or blocked cancellation. M4B output plus Studio cleanup require FFmpeg on `PATH` or `BETTERTTS_FFMPEG_PATH`.
 
 Desktop audio captioning is available from the generated-output panel. `npm run desktop:build` fetches and SHA-256 verifies the pinned whisper.cpp v1.9.1 Windows runtime; it does not download model weights. Place the multilingual `ggml-base.bin` file in the app user-data folder under `models/whisper/`, or set `BETTERTTS_WHISPER_MODEL` to an existing GGML model path. The UI reports the exact recovery guidance when the runtime or model is missing. The same panel accepts SRT/VTT files for local cue-timed re-voicing without whisper.cpp.
 
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (560 tests across 95 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (565 tests across 96 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

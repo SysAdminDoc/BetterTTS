@@ -15,6 +15,7 @@ import { getByoModelOption } from '../src/lib/byo-models.ts'
 import { encodeWav } from '../src/lib/wav.ts'
 import { BYO_WEIGHTS_CHANNEL, validateByoWeightsRequest } from './byo-ipc.ts'
 import { validateNativeTtsRequest } from './native-ipc.ts'
+import { NATIVE_CANCEL_GRACE_MS, startNativeGenerationWatchdog, validateNativePcm } from './native-tts-runtime.ts'
 import { OPENAI_TTS_CHANNEL, validateOpenAiTtsRequest } from './openai-ipc.ts'
 import { createOpenAiTtsServer, type OpenAiSpeechRequest } from './openai-server.ts'
 import { RVC_CHANNEL, RVC_WEIGHTS_CHANNEL, validateRvcRequest, validateRvcWeightsRequest } from './rvc-ipc.ts'
@@ -179,6 +180,11 @@ const RVC_MODEL_EXTENSIONS = new Set(['.pth'])
 const RVC_INDEX_EXTENSIONS = new Set(['.index'])
 let ttsHost: UtilityProcess | null = null
 let ttsHostSubscriber: WebContents | null = null
+const nativeHostGenerations = new Map<number, {
+  host: UtilityProcess
+  watchdog: () => void
+  cancellation?: ReturnType<typeof setTimeout>
+}>()
 let whisperHost: UtilityProcess | null = null
 let whisperHostSubscriber: WebContents | null = null
 let sidecarHost: UtilityProcess | null = null
@@ -763,6 +769,51 @@ function sendToSubscriber(message: unknown): void {
   }
 }
 
+function disarmNativeGeneration(id: number): void {
+  const entry = nativeHostGenerations.get(id)
+  if (!entry) return
+  entry.watchdog()
+  if (entry.cancellation) clearTimeout(entry.cancellation)
+  nativeHostGenerations.delete(id)
+}
+
+function clearNativeGenerations(host: UtilityProcess): void {
+  for (const [id, entry] of nativeHostGenerations) {
+    if (entry.host !== host) continue
+    disarmNativeGeneration(id)
+  }
+}
+
+function stopTtsHost(host: UtilityProcess | null = ttsHost): void {
+  if (!host) return
+  clearNativeGenerations(host)
+  if (ttsHost === host) ttsHost = null
+  host.kill()
+}
+
+function armNativeGeneration(host: UtilityProcess, id: number): void {
+  disarmNativeGeneration(id)
+  const watchdog = startNativeGenerationWatchdog(() => {
+    if (ttsHost !== host) return
+    sendToSubscriber({ type: 'generateError', message: 'Native generation timed out; the utility host was restarted.', id })
+    stopTtsHost(host)
+  })
+  nativeHostGenerations.set(id, { host, watchdog })
+}
+
+function cancelNativeHost(request: { type: 'cancel'; id: number } | { type: 'cancel-all' }): void {
+  const host = ttsHost
+  if (!host) return
+  host.postMessage(request)
+  for (const [id, entry] of nativeHostGenerations) {
+    if (entry.host !== host || (request.type === 'cancel' && id !== request.id)) continue
+    if (entry.cancellation) clearTimeout(entry.cancellation)
+    entry.cancellation = setTimeout(() => {
+      if (ttsHost === host) stopTtsHost(host)
+    }, NATIVE_CANCEL_GRACE_MS)
+  }
+}
+
 function ensureTtsHost(): UtilityProcess {
   if (ttsHost) return ttsHost
   const env: Record<string, string | undefined> = {
@@ -777,8 +828,17 @@ function ensureTtsHost(): UtilityProcess {
     serviceName: 'BetterTTS native inference',
     env: env as Record<string, string>,
   })
-  host.on('message', (message) => sendToSubscriber(message))
+  host.on('message', (message) => {
+    if (message && typeof message === 'object') {
+      const response = message as { type?: unknown; id?: unknown }
+      if ((response.type === 'generated' || response.type === 'generateError') && typeof response.id === 'number') {
+        disarmNativeGeneration(response.id)
+      }
+    }
+    sendToSubscriber(message)
+  })
   host.on('exit', () => {
+    clearNativeGenerations(host)
     if (ttsHost === host) {
       ttsHost = null
       sendToSubscriber({ type: 'crashed' })
@@ -801,13 +861,17 @@ ipcMain.on(NATIVE_TTS_CHANNEL, (event, message: unknown) => {
     return
   }
   ttsHostSubscriber = event.sender
-  if (request.type === 'reset' || request.type === 'cancel-all' || request.type === 'cancel') {
-    const host = ttsHost
-    ttsHost = null
-    host?.kill()
+  if (request.type === 'reset') {
+    stopTtsHost()
     return
   }
-  ensureTtsHost().postMessage(request)
+  if (request.type === 'cancel-all' || request.type === 'cancel') {
+    cancelNativeHost(request)
+    return
+  }
+  const host = ensureTtsHost()
+  if (request.type === 'generate') armNativeGeneration(host, request.id)
+  host.postMessage(request)
 })
 
 // --- whisper.cpp caption host (TF-117) --------------------------------------
@@ -1418,6 +1482,7 @@ async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: Abor
       180_000,
       signal,
     )
+    armNativeGeneration(host, id)
     host.postMessage({
       type: 'generate',
       text: request.input,
@@ -1430,10 +1495,10 @@ async function synthesizeNativeOpenAi(request: OpenAiSpeechRequest, signal: Abor
       const result = await generated
       if (result.type === 'generateError') throw new Error(result.message)
       const samples = result.samples instanceof Float32Array ? result.samples : new Float32Array(result.samples)
-      if (samples.length === 0 || samples.some((sample) => !Number.isFinite(sample))) throw new Error('The native inference host returned invalid audio.')
-      return { samples, sampleRate: result.sampleRate }
+      const audio = validateNativePcm(samples, result.sampleRate)
+      return { samples: audio.samples, sampleRate: audio.sampleRate }
     } finally {
-      if (signal.aborted) host.postMessage({ type: 'cancel', id })
+      if (signal.aborted) cancelNativeHost({ type: 'cancel', id })
     }
   })
   openAiGenerationTail = operation.then(() => undefined, () => undefined)

@@ -34,6 +34,8 @@ export type NativeRuntimeInfo = {
   }
   node: string
   modelCacheDir: string
+  activePcmBytes?: number
+  maxPcmBytes?: number
   engine?: 'kokoro' | 'piper' | 'melo'
   sampleRate?: number
   modelPack?: NativeModelPackStatus

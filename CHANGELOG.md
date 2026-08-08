@@ -8,6 +8,7 @@
 - Article import now requires public HTTPS destinations, omits credentials and referrers, rejects local/private targets where the browser can identify them, manually validates exposed redirect hops, applies per-hop and total timeouts, and discloses the final destination without query credentials.
 - The opt-in loopback OpenAI-compatible server now issues a fresh Bearer token per start, uses an exact browser-origin allowlist instead of wildcard CORS, bounds concurrent/rate-limited requests, enforces deadlines, and revokes active work and credentials on shutdown.
 - Qwen desktop setup now uses a Windows/Python 3.12 runtime manifest with a fully hashed pip lock, staged venv promotion and crash recovery, offline wheelhouse repair, disk/memory/GPU preflight, immutable model revision and per-file verification, and bounded setup/generation timeouts; the bridge reports qwenVersion and torchVersion consistently.
+- Native Sherpa pack setup now single-flights concurrent installs per pinned pack, while the inference host owns one request at a time, implements cancel-one/cancel-all, bounds PCM transport to 512 MiB, and restarts after a hung generation or blocked cancellation.
 
 ## v0.23.0 - 2026-08-03
 

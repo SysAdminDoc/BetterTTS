@@ -9,7 +9,7 @@
 // product, not a nicety.
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 export type LicenseTier = 'permissive' | 'restricted' | 'non-commercial'
 
@@ -105,6 +105,27 @@ export type EnsurePackOptions = {
   allowNonPermissive?: boolean
   fetchImpl?: typeof fetch
   baseUrl?: string
+}
+
+const nativePackFlights = new Map<string, Promise<unknown>>()
+
+/**
+ * Share one install operation per absolute root, pack id, and revision within
+ * this process. The first caller owns the fetch/progress options; all other
+ * callers observe the same result or failure and can retry after it settles.
+ */
+export function withNativePackSingleFlight<T>(rootDir: string, packKey: string, operation: () => Promise<T>): Promise<T> {
+  const key = `${resolve(rootDir)}\u0000${packKey}`
+  const existing = nativePackFlights.get(key) as Promise<T> | undefined
+  if (existing) return existing
+
+  const flight = operation()
+  nativePackFlights.set(key, flight)
+  const clear = () => {
+    if (nativePackFlights.get(key) === flight) nativePackFlights.delete(key)
+  }
+  flight.then(clear, clear)
+  return flight
 }
 
 export function validateNativeModelPack(pack: NativeModelPack): void {
@@ -330,37 +351,39 @@ export async function ensurePack(rootDir: string, pack: NativeModelPack, opts: E
   const blocked = licenseBlocksDefaultInstall(pack)
   if (blocked && !opts.allowNonPermissive) throw new NativeModelPackError('license', blocked)
 
-  const fetchImpl = opts.fetchImpl ?? fetch
-  const filesDir = packModelDir(rootDir, pack)
-  const verifiedFiles: Record<string, string> = {}
+  return withNativePackSingleFlight(rootDir, `${pack.id}@${pack.revision}`, async () => {
+    const fetchImpl = opts.fetchImpl ?? fetch
+    const filesDir = packModelDir(rootDir, pack)
+    const verifiedFiles: Record<string, string> = {}
 
-  for (const file of pack.files) {
-    const finalPath = join(filesDir, file.path)
-    if (existsSync(finalPath) && statSync(finalPath).size === file.size) {
-      // The marker accelerates status display only. Native runtime startup
-      // always hashes the actual bytes so a same-sized post-install mutation
-      // cannot inherit trust from stale marker metadata.
-      const known = (await hashFile(finalPath)) === file.sha256
-      if (known) {
-        verifiedFiles[file.path] = file.sha256
-        continue
+    for (const file of pack.files) {
+      const finalPath = join(filesDir, file.path)
+      if (existsSync(finalPath) && statSync(finalPath).size === file.size) {
+        // The marker accelerates status display only. Native runtime startup
+        // always hashes the actual bytes so a same-sized post-install mutation
+        // cannot inherit trust from stale marker metadata.
+        const known = (await hashFile(finalPath)) === file.sha256
+        if (known) {
+          verifiedFiles[file.path] = file.sha256
+          continue
+        }
+        // Wrong content at the right size — quarantine to .part-free restart.
+        rmSync(finalPath, { force: true })
+      } else if (existsSync(finalPath)) {
+        rmSync(finalPath, { force: true })
       }
-      // Wrong content at the right size — quarantine to .part-free restart.
-      rmSync(finalPath, { force: true })
-    } else if (existsSync(finalPath)) {
-      rmSync(finalPath, { force: true })
+      await downloadFile(packDownloadUrl(pack, file, opts.baseUrl), finalPath, file, opts.onProgress, fetchImpl)
+      verifiedFiles[file.path] = file.sha256
     }
-    await downloadFile(packDownloadUrl(pack, file, opts.baseUrl), finalPath, file, opts.onProgress, fetchImpl)
-    verifiedFiles[file.path] = file.sha256
-  }
 
-  const markerBody: VerificationMarker = {
-    revision: pack.revision,
-    verifiedAt: new Date().toISOString(),
-    files: verifiedFiles,
-  }
-  mkdirSync(packInstallDir(rootDir, pack), { recursive: true })
-  writeFileSync(markerPath(rootDir, pack), JSON.stringify(markerBody, null, 2))
+    const markerBody: VerificationMarker = {
+      revision: pack.revision,
+      verifiedAt: new Date().toISOString(),
+      files: verifiedFiles,
+    }
+    mkdirSync(packInstallDir(rootDir, pack), { recursive: true })
+    writeFileSync(markerPath(rootDir, pack), JSON.stringify(markerBody, null, 2))
 
-  return { localModelRoot: packInstallDir(rootDir, pack), status: await readPackStatus(rootDir, pack) }
+    return { localModelRoot: packInstallDir(rootDir, pack), status: await readPackStatus(rootDir, pack) }
+  })
 }

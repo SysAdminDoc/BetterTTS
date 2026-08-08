@@ -208,6 +208,37 @@ describe('ensurePack', () => {
     // Only the corrupt file was re-fetched; the good one was hash-accepted.
     expect(calls.map((call) => call.url.split('/').pop())).toEqual(['model.onnx'])
   })
+
+  it('shares concurrent setup for one pack and releases the lock for retry', async () => {
+    const pack = makePack()
+    const base = makeFakeFetch({ 'config.json': bodyA, 'onnx/model.onnx': bodyB })
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let first = true
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (first) {
+        first = false
+        await entered
+      }
+      return base.fetchImpl(input, init)
+    }) as typeof fetch
+
+    const firstInstall = ensurePack(root, pack, { fetchImpl })
+    const secondInstall = ensurePack(root, pack, { fetchImpl })
+    await Promise.resolve()
+    expect(base.calls).toHaveLength(0)
+    release()
+
+    const results = await Promise.all([firstInstall, secondInstall])
+    expect(results[0].status.verified).toBe(true)
+    expect(results[1].status.verified).toBe(true)
+    expect(base.calls).toHaveLength(2)
+
+    const retry = await ensurePack(root, pack, { fetchImpl: vi.fn() as unknown as typeof fetch })
+    expect(retry.status.verified).toBe(true)
+  })
 })
 
 describe('readPackStatus', () => {

@@ -26,6 +26,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import {
   NativeModelPackError,
+  withNativePackSingleFlight,
   type PackFileStatus,
   type PackStatus,
   type PackProgress,
@@ -569,6 +570,14 @@ export async function ensureSherpaModelPack(
   opts: SherpaEnsureOptions = {},
 ): Promise<{ modelRoot: string; status: PackStatus }> {
   validateSherpaModelPack(pack)
+  return withNativePackSingleFlight(rootDir, `${pack.id}@${pack.revision}`, () => ensureSherpaModelPackInternal(rootDir, pack, opts))
+}
+
+async function ensureSherpaModelPackInternal(
+  rootDir: string,
+  pack: SherpaModelPack,
+  opts: SherpaEnsureOptions,
+): Promise<{ modelRoot: string; status: PackStatus }> {
   const fetchImpl = opts.fetchImpl ?? fetch
   const packDir = packInstallDir(rootDir, pack)
   const archive = archivePath(rootDir, pack)
