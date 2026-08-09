@@ -2285,6 +2285,20 @@ ul.queue-chunk-list > li {
   gap: 5px;
 }
 
+.portable-pack-license {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.portable-pack-license input {
+  flex: 0 0 auto;
+  margin: 1px 0 0;
+}
+
 .cache-manager button,
 .diagnostics-panel button {
   display: inline-flex;

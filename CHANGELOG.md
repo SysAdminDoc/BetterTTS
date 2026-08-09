@@ -31,6 +31,7 @@
 - The initial-shell budget now includes the opt-in local benchmark controls while benchmark history and resource capture remain lazy (624,000 raw / 178,000 gzip ceiling).
 - Added a dependency compatibility lane that pins reviewed package specs and lock versions, reports nested runtime instances, runs the full verification matrix, and records TypeScript 7 and Transformers.js 4.3+ as explicit deferred holds.
 - Added a versioned mobile listening contract covering foreground/offline shell and model readiness, interrupted direct versus durable-queue synthesis recovery, persisted reader/playback positions, 44px touch-safe queue actions, and POST/Open/GET/paste share-import fallbacks; the PWA exposes lifecycle markers for acceptance checks without telemetry.
+- Added a versioned portable offline model-pack ZIP contract with reviewed engine/model/license/source/revision metadata, exact asset sizes and SHA-256 digests, bounded archive inspection, explicit license confirmation, staged Cache API promotion, verified repair, and lazy Kokoro export/import controls. Corrupt or incomplete bytes remain staged and are never advertised as ready.
 
 ## v0.23.0 - 2026-08-03
 

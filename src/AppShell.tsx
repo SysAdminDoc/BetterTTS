@@ -304,6 +304,10 @@ const LibraryPanel = lazy(async () => {
   const module = await import('./components/LibraryPanel.tsx')
   return { default: module.LibraryPanel }
 })
+const PortableModelPackPanel = lazy(async () => {
+  const module = await import('./components/PortableModelPackPanel.tsx')
+  return { default: module.PortableModelPackPanel }
+})
 const SentenceRetakePanel = lazy(async () => {
   const module = await import('./components/SentenceRetakePanel.tsx')
   return { default: module.SentenceRetakePanel }
@@ -7747,6 +7751,16 @@ function App() {
                   <p className="cache-empty">Checking model cache…</p>
                 )}
               </div>
+                <Suspense fallback={<div className="diagnostics-panel backup-panel" aria-label="Portable offline model pack">Loading portable model-pack tools…</div>}>
+                  <PortableModelPackPanel
+                    selectedVoice={selectedVoice}
+                    modelCache={modelCache}
+                    isGenerating={isGenerating}
+                    refreshModelCacheStatus={refreshModelCacheStatus}
+                    refreshStorageEstimate={refreshStorageEstimate}
+                    showToast={showToast}
+                  />
+                </Suspense>
                 {desktopProjects ? (
                   <div className="diagnostics-panel backup-panel" aria-label="Desktop project">
                     <div className="cache-manager-head">

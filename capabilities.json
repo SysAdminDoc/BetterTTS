@@ -9,8 +9,8 @@
     ]
   },
   "testMetrics": {
-    "testFiles": 106,
-    "tests": 636
+    "testFiles": 108,
+    "tests": 644
   },
   "queue": {
     "resumable": true,
