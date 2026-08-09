@@ -1,7 +1,7 @@
 import { opusSupported } from './encode.ts'
 import type { CapabilityManifest } from './capabilities.ts'
 import type { M4bCapability } from './m4b.ts'
-import { readModelCacheStatus, type ModelCacheSummary } from './model-cache.ts'
+import type { ModelCacheSummary } from './model-cache-types.ts'
 import { getPersistenceOutcome, type PersistenceOutcome } from './persistence.ts'
 import { piperPlusRuntimeSupport, type PiperPlusRuntimeSupport } from './piper-plus.ts'
 import {
@@ -254,7 +254,7 @@ export async function collectDiagnostics(
       status: 'WebGPU probe failed',
     }),
     readSafely(probes.storage ?? readStorageDiagnostics, { supported: false }),
-    readSafely(probes.cache ?? readModelCacheStatus, {
+    readSafely(probes.cache ?? (() => import('./model-cache.ts').then(({ readModelCacheStatus }) => readModelCacheStatus())), {
       supported: false,
       engines: [],
       totalBytes: 0,

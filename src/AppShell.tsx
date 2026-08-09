@@ -138,10 +138,7 @@ import {
   type EngineCacheStatus,
   type ModelCacheEngineId,
   type ModelCacheSummary,
-  clearModelCache,
-  prefetchKokoroQ8Pack,
-  readModelCacheStatus,
-} from './lib/model-cache.ts'
+} from './lib/model-cache-types.ts'
 import {
   TRANSFORMERS_RUNTIME_VERSION,
   clearWebGpuAdapterDenylist,
@@ -273,6 +270,7 @@ const PUNCTUATION_PAUSE_FIELDS: ReadonlyArray<{ key: PunctuationPauseKey; symbol
   { key: 'emDash', symbol: '—', label: 'Em dash' },
 ]
 const waveformCache = new Map<string, number[]>()
+const loadModelCache = () => import('./lib/model-cache.ts')
 
 function summarizeQualityIssues(issues: readonly { code: string }[]): string {
   return [...new Set(issues.map((issue) => issue.code))].join(', ')
@@ -2757,6 +2755,7 @@ function App() {
   }
 
   async function refreshModelCacheStatus() {
+    const { readModelCacheStatus } = await loadModelCache()
     const summary = await readModelCacheStatus()
     setModelCache(summary)
     return summary
@@ -2766,6 +2765,7 @@ function App() {
     if (isGenerating) return
     setCacheAction('prefetch-kokoro')
     try {
+      const { prefetchKokoroQ8Pack } = await loadModelCache()
       const count = await prefetchKokoroQ8Pack(selectedVoice.id, (done, total, path) => {
         setStatus(`Prefetching Kokoro q8 pack (${done}/${total}) - ${path}`)
       })
@@ -2785,6 +2785,7 @@ function App() {
     if (isGenerating) return
     setCacheAction(`clear-${engineId}`)
     try {
+      const { clearModelCache } = await loadModelCache()
       const deleted = await clearModelCache(engineId)
       await refreshModelCacheStatus()
       refreshStorageEstimate()
@@ -7469,6 +7470,11 @@ function App() {
                   <span>
                     <strong>Offline packs</strong>
                     <small>Model cache is separate from the app shell.</small>
+                    <small>
+                      {modelCache?.storage?.supported
+                        ? `Quota ${modelCache.storage.quotaBytes != null ? formatBytes(modelCache.storage.quotaBytes) : 'unknown'} · ${modelCache.storage.persisted === true ? 'persistent' : 'eviction-prone'}${modelCache.packs?.some((pack) => pack.repairable) ? ' · repair pending' : ''}`
+                        : 'Cache quota unavailable'}
+                    </small>
                   </span>
                   <button
                     type="button"

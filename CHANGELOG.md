@@ -17,6 +17,7 @@
 - Optional long-form quality checks now inspect waveform duration, clipping, repeated tails, cues, and local Whisper alignment, retry one bounded time, surface segment/job needs-review outcomes, and retain source-text-free review warnings in saved clips and queue chunks.
 - EPUB3 Media Overlay, M4B, and chaptered ZIP exports now carry interoperable chapter/language/metadata/cover contracts and run local golden-fixture consumer/player conformance checks before download.
 - Long-form playback now has an explicit resource contract: queue players are capped and evicted safely, waveform reads are bounded and abortable, streaming synthesis applies audio-buffer backpressure, WebCodecs resources close on cancellation, and Media Session/choppiness behavior is covered by deterministic tests.
+- Offline Kokoro q8 packs now commit through versioned manifests and markers with per-pack locking, verified size/hash records, quota and persistence telemetry, stale-build cleanup, and resumable staging across both model caches.
 - The initial-shell performance budget now accounts for the small shared playback contract while keeping waveform and streaming scheduler code lazy.
 
 ## v0.23.0 - 2026-08-03
