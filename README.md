@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-626%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-630%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 626 tests across 104 test files
+- **Tests:** 630 tests across 105 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -115,6 +115,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Voice preview** — one-click preview for each voice with a bounded 20-entry session LRU cache and object-URL disposal
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
 - **Generation stats** — elapsed time, time to first audio, chars/s throughput, audio duration, realtime speed factor
+- **Opt-in local benchmark** — record bounded model/runtime identity, first-audio latency, throughput, memory/quota observations, retry/failure counts, and a redacted JSON history; recording is off by default and never uploads source text, URLs, credentials, or audio
 - **Cancel button** — abort generation mid-run, keep partial results
 - **Completeness check** — every sentence is verified against a speech-rate floor; possibly truncated or missing audio is flagged in the output, queue, and diagnostics instead of failing silently
 - **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors (e.g. `af_heart(2)+af_bella(1)`)
@@ -130,7 +131,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Content-Security-Policy** baked into production builds; document scripts stay same-origin while worker/media/image blob URLs remain destination-scoped
 - **Persistent storage** request + usage meter; clip library auto-evicts past a 200 MB cap, warns at 90% quota, and recovers from full-storage saves by evicting oldest clips
 - **Offline pack manager** — inspect per-engine model cache size, distinguish the app-shell cache, prefetch the selected Kokoro q8 voice pack, and selectively clear stale engine caches
-- **Diagnostics export** — copy or download a local JSON support bundle with browser and native app/OS/runtime details, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, verified model-pack and FFmpeg status, sidecar stderr summaries, redacted paths, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8
+- **Diagnostics export** — copy or download a local JSON support bundle with browser and native app/OS/runtime details, WebGPU adapter identity/denylist state, codec, generation timing, storage, cache, model-route, verified model-pack and FFmpeg status, sidecar stderr summaries, redacted paths, and recent sanitized error state; report corrupted WebGPU audio from the same panel to force that adapter onto WASM q8. The adjacent benchmark panel is separately opt-in and excludes source text, URLs, credentials, and raw audio.
 - **Media Session API** — lock-screen play/pause, seek, and sentence-skip controls for generated audio
 - **Audio output routing** — where the browser grants Audio Output Devices API support, choose a speaker or headset for every registered playback surface; unsupported browsers hide the picker
 - **Dark and light themes** with `prefers-color-scheme` detection and zero-flash boot
@@ -202,6 +203,8 @@ Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON*
 
 Dependency compatibility is recorded in `scripts/dependency-compatibility.json`. `npm run compatibility:check` rejects package.json/package-lock/installed-version drift and reports transitive runtime instances; `npm run compatibility:matrix` runs the complete test, lint, typecheck, build, smoke, runtime-license, SBOM, and capability gates. The accepted lines cover Electron 43, Vite 8, React 19.2, Transformers.js 4.2, ONNX Runtime 1.x (direct 1.27.x), PDF.js 6.2, Playwright 1.61, and the current type packages. TypeScript 7 and Transformers.js 4.3+ are explicit deferred holds until isolated candidate installs pass their required API and full-matrix evidence. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
+The **Local benchmark** panel is off by default under **System & diagnostics**. Enable it before a generation to keep up to 32 bounded observations in local storage; use Copy/Download benchmark JSON or Clear history explicitly. The export contains model/runtime identity, timings, resource estimates, retries, and failures only. It is never uploaded automatically and deliberately contains no source text, URLs, credentials, or raw audio.
+
 Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, the browser-extension text handoff, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, PWA screenshot manifest assets, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json` and runs the reviewed UI locale catalog gate; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run desktop:smoke` runs the built Electron shell through the model-free native-window contract and checks theme switching, focus-visible keyboard reachability, smoke-safe file-picker cancellation, diagnostics, updater no-op state, and display-aware screenshot capture. On Windows, run GUI smoke through the repository's private-desktop visual-isolation harness so the window never enters the interactive desktop.
@@ -254,7 +257,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (626 tests across 104 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (630 tests across 105 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -284,6 +287,7 @@ src/
 │   ├── kokoro-timestamps.ts # Timestamped Kokoro loader, short-input pad/crop, and word cue alignment
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
+│   ├── benchmark.ts         # Opt-in local performance history and redacted JSON export
 │   ├── capabilities.ts       # Canonical app, engine, export, queue, and license facts
 │   ├── ui-locale.ts          # Reviewed UI-locale adapter; synthesis language remains engine-specific
 │   ├── document-import.ts   # PDF/DOCX text extraction

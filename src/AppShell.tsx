@@ -135,6 +135,7 @@ import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, enforceLi
 import type { VoiceProvenance } from './lib/voice-lab.ts'
 import type { VoiceSourceInput } from './lib/voice-provenance.ts'
 import type { GenerationProvenanceManifest, ProvenanceCueTiming, ProvenanceReplayContext } from './lib/provenance.ts'
+import type { BenchmarkReport } from './lib/benchmark.ts'
 import type { M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
@@ -257,6 +258,7 @@ const MELO_MODEL_ID = 'myshell-ai/MeloTTS-Chinese'
 const MELO_MODEL_REVISION = 'af5d207a364ea4208c6f589c89f57f88414bdd16'
 const MELO_SAMPLE_RATE = 44_100
 const MAX_TEXT_CHARS = 5000
+const BENCHMARK_OPT_IN_KEY = 'bettertts-benchmark-enabled'
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15_000
 const QUALITY_CHECKS_STORAGE_KEY = 'bettertts-quality-checks'
@@ -386,6 +388,18 @@ type AudioResult = {
   loudness?: LoudnessMeasurement
   qualityReview?: LongFormQualityReview[]
   provenanceManifest?: GenerationProvenanceManifest
+}
+
+type BenchmarkSession = {
+  startedAtMs: number
+  inputChars: number
+  elapsedMs?: number
+  firstAudioLatencyMs?: number | null
+  audioDurationSeconds?: number
+  retryCount: number
+  failureCount: number
+  outcome?: 'completed' | 'cancelled' | 'failed'
+  provenance?: GenerationProvenanceManifest
 }
 
 type ImportedTextSnapshot = {
@@ -1664,6 +1678,15 @@ function App() {
   const [modelCache, setModelCache] = useState<ModelCacheSummary | null>(null)
   const [cacheAction, setCacheAction] = useState<string | null>(null)
   const [diagnosticsAction, setDiagnosticsAction] = useState<'copy' | 'download' | 'report-webgpu' | 'clear-webgpu' | null>(null)
+  const [benchmarkEnabled, setBenchmarkEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem(BENCHMARK_OPT_IN_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [benchmarkReport, setBenchmarkReport] = useState<BenchmarkReport | null>(null)
+  const [benchmarkAction, setBenchmarkAction] = useState<'copy' | 'download' | 'clear' | null>(null)
   const [backupAction, setBackupAction] = useState<'download' | 'inspect' | 'restore' | null>(null)
   const [projectAction, setProjectAction] = useState<'open' | 'save' | 'save-as' | 'autosave' | null>(null)
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
@@ -1734,6 +1757,7 @@ function App() {
   const persistRequestedRef = useRef(false)
   const storagePressureWarnedRef = useRef(false)
   const persistenceWarnedRef = useRef(false)
+  const benchmarkSessionRef = useRef<BenchmarkSession | null>(null)
   const projectSaveQueueRef = useRef(new SerialTaskQueue())
 
   useEffect(() => {
@@ -1745,6 +1769,19 @@ function App() {
     })
     return () => { cancelled = true }
   }, [])
+  useEffect(() => {
+    if (!benchmarkEnabled) {
+      setBenchmarkReport(null)
+      return
+    }
+    let cancelled = false
+    import('./lib/benchmark.ts').then(({ readBenchmarkReport }) => {
+      if (!cancelled) setBenchmarkReport(readBenchmarkReport())
+    }).catch(() => {
+      if (!cancelled) setBenchmarkReport(null)
+    })
+    return () => { cancelled = true }
+  }, [benchmarkEnabled])
   const projectRevisionRef = useRef(0)
   const suppressProjectDirtyRef = useRef(false)
   const outputPanelRef = useRef<HTMLElement | null>(null)
@@ -2333,6 +2370,7 @@ function App() {
   const editorModeLabel = narratorMode ? 'Narrator mode' : dialogMode ? 'Dialog script' : separateLines ? 'Line export' : 'Single clip'
   const completedQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.filter((chunk) => chunk.status === 'done').length, 0)
   const totalQueueChunks = queueJobs.reduce((total, job) => total + job.chunks.length, 0)
+  const latestBenchmark = benchmarkReport?.observations[benchmarkReport.observations.length - 1]
   const queueSummaryLabel = queueJobs.length > 0
     ? `${queueJobs.length} job${queueJobs.length === 1 ? '' : 's'} / ${completedQueueChunks}/${totalQueueChunks} chunks`
     : 'No queued jobs'
@@ -2897,6 +2935,98 @@ function App() {
               ? QWEN_MODEL_ID
               : 'Web Speech API',
       modelRoutes,
+    }
+  }
+
+  function handleBenchmarkToggle(enabled: boolean) {
+    setBenchmarkEnabled(enabled)
+    persistSetting(BENCHMARK_OPT_IN_KEY, enabled ? '1' : '0')
+    if (!enabled) setBenchmarkReport(null)
+  }
+
+  async function persistBenchmarkSession(session: BenchmarkSession): Promise<void> {
+    const manifest = session.provenance
+    const runtimeIdentity = manifest?.engine.runtimeIdentities?.[0]
+    const fallbackRuntimeKind = engine === 'qwen'
+      ? 'sidecar' as const
+      : engine === 'browser'
+        ? 'browser' as const
+        : provenanceRuntimeKind(engine, runtimeLabel)
+    const result = await import('./lib/benchmark.ts').then(({ appendBenchmarkObservation }) => appendBenchmarkObservation({
+      identity: {
+        engineId: manifest?.engine.id ?? engine,
+        modelId: manifest?.engine.modelId ?? buildDiagnosticsSelection().selectedModel,
+        modelRevision: manifest?.engine.modelRevision ?? 'unknown',
+        runtimeKind: runtimeIdentity?.runtime ?? fallbackRuntimeKind,
+        runtimeLabel: manifest?.runtime.label ?? runtimeLabel,
+        runtimeRevision: runtimeIdentity?.revision,
+      },
+      elapsedMs: session.elapsedMs ?? Math.max(0, performance.now() - session.startedAtMs),
+      firstAudioLatencyMs: session.firstAudioLatencyMs ?? null,
+      audioDurationSeconds: session.audioDurationSeconds ?? 0,
+      inputChars: session.inputChars,
+      outcome: session.outcome ?? (abortRef.current ? 'cancelled' : 'failed'),
+      retryCount: session.retryCount,
+      failureCount: session.failureCount,
+    }))
+    setBenchmarkReport(result.report)
+    if (!result.persisted) {
+      const message = result.error ?? 'Benchmark history could not be saved locally.'
+      recordDiagnosticEvent('warn', message, 'benchmark.persist')
+      showToast({ tone: 'warn', message })
+    }
+  }
+
+  async function handleCopyBenchmark() {
+    if (benchmarkAction) return
+    setBenchmarkAction('copy')
+    try {
+      const { exportBenchmarkJson, readBenchmarkReport } = await import('./lib/benchmark.ts')
+      const report = benchmarkReport ?? readBenchmarkReport()
+      if (report.observations.length === 0) throw new Error('Enable local benchmark recording and complete a generation first.')
+      await copyTextToClipboard(exportBenchmarkJson(report))
+      showToast({ tone: 'ok', message: 'Local benchmark JSON copied.' })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not copy benchmark JSON.' })
+    } finally {
+      setBenchmarkAction(null)
+    }
+  }
+
+  async function handleDownloadBenchmark() {
+    if (benchmarkAction) return
+    setBenchmarkAction('download')
+    try {
+      const { exportBenchmarkJson, readBenchmarkReport } = await import('./lib/benchmark.ts')
+      const report = benchmarkReport ?? readBenchmarkReport()
+      if (report.observations.length === 0) throw new Error('Enable local benchmark recording and complete a generation first.')
+      const blob = new Blob([exportBenchmarkJson(report)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `bettertts-benchmark-${timestamp()}.json`
+      anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      showToast({ tone: 'ok', message: 'Local benchmark JSON downloaded.' })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not export benchmark JSON.' })
+    } finally {
+      setBenchmarkAction(null)
+    }
+  }
+
+  async function handleClearBenchmark() {
+    if (benchmarkAction) return
+    setBenchmarkAction('clear')
+    try {
+      const { clearBenchmarkReport, emptyBenchmarkReport } = await import('./lib/benchmark.ts')
+      if (!clearBenchmarkReport()) throw new Error('Benchmark history could not be cleared from local storage.')
+      setBenchmarkReport(emptyBenchmarkReport())
+      showToast({ tone: 'ok', message: 'Local benchmark history cleared.' })
+    } catch (error) {
+      showToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not clear benchmark history.' })
+    } finally {
+      setBenchmarkAction(null)
     }
   }
 
@@ -3837,6 +3967,7 @@ function App() {
             // lazily, so reload once and retry before surfacing the failure —
             // long queue runs self-heal instead of failing every later chunk.
             if (err instanceof Error && err.name !== 'AbortError' && /crashed|not loaded/i.test(err.message)) {
+              if (benchmarkSessionRef.current) benchmarkSessionRef.current.retryCount += 1
               recordDiagnosticEvent('warn', err, 'native.synthesize-retry')
               await loadNativeKokoro(onProgress)
               return { samples: await generateNative(text, voice, spd, signal), sampleRate: runtime.sampleRate ?? KOKORO_SAMPLE_RATE }
@@ -4186,10 +4317,14 @@ function App() {
         )
       },
       onMissingAudio: (sentence) => {
+        if (benchmarkSessionRef.current) benchmarkSessionRef.current.failureCount += 1
         recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence — it is missing from the output.`, 'synthesis.completeness')
       },
       onQualityReview: (review) => {
         recordDiagnosticEvent('warn', `${review.scope === 'job' ? 'Long-form output' : 'Segment'} needs review after ${review.attempts} attempt${review.attempts === 1 ? '' : 's'}: ${summarizeQualityIssues(review.issues)}.`, 'synthesis.quality.review')
+      },
+      onQualityRetry: () => {
+        if (benchmarkSessionRef.current) benchmarkSessionRef.current.retryCount += 1
       },
     })
     timeToFirstAudioMs = dispatchResult.timeToFirstAudioMs
@@ -4379,6 +4514,14 @@ function App() {
     const elapsed = (performance.now() - genStart) / 1000
     const audioDuration = totalSamples / outputSampleRate
     setGenStats({ elapsed, chars: totalChars, audioDuration, timeToFirstAudioMs })
+    if (benchmarkSessionRef.current) {
+      benchmarkSessionRef.current.elapsedMs = Math.round(elapsed * 1000)
+      benchmarkSessionRef.current.firstAudioLatencyMs = timeToFirstAudioMs
+      benchmarkSessionRef.current.audioDurationSeconds = audioDuration
+      benchmarkSessionRef.current.inputChars = totalChars
+      benchmarkSessionRef.current.outcome = abortRef.current ? 'cancelled' : 'completed'
+      benchmarkSessionRef.current.provenance = generatedProvenance[0]
+    }
     if (abortRef.current) {
       setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
       showToast({ tone: 'warn', message: uiText(uiLocale, 'generationCancelled') })
@@ -4610,6 +4753,14 @@ function App() {
     generationAbortRef.current = generationController
     dispatchGenerationState({ type: 'start', runId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, status: 'Starting generation' })
     setGenStats(null)
+    benchmarkSessionRef.current = benchmarkEnabled
+      ? {
+        startedAtMs: performance.now(),
+        inputChars: sourceText.length,
+        retryCount: 0,
+        failureCount: 0,
+      }
+      : null
     generatingRef.current = true
     setIsGenerating(true)
 
@@ -4640,6 +4791,13 @@ function App() {
         return
       }
       const message = error instanceof Error ? error.message : 'Generation failed.'
+      if (benchmarkSessionRef.current) {
+        if (error instanceof Error && error.name === 'AbortError') benchmarkSessionRef.current.outcome = 'cancelled'
+        else if (!abortRef.current) {
+          benchmarkSessionRef.current.failureCount += 1
+          benchmarkSessionRef.current.outcome = 'failed'
+        }
+      }
       setStatus('Generation failed')
       showToast({ tone: 'error', message })
       console.error(error)
@@ -4652,6 +4810,15 @@ function App() {
       generatingRef.current = false
       setIsGenerating(false)
       if (generationAbortRef.current === generationController) generationAbortRef.current = null
+      const benchmarkSession = benchmarkSessionRef.current
+      benchmarkSessionRef.current = null
+      if (benchmarkSession) {
+        try {
+          await persistBenchmarkSession(benchmarkSession)
+        } catch (error) {
+          recordDiagnosticEvent('warn', error, 'benchmark.persist')
+        }
+      }
     }
   }
 
@@ -7719,6 +7886,53 @@ function App() {
                   </button>
                 </div>
                 <small>{m4bCapabilityText(m4bCapability)}</small>
+              </div>
+              <div className="diagnostics-panel benchmark-panel" aria-label="Local benchmark report">
+                <div className="cache-manager-head">
+                  <span>
+                    <strong>Local benchmark</strong>
+                    <small>Off by default. Records local timing and resource observations only; nothing is uploaded.</small>
+                  </span>
+                </div>
+                <label className="toggle-row" htmlFor="benchmark-enabled" aria-label="Record local benchmark history">
+                  <input
+                    id="benchmark-enabled"
+                    type="checkbox"
+                    checked={benchmarkEnabled}
+                    onChange={(event) => handleBenchmarkToggle(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Record local performance</strong>
+                    <small>Model/runtime identity, first audio, throughput, memory/quota, retries, and failures.</small>
+                  </span>
+                </label>
+                {benchmarkEnabled ? (
+                  <>
+                    <dl className="diagnostics-facts">
+                      <div><dt>Runs</dt><dd>{benchmarkReport?.observations.length ?? 0}</dd></div>
+                      <div><dt>Latest engine</dt><dd title={latestBenchmark ? `${latestBenchmark.identity.engineId} · ${latestBenchmark.identity.modelId}` : 'No run recorded'}>{latestBenchmark ? shortUiLabel(latestBenchmark.identity.engineId, 40) : 'No run recorded'}</dd></div>
+                      <div><dt>First audio</dt><dd>{latestBenchmark?.metrics.firstAudioLatencyMs != null ? `${Math.round(latestBenchmark.metrics.firstAudioLatencyMs)} ms` : 'Not measured'}</dd></div>
+                      <div><dt>Throughput</dt><dd>{latestBenchmark ? `${latestBenchmark.metrics.throughputCharsPerSecond.toFixed(1)} chars/s` : 'Not measured'}</dd></div>
+                    </dl>
+                    <small className="diagnostics-detail">Exports contain no source text, URLs, credentials, or raw audio. Keep the JSON local unless you choose to share it.</small>
+                    <div className="diagnostics-actions">
+                      <button type="button" onClick={handleCopyBenchmark} disabled={benchmarkAction !== null || latestBenchmark === undefined}>
+                        {benchmarkAction === 'copy' ? <Loader2 size={13} aria-hidden="true" /> : <SquareCode size={13} aria-hidden="true" />}
+                        Copy benchmark JSON
+                      </button>
+                      <button type="button" onClick={handleDownloadBenchmark} disabled={benchmarkAction !== null || latestBenchmark === undefined}>
+                        {benchmarkAction === 'download' ? <Loader2 size={13} aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+                        Download benchmark JSON
+                      </button>
+                      <button type="button" onClick={handleClearBenchmark} disabled={benchmarkAction !== null || latestBenchmark === undefined}>
+                        {benchmarkAction === 'clear' ? <Loader2 size={13} aria-hidden="true" /> : <Trash2 size={13} aria-hidden="true" />}
+                        Clear benchmark history
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <small className="diagnostics-detail">Enable this switch before a generation when you want a local comparison report. Existing history is not read or recorded while it is off.</small>
+                )}
               </div>
               </div>
               ) : null}
