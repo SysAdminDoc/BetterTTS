@@ -7,11 +7,27 @@
   "start_url": "./",
   "share_target": {
     "action": "./",
-    "method": "GET",
+    "method": "POST",
+    "enctype": "multipart/form-data",
     "params": {
       "title": "title",
       "text": "text",
-      "url": "url"
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            ".txt",
+            ".epub",
+            ".pdf",
+            ".docx",
+            "text/plain",
+            "application/epub+zip",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ]
+        }
+      ]
     }
   },
   "display": "standalone",

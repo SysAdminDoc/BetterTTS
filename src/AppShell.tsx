@@ -4829,19 +4829,33 @@ function App() {
   }
 
   useEffect(() => {
-    // PWA share target: Android shares land here as ?url= / ?text= params.
+    // PWA share target: modern browsers POST multipart data to the service
+    // worker, which redirects here with a one-shot cache token. Older or
+    // unsupported browsers keep the GET text/URL fallback below.
     const params = new URLSearchParams(window.location.search)
     const extensionHandoff = params.get('source') === 'extension'
+    const shareToken = params.get('share')
+    const shareError = params.get('share-error')
     const explicitUrl = params.get('url')
     const sharedText = params.get('text')
     const urlFromText = extensionHandoff ? null : sharedText?.match(/https?:\/\/\S+/)?.[0] ?? null
     const sharedUrl = extensionHandoff ? null : explicitUrl || urlFromText
-    if (sharedUrl) {
-      importFromUrl(sharedUrl)
+    if (shareToken) {
+      const notifyShareUnavailable = () => showToast({ tone: 'warn', message: uiText(uiLocale, 'shareUnavailable') })
+      void import('./lib/share-target.ts').then(({ handleShareTargetToken }) => handleShareTargetToken(shareToken, {
+        onUnavailable: notifyShareUnavailable,
+        onFile: (file) => importedFileHandlerRef.current?.(file) ?? notifyShareUnavailable(),
+        onUrl: (url) => importFromUrl(url),
+        onText: (value) => setText(value.slice(0, MAX_TEXT_CHARS)),
+      })).catch(notifyShareUnavailable)
+    } else if (shareError) {
+        showToast({ tone: 'warn', message: uiText(uiLocale, 'shareUnavailable') })
+    } else if (sharedUrl) {
+      void importFromUrl(sharedUrl)
     } else if (sharedText) {
       setText(sharedText.slice(0, MAX_TEXT_CHARS))
     }
-    if (sharedUrl || sharedText) {
+    if (shareToken || shareError || sharedUrl || sharedText) {
       window.history.replaceState(null, '', window.location.pathname)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

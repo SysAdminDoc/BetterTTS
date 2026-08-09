@@ -110,7 +110,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, durable resume, and previous/next sentence controls
 - **Document import** — open TXT, EPUB, PDF, or DOCX files; ZIP-backed formats are inspected against bounded entry, expansion, and compression-ratio limits before extraction, PDF files containing JavaScript actions are rejected before text extraction, and PDF/DOCX text is cleaned with the same reversible audiobook cleanup controls before synthesis or Reader mode
 - **Desktop workflow integrations** — opt-in Windows global read-selection hotkey, per-user Explorer menu plus “Open with BetterTTS” registrations for TXT/EPUB/PDF/DOCX, bounded folder import, optional Tesseract screen OCR, tray render status, and completion notifications; every OS hook is independently disableable and the web/PWA build remains unchanged
-- **Article import** — paste a public HTTPS URL and Readability extracts the text; embedded credentials, HTTP/local/private destinations, and redirects the browser cannot inspect are rejected, and successful imports disclose the final destination (plus Android share-target support)
+- **Article import** — paste a public HTTPS URL and Readability extracts the text; embedded credentials, HTTP/local/private destinations, and redirects the browser cannot inspect are rejected, and successful imports disclose the final destination (plus GET text/URL and capability-gated POST file share-target support)
 - **Text cleanup** — skip citations, footnotes, references, repeated page headers/footers, book metadata, URLs, markdown, re-flow wrapped PDF lines with end-of-line hyphen repair, and normalize audiobook numbers/units before synthesis; the persisted rules are previewable and reversible
 - **Voice preview** — one-click preview for each voice with a bounded 20-entry session LRU cache and object-URL disposal
 - **Pronunciation dictionary** — versioned JSON pack import/export, a bundled tech-abbreviation starter pack, and word-bounded respelling or eSpeak phoneme entries persisted locally
@@ -124,7 +124,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **CPU mode** — persistent WASM switch for GPUs with corrupted WebGPU output
 
 ### Platform
-- **Installable PWA** with service worker for offline app shell, per-build cache versioning, safe waiting-worker updates that retain the previous shell generation until reload, and desktop/mobile install screenshots
+- **Installable PWA** with service worker for offline app shell, per-build cache versioning, safe waiting-worker updates that retain the previous shell generation until reload, desktop/mobile install screenshots, and one-time validated TXT/EPUB/PDF/DOCX share handoff; browsers without POST/file sharing can use Open or the GET text/URL fallback
 - **Companion MV3 browser extension** — permission-minimal selection/page context actions open the PWA with the captured text; the packaged archive is built with `npm run extension:build`
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds; document scripts stay same-origin while worker/media/image blob URLs remain destination-scoped

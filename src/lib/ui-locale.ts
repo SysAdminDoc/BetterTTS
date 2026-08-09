@@ -17,7 +17,6 @@ export const UI_TEXT_KEYS = [
   'articleImportFallback',
   'articleImportTimeout',
   'articleImportCancelled',
-  'qualityReviewHint',
   'unexpectedInterfaceError',
 ] as const
 

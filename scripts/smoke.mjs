@@ -41,6 +41,13 @@ function runChecked(name, args) {
 
 async function assertManifestScreenshots() {
   const manifest = JSON.parse(await readFile(join(distDir, 'manifest.webmanifest'), 'utf8'))
+  if (manifest.share_target?.method !== 'POST' || manifest.share_target?.enctype !== 'multipart/form-data') {
+    throw new Error('PWA manifest must declare a multipart POST share target.')
+  }
+  const acceptedShareFiles = manifest.share_target?.params?.files?.[0]?.accept ?? []
+  for (const requiredType of ['.txt', '.epub', '.pdf', '.docx']) {
+    if (!acceptedShareFiles.includes(requiredType)) throw new Error(`PWA share target is missing ${requiredType} file support.`)
+  }
   if (!Array.isArray(manifest.screenshots) || manifest.screenshots.length < 2) {
     throw new Error('PWA manifest must declare desktop and mobile screenshots.')
   }
@@ -545,6 +552,10 @@ async function runNonChromiumCompatibilityChecks() {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Text to synthesize').waitFor({ timeout: 20000 })
     await page.getByRole('button', { name: 'Generate audio' }).first().waitFor({ timeout: 20000 })
+    // Firefox may still be completing the service-worker isolation reload
+    // after the first DOM becomes available.
+    await page.waitForTimeout(250)
+    await page.locator('#library-panel h3').waitFor({ state: 'attached', timeout: 20000 })
     await assertAxeCompatibleRules(page, 'Firefox')
     await assertAccessibilityStructure(page)
     await assertLiveRegionAnnouncements(page)
@@ -608,7 +619,7 @@ async function assertAccessibilityStructure(page) {
     throw new Error('Skip link did not focus the script editor')
   }
   const themeButton = page.getByRole('button', { name: /Switch to/ })
-  await themeButton.focus()
+  await themeButton.evaluate((element) => (element instanceof HTMLElement ? element.focus({ preventScroll: true, focusVisible: true }) : undefined))
   const focusStyle = await themeButton.evaluate((element) => {
     const style = getComputedStyle(element)
     return { style: style.outlineStyle, width: Number.parseFloat(style.outlineWidth) }
@@ -873,6 +884,17 @@ async function assertExtensionHandoff(browser) {
   }
 }
 
+async function assertShareTargetFallback(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  try {
+    const page = await context.newPage()
+    await page.goto(`${baseUrl}?share-error=invalid`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('alert').filter({ hasText: 'Share cancelled or unavailable' }).waitFor({ timeout: 20000 })
+  } finally {
+    await context.close()
+  }
+}
+
 async function runSmoke() {
   console.log('Building production app...')
   runChecked('npm', ['run', 'build'])
@@ -913,6 +935,8 @@ async function runSmoke() {
 
     console.log('Checking browser-extension text handoff...')
     await assertExtensionHandoff(browser)
+    console.log('Checking unsupported share-target fallback...')
+    await assertShareTargetFallback(browser)
 
     console.log('Checking semantic structure, keyboard access, and display preferences...')
     await assertAccessibilityStructure(desktop.page)
