@@ -1423,6 +1423,10 @@ async function runSmoke() {
       })
     })
     const mobile = await openSeededApp(mobileContext, 'smoke-unsupported')
+    const mobileShell = mobile.page.locator('.app-shell')
+    if (await mobileShell.getAttribute('data-mobile-listening-contract') !== '1' || await mobileShell.getAttribute('data-mobile-min-touch-target') !== '44') {
+      throw new Error('Mobile listening contract marker or touch threshold is missing')
+    }
     const mobileWorkspaceNav = mobile.page.getByRole('navigation', { name: 'Workspace' })
     for (const destination of ['Studio', 'Queue', 'Library', 'Models', 'Diagnostics', 'Docs']) {
       if (!(await mobileWorkspaceNav.getByRole('link', { name: new RegExp(`^${destination}`) }).isVisible())) {

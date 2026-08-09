@@ -30,6 +30,7 @@
 - Added an opt-in local benchmark history for direct generation runs: bounded model/runtime identity, first-audio latency, throughput, memory/quota observations, retry/failure counts, and redacted JSON copy/download/clear actions never include source text, URLs, credentials, or raw audio.
 - The initial-shell budget now includes the opt-in local benchmark controls while benchmark history and resource capture remain lazy (624,000 raw / 178,000 gzip ceiling).
 - Added a dependency compatibility lane that pins reviewed package specs and lock versions, reports nested runtime instances, runs the full verification matrix, and records TypeScript 7 and Transformers.js 4.3+ as explicit deferred holds.
+- Added a versioned mobile listening contract covering foreground/offline shell and model readiness, interrupted direct versus durable-queue synthesis recovery, persisted reader/playback positions, 44px touch-safe queue actions, and POST/Open/GET/paste share-import fallbacks; the PWA exposes lifecycle markers for acceptance checks without telemetry.
 
 ## v0.23.0 - 2026-08-03
 

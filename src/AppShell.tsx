@@ -136,6 +136,7 @@ import type { VoiceProvenance } from './lib/voice-lab.ts'
 import type { VoiceSourceInput } from './lib/voice-provenance.ts'
 import type { GenerationProvenanceManifest, ProvenanceCueTiming, ProvenanceReplayContext } from './lib/provenance.ts'
 import type { BenchmarkReport } from './lib/benchmark.ts'
+import { MOBILE_LISTENING_CONTRACT_VERSION, MOBILE_MIN_TOUCH_TARGET_PX, readMobileLifecycleSnapshot, type MobileLifecycleSnapshot } from './lib/mobile-listening-contract.ts'
 import type { M4bCapability } from './lib/m4b.ts'
 import {
   type EngineCacheStatus,
@@ -1547,6 +1548,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 }
 
 function App() {
+  const [mobileLifecycle, setMobileLifecycle] = useState<MobileLifecycleSnapshot>(() => readMobileLifecycleSnapshot())
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [activeNavSection, setActiveNavSection] = useState<NavSection>(getActiveNavSection)
   const [activeWorkspaceHash, setActiveWorkspaceHash] = useState<string>(() => (
@@ -1759,6 +1761,18 @@ function App() {
   const persistenceWarnedRef = useRef(false)
   const benchmarkSessionRef = useRef<BenchmarkSession | null>(null)
   const projectSaveQueueRef = useRef(new SerialTaskQueue())
+
+  useEffect(() => {
+    const refreshMobileLifecycle = () => setMobileLifecycle(readMobileLifecycleSnapshot())
+    document.addEventListener('visibilitychange', refreshMobileLifecycle)
+    window.addEventListener('online', refreshMobileLifecycle)
+    window.addEventListener('offline', refreshMobileLifecycle)
+    return () => {
+      document.removeEventListener('visibilitychange', refreshMobileLifecycle)
+      window.removeEventListener('online', refreshMobileLifecycle)
+      window.removeEventListener('offline', refreshMobileLifecycle)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -6556,7 +6570,13 @@ function App() {
   const sbomArtifact = getSbomArtifactLink(APP_VERSION, typeof location === 'undefined' ? undefined : location.href)
 
   return (
-      <div className="app-shell">
+      <div
+        className="app-shell"
+        data-mobile-listening-contract={MOBILE_LISTENING_CONTRACT_VERSION}
+        data-mobile-min-touch-target={MOBILE_MIN_TOUCH_TARGET_PX}
+        data-mobile-foreground={mobileLifecycle.foreground ? 'true' : 'false'}
+        data-mobile-connectivity={mobileLifecycle.connectivity}
+      >
         <a className="skip-link" href="#script-editor">Skip to script editor</a>
         <header className="topbar">
           <a className="brand" href="#studio" aria-label="BetterTTS home">

@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-630%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-636%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 630 tests across 105 test files
+- **Tests:** 636 tests across 106 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -126,6 +126,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 
 ### Platform
 - **Installable PWA** with service worker for offline app shell, per-build cache versioning, safe waiting-worker updates that retain the previous shell generation until reload, desktop/mobile install screenshots, and one-time validated TXT/EPUB/PDF/DOCX share handoff; browsers without POST/file sharing can use Open or the GET text/URL fallback
+- **Mobile listening contract** — foreground/online lifecycle markers, controlled-shell and cached-model readiness rules, interrupted direct-run versus durable-queue recovery, reader/playback resume requirements, 44px touch-safe queue actions, and POST → Open/GET → paste share/import fallback are versioned and unit-tested before any native mobile package is considered
 - **Companion MV3 browser extension** — permission-minimal selection/page context actions open the PWA with the captured text; the packaged archive is built with `npm run extension:build`
 - **COOP/COEP headers** injected via service worker for SharedArrayBuffer threaded WASM
 - **Content-Security-Policy** baked into production builds; document scripts stay same-origin while worker/media/image blob URLs remain destination-scoped
@@ -257,7 +258,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (630 tests across 105 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (636 tests across 106 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -288,6 +289,7 @@ src/
 │   ├── kokoro-worker.ts     # Web Worker client interface
 │   ├── diagnostics.ts       # Local browser/capability/support export bundle
 │   ├── benchmark.ts         # Opt-in local performance history and redacted JSON export
+│   ├── mobile-listening-contract.ts # Foreground/offline readiness, recovery, resume, touch, and share fallback contract
 │   ├── capabilities.ts       # Canonical app, engine, export, queue, and license facts
 │   ├── ui-locale.ts          # Reviewed UI-locale adapter; synthesis language remains engine-specific
 │   ├── document-import.ts   # PDF/DOCX text extraction
