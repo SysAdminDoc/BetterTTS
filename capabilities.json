@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "app": {
     "name": "BetterTTS",
-    "version": "0.23.0",
+    "version": "0.24.0",
     "supportedPlatforms": [
       "web",
       "windows"

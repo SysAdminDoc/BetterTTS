@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.24.0 - 2026-08-09
 
 ### Security
 - Remediated the current npm audit findings by upgrading PDF.js and vulnerable transitive dependencies, added a production audit gate to the build, and rejected PDF files containing JavaScript actions before local text extraction.

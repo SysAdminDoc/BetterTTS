@@ -55,7 +55,7 @@ describe('buildDesktopDiagnostics', () => {
         qwen: { available: false, message: 'Python unavailable' },
       },
     }, {
-      appVersion: '0.23.0',
+      appVersion: '0.24.0',
       electronVersion: '43.1.0',
       chromeVersion: '134.0.0.0',
       nodeVersion: '22.0.0',
