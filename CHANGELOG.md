@@ -27,6 +27,7 @@
 - The strict initial-shell raw budget now includes the sub-1 KiB share-token dispatch needed for that handoff; all share storage and parsing remain lazy.
 - Voice provenance is now versioned in every new generation/export manifest: built-in, user-supplied, cloned, RVC, and sidecar source classes carry bounded model/source details, consent acknowledgement, clone ancestry, and explicit retained/unknown/not-applicable watermark status; clone-derived Web Share prompts a review warning and requires acknowledgement.
 - The initial raw-byte budget now includes the small voice-attribution/share-review contract; full provenance construction remains lazy and gzip delivery stays within the existing ceiling.
+- Added a dependency compatibility lane that pins reviewed package specs and lock versions, reports nested runtime instances, runs the full verification matrix, and records TypeScript 7 and Transformers.js 4.3+ as explicit deferred holds.
 
 ## v0.23.0 - 2026-08-03
 

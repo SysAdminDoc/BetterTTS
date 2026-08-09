@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-621%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-626%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 621 tests across 103 test files
+- **Tests:** 626 tests across 104 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -163,6 +163,12 @@ npm run sbom:check
 # Validate generated capability facts and test totals
 npm run capabilities:check
 
+# Verify the accepted dependency specs, lock versions, and installed packages
+npm run compatibility:check
+
+# Run the complete dependency compatibility gate matrix
+npm run compatibility:matrix
+
 # Local rendered smoke check
 npm run smoke
 
@@ -194,7 +200,7 @@ Open `http://localhost:5173/BetterTTS/` in your browser.
 
 Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON** when reporting a local runtime issue. The bundle includes app version, platform details, native runtime/provider state, verified model-pack and FFmpeg status, bounded sidecar/native stderr summaries, WebGPU adapter identity and denylist state, WebCodecs AAC/Opus support, the last generation's time to first audio, Cross-Origin Storage detection, Transformers.js upgrade readiness, Piper-plus runtime support, storage quota, model-cache summary, selected model routes, redacted path labels, and recent sanitized warnings/errors. It does not include script text or imported article URLs. If a WebGPU clip is corrupted or produces screeching audio, choose **Report bad audio** in the WebGPU adapter panel; BetterTTS stores only the adapter fingerprint and uses WASM q8 for that adapter until you clear the report.
 
-BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
+Dependency compatibility is recorded in `scripts/dependency-compatibility.json`. `npm run compatibility:check` rejects package.json/package-lock/installed-version drift and reports transitive runtime instances; `npm run compatibility:matrix` runs the complete test, lint, typecheck, build, smoke, runtime-license, SBOM, and capability gates. The accepted lines cover Electron 43, Vite 8, React 19.2, Transformers.js 4.2, ONNX Runtime 1.x (direct 1.27.x), PDF.js 6.2, Playwright 1.61, and the current type packages. TypeScript 7 and Transformers.js 4.3+ are explicit deferred holds until isolated candidate installs pass their required API and full-matrix evidence. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
 Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, the browser-extension text handoff, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, PWA screenshot manifest assets, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json` and runs the reviewed UI locale catalog gate; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
@@ -248,7 +254,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (621 tests across 103 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (626 tests across 104 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "gates": [
+    "test",
+    "lint",
+    "typecheck",
+    "build",
+    "smoke",
+    "license:runtime",
+    "sbom:check",
+    "capabilities:check"
+  ],
+  "packages": [
+    {
+      "id": "electron-43",
+      "label": "Electron 43 minors",
+      "packages": [
+        { "name": "electron", "spec": "^43.1.0", "lockedVersion": "43.1.0", "line": "43.x" }
+      ],
+      "decision": "Electron 43.x is the accepted desktop Chromium line; desktop smoke remains a release gate."
+    },
+    {
+      "id": "vite-8",
+      "label": "Vite 8 minors",
+      "packages": [
+        { "name": "vite", "spec": "^8.1.1", "lockedVersion": "8.1.3", "line": "8.x" }
+      ],
+      "decision": "Vite 8.x is accepted while the initial-shell and lazy-boundary budgets stay enforced."
+    },
+    {
+      "id": "react-19-2",
+      "label": "React 19.2",
+      "packages": [
+        { "name": "react", "spec": "^19.2.7", "lockedVersion": "19.2.7", "line": "19.2.x" },
+        { "name": "react-dom", "spec": "^19.2.7", "lockedVersion": "19.2.7", "line": "19.2.x" }
+      ],
+      "decision": "React and React DOM stay on the matched 19.2 line until the shell and hook suite passes together."
+    },
+    {
+      "id": "transformers-4",
+      "label": "Transformers.js 4.x",
+      "packages": [
+        {
+          "name": "@huggingface/transformers",
+          "spec": "^4.2.0",
+          "lockedVersion": "4.2.0",
+          "line": "4.2.x",
+          "override": "$@huggingface/transformers"
+        }
+      ],
+      "decision": "Transformers.js 4.2.x is the accepted runtime line; 4.3+ remains an explicit deferred hold below."
+    },
+    {
+      "id": "onnx-runtime",
+      "label": "ONNX Runtime",
+      "packages": [
+        { "name": "onnxruntime-node", "spec": "^1.27.0", "lockedVersion": "1.27.0", "line": "1.x", "directLine": "1.27.x" },
+        { "name": "onnxruntime-web", "spec": "^1.27.0", "lockedVersion": "1.27.0", "line": "1.x", "directLine": "1.27.x" }
+      ],
+      "decision": "The direct native/web runtimes are pinned to 1.27.x; older nested Transformers.js runtime copies are reported and must remain within 1.x."
+    },
+    {
+      "id": "pdfjs-6-2",
+      "label": "PDF.js 6.2",
+      "packages": [
+        { "name": "pdfjs-dist", "spec": "^6.2.108", "lockedVersion": "6.2.108", "line": "6.2.x" }
+      ],
+      "decision": "PDF.js stays on the fixed 6.2 line with the malicious-document and runtime security gates."
+    },
+    {
+      "id": "playwright-1-61",
+      "label": "Playwright 1.61",
+      "packages": [
+        { "name": "playwright", "spec": "^1.61.1", "lockedVersion": "1.61.1", "line": "1.61.x" }
+      ],
+      "decision": "Playwright 1.61.x is accepted for the Chromium/Firefox smoke contract."
+    },
+    {
+      "id": "type-packages",
+      "label": "Current type packages",
+      "packages": [
+        { "name": "@types/node", "spec": "^24.13.2", "lockedVersion": "24.13.3", "line": "24.13.x" },
+        { "name": "@types/react", "spec": "^19.2.17", "lockedVersion": "19.2.17", "line": "19.2.x" },
+        { "name": "@types/react-dom", "spec": "^19.2.3", "lockedVersion": "19.2.3", "line": "19.2.x" }
+      ],
+      "decision": "Type declarations are reviewed with the strict renderer and Electron typecheck rather than upgraded independently."
+    },
+    {
+      "id": "typescript-6",
+      "label": "TypeScript 6",
+      "packages": [
+        { "name": "typescript", "spec": "~6.0.2", "lockedVersion": "6.0.3", "line": "6.0.x" }
+      ],
+      "decision": "TypeScript 6.0.x remains the tested compiler while the TypeScript 7 hold is explicit."
+    }
+  ],
+  "holds": [
+    {
+      "id": "typescript-7",
+      "package": "typescript",
+      "candidate": "7.x",
+      "status": "deferred",
+      "reason": "Do not adopt TypeScript 7 until its programmatic API and declarations are proven with Vite, oxlint, Vitest, React, and Electron by the full compatibility matrix.",
+      "requiredEvidence": "An isolated candidate install must pass npm test, npm run lint, npm run typecheck, npm run build, npm run smoke, npm run license:runtime, npm run sbom:check, and npm run capabilities:check."
+    },
+    {
+      "id": "transformers-4-3",
+      "package": "@huggingface/transformers",
+      "candidate": "4.3.x or newer",
+      "status": "deferred",
+      "reason": "The current 4.2.0 override remains in place until the registry API, Kokoro, Supertonic, KittenTTS, and Chatterbox suite passes under the candidate runtime.",
+      "requiredEvidence": "The candidate must dedupe its runtime graph and pass src/lib/transformers-v4.test.ts, src/lib/kokoro-assets.test.ts, src/lib/supertonic.test.ts, src/lib/kitten.test.ts, plus the full compatibility matrix."
+    }
+  ]
+}
