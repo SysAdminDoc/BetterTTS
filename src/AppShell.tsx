@@ -103,6 +103,7 @@ import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
+import { loadPortableBackup } from './lib/restore-recovery.ts'
 import { DEFAULT_UI_LOCALE, UI_LOCALE_STORAGE_KEY, UI_LOCALES, parseUiLocale, readUiLocale, uiText, type UiLocale } from './lib/ui-locale.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
@@ -2853,7 +2854,7 @@ function App() {
     if (backupAction) return
     setBackupAction('download')
     try {
-      const { createPortableBackup } = await import('./lib/backup.ts')
+      const { createPortableBackup } = await loadPortableBackup()
       const { blob, preview } = await createPortableBackup()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -2876,7 +2877,7 @@ function App() {
     if (!file || backupAction) return
     setBackupAction('inspect')
     try {
-      const { inspectPortableBackup } = await import('./lib/backup.ts')
+      const { inspectPortableBackup } = await loadPortableBackup()
       const preview = await inspectPortableBackup(file)
       setPendingBackup({ file, preview })
     } catch (error) {
@@ -2891,7 +2892,7 @@ function App() {
     if (!pendingBackup || backupAction) return
     setBackupAction('restore')
     try {
-      const { restorePortableBackup } = await import('./lib/backup.ts')
+      const { restorePortableBackup } = await loadPortableBackup()
       const preview = await restorePortableBackup(pendingBackup.file)
       setLibrary(await listClips())
       setQueueJobs(await listJobs())
@@ -2911,7 +2912,7 @@ function App() {
   }
 
   async function createProjectBytes(): Promise<{ bytes: Uint8Array; preview: BackupPreview }> {
-    const { createPortableBackup } = await import('./lib/backup.ts')
+    const { createPortableBackup } = await loadPortableBackup()
     const project = await createPortableBackup({
       settings: { 'bettertts-current-text': text },
     })
@@ -2984,7 +2985,7 @@ function App() {
     const file = new File([opened.bytes as Uint8Array<ArrayBuffer>], opened.name, {
       type: 'application/vnd.bettertts.backup+zip',
     })
-    const { inspectPortableBackup, restorePortableBackup } = await import('./lib/backup.ts')
+    const { inspectPortableBackup, restorePortableBackup } = await loadPortableBackup()
     const preview = await inspectPortableBackup(file)
     await restorePortableBackup(file)
     suppressProjectDirtyRef.current = true

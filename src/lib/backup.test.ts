@@ -1,7 +1,14 @@
 import 'fake-indexeddb/auto'
 import { unzipSync, zipSync } from 'fflate'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createPortableBackup, inspectPortableBackup, restorePortableBackup } from './backup.ts'
+import {
+  createPortableBackup,
+  inspectPortableBackup,
+  migrateRestoreJournal,
+  recoverPortableBackupRestore,
+  restorePortableBackup,
+  RESTORE_JOURNAL_DB_NAME,
+} from './backup.ts'
 import { clearLibrary, getClipBlob, listClips, saveClip } from './library.ts'
 import { deleteJob, getChunkBlob, listJobs, saveChunkBlob, saveJob, type QueueJob } from './queue.ts'
 
@@ -23,10 +30,12 @@ const localStorageStub: Storage = {
     storedSettings.delete(key)
   },
   setItem(key, value) {
+    if (rejectLightTheme && key === 'bettertts-theme' && value === 'light') throw new DOMException('Quota exceeded', 'QuotaExceededError')
     storedSettings.set(key, value)
   },
 }
 let availableQuota = 1024 * 1024 * 1024
+let rejectLightTheme = false
 
 const job: QueueJob = {
   schemaVersion: 2,
@@ -73,10 +82,12 @@ describe('portable backup', () => {
   })
 
   beforeEach(async () => {
+    await recoverPortableBackupRestore()
     await clearLibrary()
     for (const queued of await listJobs()) await deleteJob(queued.id)
     window.localStorage.clear()
     availableQuota = 1024 * 1024 * 1024
+    rejectLightTheme = false
   })
 
   it('round-trips clips, queue audio, and settings', async () => {
@@ -171,6 +182,126 @@ describe('portable backup', () => {
 
     await expect(inspectPortableBackup(backup.blob)).rejects.toThrow('storage quota')
     expect((await listClips()).map((clip) => clip.id)).toEqual(['clip'])
+  })
+
+  it('rolls back the staged replacement when a commit-time quota failure occurs', async () => {
+    await saveClip({
+      id: 'incoming',
+      filename: 'incoming.wav',
+      label: 'Incoming clip',
+      voice: 'af_heart',
+      speed: 1,
+      createdAt: 1,
+      size: 5,
+      duration: '1.0s',
+    }, new Blob(['inbox'], { type: 'audio/wav' }))
+    const backup = await createPortableBackup({ settings: { 'bettertts-theme': 'light' } })
+
+    await clearLibrary()
+    await saveClip({
+      id: 'current',
+      filename: 'current.wav',
+      label: 'Current clip',
+      voice: 'af_heart',
+      speed: 1,
+      createdAt: 2,
+      size: 6,
+      duration: '1.2s',
+    }, new Blob(['active'], { type: 'audio/wav' }))
+    window.localStorage.setItem('bettertts-theme', 'dark')
+    rejectLightTheme = true
+
+    await expect(restorePortableBackup(backup.blob)).rejects.toThrow(/Could not restore 1 local setting|previous local state/)
+    expect((await listClips()).map((clip) => clip.id)).toEqual(['current'])
+    expect(await (await getClipBlob('current'))!.text()).toBe('active')
+    expect(window.localStorage.getItem('bettertts-theme')).toBe('dark')
+  })
+
+  it('migrates a version-zero journal and demotes zombie queue chunks', () => {
+    const migrated = migrateRestoreJournal({
+      schemaVersion: 0,
+      phase: 'committing',
+      prepared: {
+        manifest: {
+          schemaVersion: 1,
+          createdAt: new Date().toISOString(),
+          clips: [],
+          jobs: [{ ...job, chunks: [{ ...job.chunks[0], status: 'generating' }] }],
+          settings: {},
+          assets: [],
+        },
+        files: { 'manifest.json': new Uint8Array([123, 125]) },
+      },
+      previous: { clips: [], jobs: [], settings: {} },
+    })
+    expect(migrated?.schemaVersion).toBe(1)
+    expect(migrated?.phase).toBe('committing')
+    expect(migrated?.prepared.manifest.jobs[0].chunks[0].status).toBe('pending')
+  })
+
+  it('recovers a journal left in the committing phase after a simulated crash', async () => {
+    await saveClip({
+      id: 'previous',
+      filename: 'previous.wav',
+      label: 'Previous clip',
+      voice: 'af_heart',
+      speed: 1,
+      createdAt: 1,
+      size: 8,
+      duration: '1.0s',
+    }, new Blob(['previous'], { type: 'audio/wav' }))
+    window.localStorage.setItem('bettertts-theme', 'dark')
+    const backup = await createPortableBackup()
+    const previous = {
+      clips: await Promise.all((await listClips()).map(async (record) => ({ record, blob: await getClipBlob(record.id) }))),
+      jobs: await Promise.all((await listJobs()).map(async (queued) => ({
+        job: queued,
+        blobs: (await Promise.all(queued.chunks.map(async (chunk) => {
+          const blob = await getChunkBlob(queued.id, chunk.index)
+          return blob ? { chunkIndex: chunk.index, blob } : null
+        }))).filter((entry): entry is { chunkIndex: number; blob: Blob } => entry !== null),
+      }))),
+      settings: { 'bettertts-theme': 'dark' },
+    }
+    await clearLibrary()
+    await saveClip({
+      id: 'partial',
+      filename: 'partial.wav',
+      label: 'Partial clip',
+      voice: 'af_heart',
+      speed: 1,
+      createdAt: 2,
+      size: 7,
+      duration: '1.0s',
+    }, new Blob(['partial'], { type: 'audio/wav' }))
+
+    const archiveFiles = unzipSync(new Uint8Array(await backup.blob.arrayBuffer()))
+    const manifest = JSON.parse(new TextDecoder().decode(archiveFiles['manifest.json']))
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(RESTORE_JOURNAL_DB_NAME, 1)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    const transaction = database.transaction('restore', 'readwrite')
+    transaction.objectStore('restore').put({
+      schemaVersion: 1,
+      restoreId: 'crashed-restore',
+      createdAt: new Date().toISOString(),
+      phase: 'committing',
+      prepared: { manifest, files: archiveFiles },
+      previous,
+    }, 'active')
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+    database.close()
+
+    await recoverPortableBackupRestore()
+    expect((await listClips()).map((clip) => clip.id)).toEqual(['previous'])
+    expect(await (await getClipBlob('previous'))!.text()).toBe('previous')
+    await recoverPortableBackupRestore()
   })
 
   it('rejects invalid records before changing local data', async () => {

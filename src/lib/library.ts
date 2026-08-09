@@ -1,5 +1,6 @@
 import type { Cue } from './subtitles.ts'
 import { publishStoreChange } from './coordination.ts'
+import { ensurePortableBackupRecovery } from './restore-recovery.ts'
 import type { RvcClipProvenance } from './rvc.ts'
 import type { VoiceProvenance } from './voice-lab.ts'
 import { migrateGenerationProvenance, type GenerationProvenanceManifest } from './provenance-migration.ts'
@@ -185,6 +186,7 @@ export async function saveClip(record: ClipRecord, blob: Blob): Promise<void> {
 }
 
 export async function listClips(): Promise<ClipRecord[]> {
+  await ensurePortableBackupRecovery()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(CLIPS_STORE, 'readonly')

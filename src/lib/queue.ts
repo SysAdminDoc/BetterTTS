@@ -1,5 +1,6 @@
 import type { AudioFormat } from './encode.ts'
 import { publishStoreChange } from './coordination.ts'
+import { ensurePortableBackupRecovery } from './restore-recovery.ts'
 import type { Cue } from './subtitles.ts'
 import type { NarratorRole } from './text.ts'
 import type { KokoroLocale, VoiceId } from './voices.ts'
@@ -128,6 +129,7 @@ export async function saveJob(job: QueueJob): Promise<void> {
 }
 
 export async function listJobs(): Promise<QueueJob[]> {
+  await ensurePortableBackupRecovery()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(JOBS_STORE, 'readonly')

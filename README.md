@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-565%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-568%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 565 tests across 96 test files
+- **Tests:** 568 tests across 96 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -212,7 +212,7 @@ The **RVC voice conversion** post-stage is available only in the Windows desktop
 
 The **Local OpenAI-compatible TTS server** is also desktop-only and starts only from **Voice chain -> Engine -> System & diagnostics**. It binds to `127.0.0.1` on the selected port (default `8765`) and exposes `GET /health`, `GET /v1/models`, and `POST /v1/audio/speech`. Each start displays a fresh Bearer token; send it as `Authorization: Bearer <token>` and stop/restart the server to revoke it. A minimal request is `{"input":"Hello","model":"kokoro","voice":"af_heart","response_format":"wav"}`; add `"stream":true` or `"stream_format":"sse"` for SSE events containing base64 audio chunks followed by `data: [DONE]`. Supported models are `kokoro`, `kokoro-82m`, `piper`, `piper-plus`, and `melo`; the native provider currently maps Piper voices to English Cori. Browser CORS is limited to the packaged `app://bettertts` origin and the explicit local development origins; unauthenticated, disallowed-origin, overloaded, and timed-out requests are rejected. The server does not expose browser-only engines and never listens on a non-loopback interface.
 
-The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically.
+The Windows app can create and open portable `.bettertts` projects from System tools. Projects contain editor state, settings, resumable queues, saved clips, and checksummed audio assets; an open project serializes autosaves and reports its saved/unsaved state. Atomic writes compare revision, SHA-256, mtime, and size, so an external edit offers reload, save-copy, explicit overwrite, or cancel instead of being silently replaced. Existing browser/PWA data can be restored from a `.bettertts-backup` and then saved as a project. Backup creation and restore share the same 512 MB archive/expanded-data ceiling, reject undeclared payloads, and restore queue metadata with its audio blobs atomically. Restore stages both the incoming archive and the previous local state in a versioned journal before replacement; a startup recovery pass rolls back an interrupted commit or removes a completed marker.
 
 Packaged Windows inference fails closed if a native model pack is missing, modified, on an unpinned revision, or blocked by its license. Development builds may explicitly opt into the old mutable fallback with `BETTERTTS_DEV_ALLOW_UNVERIFIED_MODEL_FALLBACK=1`; packaged builds ignore that flag.
 
@@ -242,7 +242,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (565 tests across 96 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (568 tests across 96 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

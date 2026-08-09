@@ -50,7 +50,7 @@ type BackupAsset = {
   type: string
 }
 
-type BackupManifest = {
+export type BackupManifest = {
   schemaVersion: 1
   createdAt: string
   clips: ClipRecord[]
@@ -72,6 +72,31 @@ type PreparedBackup = {
   files: Record<string, Uint8Array>
   preview: BackupPreview
 }
+
+export const RESTORE_JOURNAL_SCHEMA_VERSION = 1
+export const RESTORE_JOURNAL_DB_NAME = 'bettertts-backup-restore'
+
+type RestoreJournalPhase = 'staged' | 'committing' | 'committed' | 'rollback'
+
+export type RestoreJournal = {
+  schemaVersion: 1
+  restoreId: string
+  createdAt: string
+  phase: RestoreJournalPhase
+  prepared: {
+    manifest: BackupManifest
+    files: Record<string, Uint8Array>
+  }
+  previous: {
+    clips: ClipSnapshot[]
+    jobs: QueueJobSnapshot[]
+    settings: Record<string, string>
+  }
+}
+
+const RESTORE_JOURNAL_STORE = 'restore'
+const RESTORE_JOURNAL_KEY = 'active'
+let restoreJournalDbPromise: Promise<IDBDatabase> | null = null
 
 function archive(files: Record<string, Uint8Array>): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -100,6 +125,190 @@ function readBlob(blob: Blob): Promise<ArrayBuffer> {
     reader.onerror = () => reject(reader.error)
     reader.readAsArrayBuffer(blob)
   })
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function migrateJournalFiles(raw: unknown): Record<string, Uint8Array> | null {
+  const source = asRecord(raw)
+  if (!source) return null
+  const files: Record<string, Uint8Array> = {}
+  for (const [path, value] of Object.entries(source)) {
+    if (value instanceof Uint8Array) files[path] = value
+    else if (value instanceof ArrayBuffer) files[path] = new Uint8Array(value)
+    else return null
+  }
+  return files
+}
+
+function migrateJournalSnapshots(raw: unknown): RestoreJournal['previous'] | null {
+  const source = asRecord(raw)
+  const sourceSettings = asRecord(source?.settings)
+  if (!source || !Array.isArray(source.clips) || !Array.isArray(source.jobs) || !sourceSettings) return null
+  const clips: ClipSnapshot[] = []
+  for (const value of source.clips) {
+    const snapshot = asRecord(value)
+    const record = migrateClipRecord(snapshot?.record)
+    const blob = snapshot?.blob
+    if (!record || (blob !== null && !(typeof Blob !== 'undefined' && blob instanceof Blob))) return null
+    clips.push({ record, blob: blob as Blob | null })
+  }
+  const jobs: QueueJobSnapshot[] = []
+  for (const value of source.jobs) {
+    const snapshot = asRecord(value)
+    const job = migrateQueueJob(snapshot?.job)
+    if (!snapshot || !Array.isArray(snapshot.blobs)) return null
+    const blobs: QueueJobSnapshot['blobs'] = []
+    for (const rawBlob of snapshot.blobs) {
+      const entry = asRecord(rawBlob)
+      const chunkIndex = Number(entry?.chunkIndex)
+      if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || !(typeof Blob !== 'undefined' && entry?.blob instanceof Blob)) return null
+      blobs.push({ chunkIndex, blob: entry.blob as Blob })
+    }
+    jobs.push({ job, blobs })
+  }
+  const settings: Record<string, string> = {}
+  for (const [key, value] of Object.entries(sourceSettings)) {
+    if (typeof value !== 'string') return null
+    settings[key] = value
+  }
+  return { clips, jobs, settings }
+}
+
+/** Migrate the restore journal independently from the backup manifest. */
+export function migrateRestoreJournal(raw: unknown): RestoreJournal | null {
+  const source = asRecord(raw)
+  if (!source || (source.schemaVersion !== 0 && source.schemaVersion !== RESTORE_JOURNAL_SCHEMA_VERSION)) return null
+  const preparedSource = asRecord(source.prepared) ?? source
+  const manifestSource = asRecord(preparedSource.manifest)
+  if (
+    !manifestSource
+    || manifestSource.schemaVersion !== BACKUP_SCHEMA_VERSION
+    || typeof manifestSource.createdAt !== 'string'
+    || !Array.isArray(manifestSource.clips)
+    || !Array.isArray(manifestSource.jobs)
+    || !Array.isArray(manifestSource.assets)
+    || !asRecord(manifestSource.settings)
+  ) return null
+  const clips = manifestSource.clips.map(migrateClipRecord).filter((record): record is ClipRecord => record !== null)
+  if (clips.length !== manifestSource.clips.length) return null
+  const jobs = manifestSource.jobs.map(migrateQueueJob)
+  const assets = manifestSource.assets.flatMap((value) => {
+    const asset = asRecord(value)
+    return asset
+      && typeof asset.path === 'string'
+      && Number.isSafeInteger(asset.size)
+      && Number(asset.size) >= 0
+      && typeof asset.sha256 === 'string'
+      && typeof asset.type === 'string'
+      ? [{ path: asset.path, size: Number(asset.size), sha256: asset.sha256, type: asset.type }]
+      : []
+  })
+  if (assets.length !== manifestSource.assets.length) return null
+  const manifestSettings = asRecord(manifestSource.settings)
+  if (!manifestSettings) return null
+  const settings: Record<string, string> = {}
+  for (const [key, value] of Object.entries(manifestSettings)) {
+    if (typeof value !== 'string') return null
+    settings[key] = value
+  }
+  const files = migrateJournalFiles(preparedSource.files)
+  const previous = migrateJournalSnapshots(source.previous)
+  if (!files || !previous) return null
+  const phase = source.phase === 'committing' || source.phase === 'committed' || source.phase === 'rollback'
+    ? source.phase
+    : 'staged'
+  return {
+    schemaVersion: RESTORE_JOURNAL_SCHEMA_VERSION,
+    restoreId: typeof source.restoreId === 'string' && source.restoreId ? source.restoreId : 'legacy-restore',
+    createdAt: typeof source.createdAt === 'string' ? source.createdAt : new Date(0).toISOString(),
+    phase,
+    prepared: {
+      manifest: {
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        createdAt: manifestSource.createdAt,
+        clips,
+        jobs,
+        settings,
+        assets,
+      },
+      files,
+    },
+    previous,
+  }
+}
+
+function openRestoreJournalDb(): Promise<IDBDatabase> {
+  if (restoreJournalDbPromise) return restoreJournalDbPromise
+  restoreJournalDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(RESTORE_JOURNAL_DB_NAME, 1)
+    let settled = false
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(RESTORE_JOURNAL_STORE)) request.result.createObjectStore(RESTORE_JOURNAL_STORE)
+    }
+    request.onblocked = () => {
+      settled = true
+      restoreJournalDbPromise = null
+      reject(new Error('Backup restore journal is blocked by another tab.'))
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      if (settled) {
+        db.close()
+        return
+      }
+      settled = true
+      db.onversionchange = () => {
+        db.close()
+        restoreJournalDbPromise = null
+      }
+      resolve(db)
+    }
+    request.onerror = () => {
+      settled = true
+      restoreJournalDbPromise = null
+      reject(request.error)
+    }
+  })
+  return restoreJournalDbPromise
+}
+
+function journalTransactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error ?? new DOMException('Restore journal transaction aborted', 'AbortError'))
+  })
+}
+
+async function readRestoreJournal(): Promise<RestoreJournal | null> {
+  const db = await openRestoreJournalDb()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(RESTORE_JOURNAL_STORE, 'readonly')
+    const request = transaction.objectStore(RESTORE_JOURNAL_STORE).get(RESTORE_JOURNAL_KEY)
+    request.onsuccess = () => {
+      const journal = request.result === undefined ? null : migrateRestoreJournal(request.result)
+      if (request.result !== undefined && !journal) reject(new Error('Backup restore journal schema is unsupported or corrupt.'))
+      else resolve(journal)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function writeRestoreJournal(journal: RestoreJournal): Promise<void> {
+  const db = await openRestoreJournalDb()
+  const transaction = db.transaction(RESTORE_JOURNAL_STORE, 'readwrite')
+  transaction.objectStore(RESTORE_JOURNAL_STORE).put(journal, RESTORE_JOURNAL_KEY)
+  await journalTransactionDone(transaction)
+}
+
+async function clearRestoreJournal(): Promise<void> {
+  const db = await openRestoreJournalDb()
+  const transaction = db.transaction(RESTORE_JOURNAL_STORE, 'readwrite')
+  transaction.objectStore(RESTORE_JOURNAL_STORE).delete(RESTORE_JOURNAL_KEY)
+  await journalTransactionDone(transaction)
 }
 
 function safePath(path: string): boolean {
@@ -306,6 +515,40 @@ function validateManifestRecords(manifest: BackupManifest): void {
   }
 }
 
+async function validateRestoreJournalPayload(journal: RestoreJournal): Promise<void> {
+  if (!Number.isFinite(Date.parse(journal.createdAt))) throw new Error('Backup restore journal creation date is invalid.')
+  validateManifestRecords(journal.prepared.manifest)
+  const expectedPaths = new Set(['manifest.json', ...journal.prepared.manifest.assets.map((asset) => asset.path)])
+  const actualPaths = Object.keys(journal.prepared.files)
+  if (actualPaths.length !== expectedPaths.size || actualPaths.some((path) => !expectedPaths.has(path))) {
+    throw new Error('Backup restore journal staging files do not match its manifest.')
+  }
+  const manifestBytes = journal.prepared.files['manifest.json']
+  if (!manifestBytes) throw new Error('Backup restore journal is missing its staged manifest.')
+  let stagedManifest: unknown
+  try {
+    stagedManifest = JSON.parse(new TextDecoder().decode(manifestBytes))
+  } catch {
+    throw new Error('Backup restore journal manifest is not valid JSON.')
+  }
+  if (!migrateRestoreJournal({
+    schemaVersion: RESTORE_JOURNAL_SCHEMA_VERSION,
+    restoreId: journal.restoreId,
+    createdAt: journal.createdAt,
+    phase: journal.phase,
+    prepared: { manifest: stagedManifest, files: journal.prepared.files },
+    previous: journal.previous,
+  })) {
+    throw new Error('Backup restore journal manifest is unsupported.')
+  }
+  for (const asset of journal.prepared.manifest.assets) {
+    const bytes = journal.prepared.files[asset.path]
+    if (!bytes || bytes.byteLength !== asset.size || await sha256(bytes) !== asset.sha256) {
+      throw new Error(`Backup restore journal asset failed validation: ${asset.path}`)
+    }
+  }
+}
+
 async function prepareBackup(file: Blob): Promise<PreparedBackup> {
   if (file.size > MAX_BACKUP_BYTES) throw new Error('Backup is larger than 512 MB.')
   const source = new Uint8Array(await readBlob(file))
@@ -413,6 +656,35 @@ async function clearQueue() {
   for (const job of await listJobs()) await deleteJob(job.id)
 }
 
+function snapshotAudioBytes(snapshot: RestoreJournal['previous']): number {
+  return snapshot.clips.reduce((total, entry) => total + (entry.blob?.size ?? 0), 0)
+    + snapshot.jobs.reduce((total, job) => total + job.blobs.reduce((sum, entry) => sum + entry.blob.size, 0), 0)
+}
+
+async function assertRestoreStagingQuota(prepared: PreparedBackup, previous: RestoreJournal['previous']): Promise<void> {
+  const estimate = await navigator.storage?.estimate?.()
+  if (!estimate?.quota) return
+  const manifestBytes = prepared.files['manifest.json']?.byteLength ?? 0
+  const previousMetadataBytes = new TextEncoder().encode(JSON.stringify({
+    clips: previous.clips.map((entry) => entry.record),
+    jobs: previous.jobs.map((entry) => entry.job),
+    settings: previous.settings,
+  })).byteLength
+  const stagedBytes = prepared.preview.audioBytes + snapshotAudioBytes(previous) + manifestBytes + previousMetadataBytes
+  const usage = estimate.usage ?? 0
+  if (!Number.isFinite(stagedBytes) || usage + stagedBytes > estimate.quota * 0.9) {
+    throw new Error('Backup restore staging exceeds 90% of this browser storage quota.')
+  }
+}
+
+async function restorePreviousState(previous: RestoreJournal['previous']): Promise<void> {
+  await clearLibrary()
+  await clearQueue()
+  await restoreClipSnapshots(previous.clips)
+  for (const job of previous.jobs) await restoreQueueJob(job)
+  restoreSettings(previous.settings)
+}
+
 async function applyPreparedBackup(prepared: PreparedBackup) {
   await clearLibrary()
   await clearQueue()
@@ -454,22 +726,72 @@ async function applyPreparedBackup(prepared: PreparedBackup) {
   restoreSettings(prepared.manifest.settings)
 }
 
-export async function restorePortableBackup(file: Blob): Promise<BackupPreview> {
+async function stagePortableBackup(file: Blob): Promise<RestoreJournal> {
+  await recoverPortableBackupRestore()
   const prepared = await prepareBackup(file)
   const previous = await snapshotCurrentState()
+  await assertRestoreStagingQuota(prepared, previous)
+  const journal: RestoreJournal = {
+    schemaVersion: RESTORE_JOURNAL_SCHEMA_VERSION,
+    restoreId: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    phase: 'staged',
+    prepared: { manifest: prepared.manifest, files: prepared.files },
+    previous,
+  }
+  await validateRestoreJournalPayload(journal)
   try {
-    await applyPreparedBackup(prepared)
+    await writeRestoreJournal(journal)
+  } catch (error) {
+    throw new Error(`Could not stage portable backup before replacing local state: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return journal
+}
+
+async function commitStagedRestore(): Promise<BackupPreview> {
+  const staged = await readRestoreJournal()
+  if (!staged) throw new Error('Portable backup restore journal is missing.')
+  if (staged.phase !== 'staged') throw new Error('Portable backup restore journal is not ready to commit.')
+  await validateRestoreJournalPayload(staged)
+  const committing: RestoreJournal = { ...staged, phase: 'committing' }
+  await writeRestoreJournal(committing)
+  try {
+    await applyPreparedBackup({ manifest: committing.prepared.manifest, files: committing.prepared.files, preview: previewFor(committing.prepared.manifest) })
+    await writeRestoreJournal({ ...committing, phase: 'committed' })
+    // A committed marker is authoritative. If cleanup is interrupted, startup
+    // recovery only removes this journal and never rolls back a successful restore.
+    await clearRestoreJournal().catch(() => {})
   } catch (error) {
     try {
-      await clearLibrary()
-      await clearQueue()
-      await restoreClipSnapshots(previous.clips)
-      for (const job of previous.jobs) await restoreQueueJob(job)
-      restoreSettings(previous.settings)
+      await writeRestoreJournal({ ...committing, phase: 'rollback' }).catch(() => {})
+      await restorePreviousState(committing.previous)
+      await clearRestoreJournal()
     } catch {
       throw new Error('Backup restore failed and the previous local state could not be fully restored.')
     }
     throw error
   }
-  return prepared.preview
+  return previewFor(committing.prepared.manifest)
+}
+
+/** Recover a restore interrupted after its commit marker was written. */
+export async function recoverPortableBackupRestore(): Promise<void> {
+  const journal = await readRestoreJournal()
+  if (!journal) return
+  if (journal.phase === 'staged' || journal.phase === 'committed') {
+    await clearRestoreJournal()
+    return
+  }
+  await validateRestoreJournalPayload(journal)
+  try {
+    await restorePreviousState(journal.previous)
+    await clearRestoreJournal()
+  } catch {
+    throw new Error('Interrupted backup restore could not be rolled back; the journal was retained for another startup recovery attempt.')
+  }
+}
+
+export async function restorePortableBackup(file: Blob): Promise<BackupPreview> {
+  await stagePortableBackup(file)
+  return commitStagedRestore()
 }

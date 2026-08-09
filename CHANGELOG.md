@@ -10,6 +10,9 @@
 - Qwen desktop setup now uses a Windows/Python 3.12 runtime manifest with a fully hashed pip lock, staged venv promotion and crash recovery, offline wheelhouse repair, disk/memory/GPU preflight, immutable model revision and per-file verification, and bounded setup/generation timeouts; the bridge reports qwenVersion and torchVersion consistently.
 - Native Sherpa pack setup now single-flights concurrent installs per pinned pack, while the inference host owns one request at a time, implements cancel-one/cancel-all, bounds PCM transport to 512 MiB, and restarts after a hung generation or blocked cancellation.
 
+### Changed
+- Portable backup restore now stages the incoming archive and previous local state in a versioned journal before replacing IndexedDB data, commits only after verification, and rolls back or cleans up interrupted restores on the next startup.
+
 ## v0.23.0 - 2026-08-03
 
 ### Added
