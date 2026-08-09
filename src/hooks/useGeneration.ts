@@ -1,17 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, type Dispatch } from 'react'
+import { generationReducer, INITIAL_GENERATION_STATE, type GenerationStats } from '../lib/app-shell-state.ts'
 
-export type GenerationStats = {
-  elapsed: number
-  chars: number
-  audioDuration: number
-  timeToFirstAudioMs: number | null
-}
+export type { GenerationStats } from '../lib/app-shell-state.ts'
 
 export function useGeneration() {
-  const [progress, setProgress] = useState<number | null>(null)
-  const [status, setStatus] = useState('Ready')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [genStats, setGenStats] = useState<GenerationStats | null>(null)
+  const [state, dispatch] = useReducer(generationReducer, INITIAL_GENERATION_STATE)
   const progressTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const abortRef = useRef(false)
   const generationAbortRef = useRef<AbortController | null>(null)
@@ -29,15 +22,25 @@ export function useGeneration() {
     generationAbortRef.current?.abort()
   }, [clearProgressResetTimer])
 
+  const setProgress = useCallback((value: number | null) => dispatch({ type: 'set-progress', value }), [])
+  const setStatus = useCallback((value: string) => dispatch({ type: 'set-status', value }), [])
+  const setIsGenerating = useCallback((value: boolean) => dispatch({ type: 'set-busy', value }), [])
+  const setGenStats = useCallback((value: GenerationStats | null) => dispatch({ type: 'set-stats', value }), [])
+
   return {
-    progress,
+    progress: state.progress,
     setProgress,
-    status,
+    status: state.status,
     setStatus,
-    isGenerating,
+    isGenerating: state.phase === 'starting' || state.phase === 'running' || state.phase === 'cancelling',
     setIsGenerating,
-    genStats,
+    genStats: state.stats,
     setGenStats,
+    generationPhase: state.phase,
+    generationError: state.error,
+    generationRunId: state.runId,
+    partialOutput: state.partialOutput,
+    dispatchGeneration: dispatch as Dispatch<Parameters<typeof generationReducer>[1]>,
     progressTimerRef,
     abortRef,
     generationAbortRef,

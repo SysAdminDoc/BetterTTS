@@ -19,6 +19,7 @@
 - Long-form playback now has an explicit resource contract: queue players are capped and evicted safely, waveform reads are bounded and abortable, streaming synthesis applies audio-buffer backpressure, WebCodecs resources close on cancellation, and Media Session/choppiness behavior is covered by deterministic tests.
 - Offline Kokoro q8 packs now commit through versioned manifests and markers with per-pack locking, verified size/hash records, quota and persistence telemetry, stale-build cleanup, and resumable staging across both model caches.
 - Browser smoke now runs axe-compatible accessibility rules, live-region and accessible-name/value checks, fold focus-return and 200% text-spacing checks across Chromium, hidden Electron, and Firefox compatibility surfaces.
+- AppShell domain transitions now have typed generation, queue, project, reader, persistence, playback, and diagnostics contracts; generation and queue hooks use the contracts while legacy I/O remains staged behind them.
 - The initial-shell performance budget now accounts for the small shared playback contract while keeping waveform and streaming scheduler code lazy.
 
 ## v0.23.0 - 2026-08-03

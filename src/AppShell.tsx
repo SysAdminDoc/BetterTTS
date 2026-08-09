@@ -1796,6 +1796,7 @@ function App() {
     setIsGenerating,
     genStats,
     setGenStats,
+    dispatchGeneration: dispatchGenerationState,
     progressTimerRef,
     abortRef,
     generationAbortRef,
@@ -4594,6 +4595,7 @@ function App() {
     abortRef.current = false
     const generationController = new AbortController()
     generationAbortRef.current = generationController
+    dispatchGenerationState({ type: 'start', runId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, status: 'Starting generation' })
     setGenStats(null)
     generatingRef.current = true
     setIsGenerating(true)
