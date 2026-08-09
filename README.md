@@ -151,6 +151,9 @@ npm run dev
 # Run tests
 npm test
 
+# Check UI catalog completeness and production string usage
+npm run locale:check
+
 # Verify runtime license coverage
 npm run license:runtime
 
@@ -193,7 +196,7 @@ Use **Voice chain -> Engine -> System & diagnostics -> Diagnostics -> Copy JSON*
 
 BetterTTS currently pins `@huggingface/transformers` to 4.2.0 through the root npm override. Do not switch to 4.3+ until the candidate install dedupes with `npm ls @huggingface/transformers`, the Kokoro/Supertonic/Kitten compatibility tests pass under that candidate (`npx vitest run src/lib/transformers-v4.test.ts src/lib/kokoro-assets.test.ts src/lib/supertonic.test.ts src/lib/kitten.test.ts`), and the full `npm test`, `npm run lint`, `npm run build`, and `npm run smoke` checks pass. Cross-Origin Storage is feature-detected only; the default model path stays on the per-origin Cache API until native browser support is available without an extension or polyfill.
 
-Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, the browser-extension text handoff, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, PWA screenshot manifest assets, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json`; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
+Run `npm run smoke` for a local production-build browser check. It serves `dist/` at `/BetterTTS/`, verifies both themes, semantic navigation and display preferences, mobile navigation, keyboard tabs, diagnostics and update actions, the browser-extension text handoff, listening-trainer/prosody controls, capability-gated Document PiP and audio-output controls, queue/library playback and Undo recovery, subtitle/ASS controls, empty states, M4B capability state, PWA screenshot manifest assets, initial-shell lazy-load boundaries, time to interactive, and unexpected console noise. Nine required screen captures plus `summary.json` are written to `dist/smoke/`; missing or empty captures fail the run. Every production build also enforces the raw/gzip shell and lazy-runtime limits in `scripts/performance-budget.json` and runs the reviewed UI locale catalog gate; `npm run typecheck` covers renderer and Electron sources, and `npm run desktop:probe-host` checks the same pinned fixture's time to first audio and real-time factor.
 
 `npm run desktop:smoke` runs the built Electron shell through the model-free native-window contract and checks theme switching, focus-visible keyboard reachability, smoke-safe file-picker cancellation, diagnostics, updater no-op state, and display-aware screenshot capture. On Windows, run GUI smoke through the repository's private-desktop visual-isolation harness so the window never enters the interactive desktop.
 

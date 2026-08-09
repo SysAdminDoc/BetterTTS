@@ -22,6 +22,7 @@
 - AppShell domain transitions now have typed generation, queue, project, reader, persistence, playback, and diagnostics contracts; generation and queue hooks use the contracts while legacy I/O remains staged behind them.
 - Production delivery now bundles the theme bootstrap as a verified module, removes ephone's unreachable Node built-in path from browser output, and enforces initial-byte, per-asset, and lazy-ownership budgets.
 - The initial-shell performance budget now accounts for the small shared playback contract while keeping waveform and streaming scheduler code lazy.
+- UI copy now has a versioned reviewed-locale catalog with build-time extraction/completeness checks, plural/number/date formatting, recovery/error coverage, and document-direction attributes independent of synthesis-language selection.
 
 ## v0.23.0 - 2026-08-03
 

@@ -104,6 +104,13 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Locale direction is set by the catalog adapter. Keep the layout contract
+   on the document root so future reviewed RTL catalogs inherit it without
+   coupling synthesis-language choices to UI layout. */
+:root[dir='rtl'] {
+  direction: rtl;
+}
+
 /* Anchor targets must clear the 56px sticky topbar instead of sliding under it. */
 [id] {
   scroll-margin-top: 72px;

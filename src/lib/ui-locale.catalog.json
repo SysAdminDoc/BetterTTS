@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "locales": [
+    {
+      "id": "en",
+      "tag": "en",
+      "label": "English",
+      "reviewed": true,
+      "direction": "ltr"
+    }
+  ],
+  "requiredTextKeys": [
+    "interfaceLanguage",
+    "synthesisLanguage",
+    "persistenceUnavailable",
+    "generationCancelled",
+    "shareUnavailable",
+    "articleImportFallback",
+    "articleImportTimeout",
+    "articleImportCancelled",
+    "qualityReviewHint",
+    "unexpectedInterfaceError"
+  ],
+  "requiredPluralKeys": [
+    "qualityChecks"
+  ],
+  "catalog": {
+    "en": {
+      "text": {
+        "interfaceLanguage": "Interface language",
+        "synthesisLanguage": "Synthesis language",
+        "persistenceUnavailable": "Settings and crash-recovery text cannot be saved by this browser. This session still works, but export or save a project before closing.",
+        "generationCancelled": "Generation cancelled.",
+        "shareUnavailable": "Share cancelled or unavailable.",
+        "articleImportFallback": "Could not read that page — most sites block cross-origin reads. Paste the article text instead.",
+        "articleImportTimeout": "Article import timed out. Paste the text instead.",
+        "articleImportCancelled": "Article import cancelled. The current script was kept.",
+        "qualityReviewHint": "See Diagnostics before exporting.",
+        "unexpectedInterfaceError": "An unexpected interface error interrupted this session. Reload to recover; saved clips and queued jobs remain on this device."
+      },
+      "plurals": {
+        "qualityChecks": {
+          "one": "Audio ready, but {count} quality check needs review. See Diagnostics before exporting.",
+          "other": "Audio ready, but {count} quality checks need review. See Diagnostics before exporting."
+        }
+      }
+    }
+  }
+}

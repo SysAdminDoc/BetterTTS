@@ -103,7 +103,7 @@ import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
 import { getPersistenceOutcome, writePersistentSetting } from './lib/persistence.ts'
 import { loadPortableBackup } from './lib/restore-recovery.ts'
-import { DEFAULT_UI_LOCALE, UI_LOCALE_STORAGE_KEY, UI_LOCALES, parseUiLocale, readUiLocale, uiText, type UiLocale } from './lib/ui-locale.ts'
+import { DEFAULT_UI_LOCALE, UI_LOCALE_STORAGE_KEY, UI_LOCALES, applyUiLocaleAttributes, parseUiLocale, readUiLocale, uiPlural, uiText, type UiLocale } from './lib/ui-locale.ts'
 import { validateBackgroundMusicFile } from './lib/audio-file.ts'
 import type { BackupPreview } from './lib/backup.ts'
 import { subscribeToStoreChanges, withJobLease } from './lib/coordination.ts'
@@ -1512,7 +1512,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
           <section className="fatal-panel" role="alert" aria-labelledby="fatal-title">
             <AlertCircle size={32} aria-hidden="true" />
             <h1 id="fatal-title">BetterTTS needs to restart</h1>
-            <p>An unexpected interface error interrupted this session. Reload to recover; saved clips and queued jobs remain on this device.</p>
+            <p>{uiText(DEFAULT_UI_LOCALE, 'unexpectedInterfaceError')}</p>
             <button type="button" onClick={() => window.location.reload()}>
               <RefreshCw size={16} aria-hidden="true" />
               Reload BetterTTS
@@ -2363,7 +2363,7 @@ function App() {
         persistenceWarnedRef.current = true
         showToast({
           tone: 'warn',
-          message: 'Settings and crash-recovery text cannot be saved by this browser. This session still works, but export or save a project before closing.',
+          message: uiText(uiLocale, 'persistenceUnavailable'),
         })
       }
     }
@@ -2380,6 +2380,7 @@ function App() {
   }, [theme])
 
   useEffect(() => {
+    applyUiLocaleAttributes(document.documentElement, uiLocale)
     persistSetting(UI_LOCALE_STORAGE_KEY, uiLocale)
   }, [uiLocale])
 
@@ -4090,7 +4091,7 @@ function App() {
 
     if (abortRef.current) {
       setStatus('Cancelled')
-      showToast({ tone: 'warn', message: 'Generation cancelled.' })
+      showToast({ tone: 'warn', message: uiText(uiLocale, 'generationCancelled') })
       return
     }
 
@@ -4368,10 +4369,10 @@ function App() {
     setGenStats({ elapsed, chars: totalChars, audioDuration, timeToFirstAudioMs })
     if (abortRef.current) {
       setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
-      showToast({ tone: 'warn', message: 'Generation cancelled.' })
+      showToast({ tone: 'warn', message: uiText(uiLocale, 'generationCancelled') })
     } else if (dispatchResult.needsReview.length > 0) {
       setStatus(`Local audio ready — ${dispatchResult.needsReview.length} segment${dispatchResult.needsReview.length === 1 ? '' : 's'} need review`)
-      showToast({ tone: 'warn', message: `Audio ready, but ${dispatchResult.needsReview.length} quality check${dispatchResult.needsReview.length === 1 ? '' : 's'} need review. See Diagnostics before exporting.` })
+      showToast({ tone: 'warn', message: uiPlural(uiLocale, 'qualityChecks', dispatchResult.needsReview.length) })
     } else if (flaggedSentences > 0) {
       setStatus('Local audio ready — completeness check flagged output')
       showToast({ tone: 'warn', message: `Audio ready, but ${flaggedSentences} sentence${flaggedSentences === 1 ? ' was' : 's were'} flagged as possibly truncated or missing — details in Diagnostics.` })
@@ -4623,7 +4624,7 @@ function App() {
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         setStatus('Cancelled')
-        showToast({ tone: 'warn', message: 'Generation cancelled.' })
+        showToast({ tone: 'warn', message: uiText(uiLocale, 'generationCancelled') })
         return
       }
       const message = error instanceof Error ? error.message : 'Generation failed.'
@@ -4718,7 +4719,7 @@ function App() {
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        showToast({ tone: 'warn', message: 'Share cancelled or unavailable.' })
+        showToast({ tone: 'warn', message: uiText(uiLocale, 'shareUnavailable') })
       }
     }
   }
@@ -4801,13 +4802,13 @@ function App() {
       // Tell the user what actually failed — timeout, HTTP status, unreadable
       // page, and CORS blocks are different problems with different fixes.
       recordDiagnosticEvent('warn', err, 'article.import')
-      let message = 'Could not read that page — most sites block cross-origin reads. Paste the article text instead.'
+      let message = uiText(uiLocale, 'articleImportFallback')
       if (controller.signal.aborted) {
         message = controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError'
-          ? 'Article import timed out. Paste the text instead.'
-          : 'Article import cancelled. The current script was kept.'
+          ? uiText(uiLocale, 'articleImportTimeout')
+          : uiText(uiLocale, 'articleImportCancelled')
       } else if (err instanceof DOMException && err.name === 'TimeoutError') {
-        message = 'Article import timed out. Paste the text instead.'
+        message = uiText(uiLocale, 'articleImportTimeout')
       } else if (err instanceof Error && err.name === 'ArticleImportPolicyError') {
         const { formatArticleImportPolicyMessage } = await import('./lib/article-import.ts')
         message = formatArticleImportPolicyMessage(err)

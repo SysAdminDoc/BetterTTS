@@ -936,6 +936,11 @@ async function runSmoke() {
     const interfaceLanguage = desktop.page.locator('#ui-locale')
     await interfaceLanguage.waitFor({ timeout: 20000 })
     if (await interfaceLanguage.inputValue() !== 'en') throw new Error('UI locale did not default to reviewed English')
+    const uiLocaleRoot = await desktop.page.evaluate(() => ({
+      lang: document.documentElement.getAttribute('lang'),
+      dir: document.documentElement.getAttribute('dir'),
+    }))
+    if (uiLocaleRoot.lang !== 'en' || uiLocaleRoot.dir !== 'ltr') throw new Error(`UI locale root attributes are incorrect: ${JSON.stringify(uiLocaleRoot)}`)
     const synthesisLanguage = desktop.page.locator('#locale')
     const initialSynthesisLanguage = await synthesisLanguage.inputValue()
     await synthesisLanguage.selectOption('ja')
