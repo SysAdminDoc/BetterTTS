@@ -20,6 +20,7 @@
 - Offline Kokoro q8 packs now commit through versioned manifests and markers with per-pack locking, verified size/hash records, quota and persistence telemetry, stale-build cleanup, and resumable staging across both model caches.
 - Browser smoke now runs axe-compatible accessibility rules, live-region and accessible-name/value checks, fold focus-return and 200% text-spacing checks across Chromium, hidden Electron, and Firefox compatibility surfaces.
 - AppShell domain transitions now have typed generation, queue, project, reader, persistence, playback, and diagnostics contracts; generation and queue hooks use the contracts while legacy I/O remains staged behind them.
+- Production delivery now bundles the theme bootstrap as a verified module, removes ephone's unreachable Node built-in path from browser output, and enforces initial-byte, per-asset, and lazy-ownership budgets.
 - The initial-shell performance budget now accounts for the small shared playback contract while keeping waveform and streaming scheduler code lazy.
 
 ## v0.23.0 - 2026-08-03

@@ -68,6 +68,40 @@ const measuredAssets = await Promise.all(
 
 const failures = []
 assertWithinBudget('initial shell', shell, budget.shell, failures)
+const shellPatterns = budget.shell.forbiddenInitialAssetPatterns ?? []
+const forbiddenInitialAssets = shellFiles.filter((asset) => shellPatterns.some((pattern) => asset.file.toLowerCase().includes(String(pattern).toLowerCase())))
+if (forbiddenInitialAssets.length > 0) {
+  failures.push(`initial shell contains forbidden lazy assets: ${forbiddenInitialAssets.map((asset) => asset.file).join(', ')}`)
+}
+if (Number.isFinite(budget.shell.maxInitialRequests) && shellFiles.length > budget.shell.maxInitialRequests) {
+  failures.push(`initial shell requests ${shellFiles.length} assets, exceeding ${budget.shell.maxInitialRequests}`)
+}
+
+const assetOwnershipBudget = budget.assetOwnership ?? {}
+for (const asset of measuredAssets) {
+  if (asset.rawBytes > assetOwnershipBudget.maxAssetRawBytes) {
+    failures.push(`${asset.file} raw ${formatBytes(asset.rawBytes)} exceeds per-asset ${formatBytes(assetOwnershipBudget.maxAssetRawBytes)}`)
+  }
+  if (asset.gzipBytes > assetOwnershipBudget.maxAssetGzipBytes) {
+    failures.push(`${asset.file} gzip ${formatBytes(asset.gzipBytes)} exceeds per-asset ${formatBytes(assetOwnershipBudget.maxAssetGzipBytes)}`)
+  }
+}
+const ownership = {}
+const ownedFiles = new Set()
+for (const owner of assetOwnershipBudget.patterns ?? []) {
+  const files = measuredAssets.filter((asset) => owner.patterns.some((pattern) => basename(asset.file).includes(pattern)))
+  ownership[owner.name] = { ...sumFiles(files), files }
+  for (const file of files) ownedFiles.add(file.file)
+}
+const unownedFiles = measuredAssets.filter((asset) => !ownedFiles.has(asset.file))
+const unowned = sumFiles(unownedFiles)
+if (unowned.rawBytes > (assetOwnershipBudget.maxUnownedRawBytes ?? 0)) {
+  failures.push(`unowned lazy assets raw ${formatBytes(unowned.rawBytes)} exceeds ${formatBytes(assetOwnershipBudget.maxUnownedRawBytes)}`)
+}
+if (unowned.gzipBytes > (assetOwnershipBudget.maxUnownedGzipBytes ?? 0)) {
+  failures.push(`unowned lazy assets gzip ${formatBytes(unowned.gzipBytes)} exceeds ${formatBytes(assetOwnershipBudget.maxUnownedGzipBytes)}`)
+}
+
 const lazyBoundaries = {}
 for (const [name, boundary] of Object.entries(budget.lazyBoundaries)) {
   const files = measuredAssets.filter((asset) => boundary.patterns.some((pattern) => basename(asset.file).includes(pattern)))
@@ -84,6 +118,7 @@ const report = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
   shell,
+  ownership: { ...unowned, files: unownedFiles, boundaries: ownership },
   lazyBoundaries,
 }
 await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)

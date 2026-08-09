@@ -4,6 +4,7 @@
     "maxRawBytes": 614000,
     "maxGzipBytes": 177000,
     "maxTimeToInteractiveMs": 5000,
+    "maxInitialRequests": 8,
     "forbiddenInitialAssetPatterns": [
       "document",
       "epub",
@@ -30,9 +31,9 @@
       "maxGzipBytes": 850000
     },
     "multilingual-g2p": {
-      "patterns": ["ephone", "phonemizer", "roa-", "all-"],
-      "maxRawBytes": 41000000,
-      "maxGzipBytes": 30000000
+      "patterns": ["ephone", "phonemizer", "roa-", "all-", "sit-", "jpx-", "en-us-"],
+      "maxRawBytes": 46500000,
+      "maxGzipBytes": 34500000
     },
     "transformers-runtime": {
       "patterns": ["transformers.web"],
@@ -59,6 +60,24 @@
       "maxRawBytes": 125000,
       "maxGzipBytes": 55000
     }
+  },
+  "assetOwnership": {
+    "maxAssetRawBytes": 65000000,
+    "maxAssetGzipBytes": 23000000,
+    "maxUnownedRawBytes": 120000,
+    "maxUnownedGzipBytes": 50000,
+    "patterns": [
+      { "name": "initial-shell", "patterns": ["index-", "theme-boot"] },
+      { "name": "shared-runtime", "patterns": ["src-", "rolldown-runtime", "preload-helper", "__vite-browser-external"] },
+      { "name": "document-parsers", "patterns": ["document", "epub", "pdf", "readability"] },
+      { "name": "kokoro-runtime", "patterns": ["kokoro", "dist-lib"] },
+      { "name": "multilingual-g2p", "patterns": ["ephone", "phonemizer", "roa-", "all-", "sit-", "jpx-", "en-us-"] },
+      { "name": "transformers-runtime", "patterns": ["transformers.web", "chatterbox", "tts.worker"] },
+      { "name": "piper-runtime", "patterns": ["piper_plus"] },
+      { "name": "onnx-web-runtime", "patterns": ["ort-"] },
+      { "name": "audio-runtime", "patterns": ["lamejs", "SignalsmithStretch", "audio-", "wav", "encode"] },
+      { "name": "optional-ui-and-artifacts", "patterns": ["ReaderView", "MiniPlayer", "LibraryPanel", "EpubMapping", "Normalization", "SentenceRetake", "WebGpu", "AudioOutput", "DesktopIntegrations", "LongForm", "Quality", "archive-budget", "audiobook", "backup", "m4b", "media-overlays", "model-cache", "provenance", "queue-sentence", "generation-dispatcher", "text-normalization", "capabilities", "browser"] }
+    ]
   },
   "realEngine": {
     "maxTimeToFirstAudioMs": 30000,

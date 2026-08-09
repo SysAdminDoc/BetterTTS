@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { createLogger, defineConfig, type Logger, type Plugin } from 'vite'
 
 // public/ files are copied verbatim, so the service-worker cache name is
 // stamped after the bundle is written; every deploy invalidates the app shell.
@@ -65,17 +65,67 @@ function piperPlusBuildPatch(): Plugin {
   }
 }
 
+// ephone's browser bundle contains a Node-only fallback branch. The branch is
+// never entered in a renderer, but its guarded dynamic import still makes
+// Vite externalize node:module and emit a misleading browser warning. Keep
+// the browser artifact free of that branch without changing the npm package.
+function ephoneBrowserPatch(): Plugin {
+  return {
+    name: 'ephone-browser-patch',
+    enforce: 'pre',
+    apply: 'build',
+    transform(code, id) {
+      const normalized = id.replace(/\\/g, '/')
+      if (!normalized.includes('/ephone/ephone.js')) return null
+      const nodeFallback = /const\{createRequire\}=await import\("node:module"\);var require=createRequire\(import\.meta\.url\)/u
+      if (!nodeFallback.test(code)) return null
+      return {
+        code: code
+          .replace(nodeFallback, 'const require = undefined')
+          .replace(/import\("node:module"\)/gu, 'Promise.resolve({ createRequire: () => undefined })')
+          .replace(/require\("node:[^"]+"\)/gu, 'undefined'),
+        map: null,
+      }
+    },
+  }
+}
+
 // The Electron desktop build loads the renderer from a custom app:// scheme, so
 // it needs relative asset paths and sets its COOP/COEP/CSP headers in the main
 // process instead of via the service worker / a build-time <meta> tag.
 const isElectron = process.env.BETTERTTS_TARGET === 'electron'
 
-export default defineConfig({
+function buildLogger(): Logger {
+  const logger = createLogger()
+  const warn = logger.warn.bind(logger)
+  logger.warn = (message, options) => {
+    // Rolldown's timing table is useful interactively but is emitted as a
+    // warning after the byte/ownership gates have already run. Keep genuine
+    // resolver and build warnings visible.
+    if (message.includes('[PLUGIN_TIMINGS]')) return
+    warn(message, options)
+  }
+  return logger
+}
+
+export default defineConfig(({ command }) => ({
   base: isElectron ? './' : '/BetterTTS/',
+  resolve: {
+    alias: {
+      'node:module': join(import.meta.dirname, 'src', 'browser-node-module-shim.ts'),
+    },
+  },
   plugins: isElectron
-    ? [react(), piperPlusBuildPatch()]
-    : [react(), swBuildId(), cspInjector(), piperPlusBuildPatch()],
+    ? [react(), ephoneBrowserPatch(), piperPlusBuildPatch()]
+    : [react(), swBuildId(), cspInjector(), ephoneBrowserPatch(), piperPlusBuildPatch()],
+  build: {
+    // The generic warning is below the largest intentionally lazy WASM/model
+    // artifact. scripts/check-build-budget.mjs is the stricter ownership and
+    // byte gate for this application.
+    chunkSizeWarningLimit: 65_000,
+  },
+  customLogger: command === 'build' ? buildLogger() : undefined,
   worker: {
     format: 'es',
   },
-})
+}))
