@@ -39,6 +39,15 @@ describe('library', () => {
     expect(migrated?.generationProvenance).toBeUndefined()
   })
 
+  it('persists bounded quality warnings without source text', async () => {
+    const qualityWarning = 'short-audio, duration-mismatch'
+    await saveClip({ ...record('quality', 1), qualityWarning }, new Blob(['quality']))
+
+    const migrated = (await listClips())[0]
+    expect(migrated.qualityWarning).toBe(qualityWarning)
+    expect(migrated.qualityWarning).not.toContain('Private source text')
+  })
+
   it('preserves valid RVC provenance and drops malformed provenance', () => {
     const valid = {
       ...record('rvc', 1),

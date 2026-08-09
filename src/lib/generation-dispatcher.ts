@@ -1,4 +1,5 @@
 import { parsePauseTags, parseProsodyTags, splitIntoSentences, type NarratorRole, type ProsodySettings } from './text.ts'
+import type { LongFormQualityIssue, LongFormQualityOptions, LongFormQualityReview } from './long-form-quality.ts'
 import type { VoiceProvenance } from './voice-lab.ts'
 
 export type GenerationJob = {
@@ -22,6 +23,7 @@ export type GenerationJobResult = {
   totalSamples: number
   totalChars: number
   flaggedSentences: number
+  needsReview: LongFormQualityReview[]
 }
 
 export type GenerationDispatchResult = {
@@ -33,6 +35,7 @@ export type GenerationDispatchResult = {
   flaggedSentences: number
   timeToFirstAudioMs: number | null
   cancelled: boolean
+  needsReview: LongFormQualityReview[]
 }
 
 export type GenerationDispatcherOptions = {
@@ -43,15 +46,31 @@ export type GenerationDispatcherOptions = {
   isCancelled?: () => boolean
   applyPronunciations?: (text: string) => string
   synthesize: (text: string, voice: string, speed: number, voiceBin?: Float32Array, signal?: AbortSignal) => Promise<GeneratedSentence | null>
+  synthesizeWithProsody?: (text: string, voice: string, speed: number, voiceBin: Float32Array | undefined, prosody: ProsodySettings, signal?: AbortSignal) => Promise<GeneratedSentence | null>
   processAudio?: (audio: GeneratedSentence, prosody: ProsodySettings) => Promise<GeneratedSentence> | GeneratedSentence
+  qualityGate?: LongFormQualityOptions
   checkCompleteness?: (text: string, durationSeconds: number, speed: number) => { suspect: boolean; speakableChars: number; minExpectedSeconds: number }
   onProgress?: (completed: number, total: number) => void
   onAudio?: (audio: GeneratedSentence, startSec: number, endSec: number) => void
   onSuspectAudio?: (text: string, completeness: { speakableChars: number; minExpectedSeconds: number; durationSeconds: number }) => void
   onMissingAudio?: (text: string) => void
+  onQualityRetry?: (text: string, attempt: number, issues: readonly LongFormQualityIssue[]) => void
+  onQualityReview?: (review: LongFormQualityReview) => void
+  onJobStart?: (jobIndex: number) => void
 }
 
 export async function dispatchGeneration(
+  jobs: GenerationJob[],
+  options: GenerationDispatcherOptions,
+): Promise<GenerationDispatchResult> {
+  if (options.qualityGate?.enabled) {
+    const { dispatchGenerationWithQuality } = await import('./generation-dispatcher-quality.ts')
+    return dispatchGenerationWithQuality(jobs, options)
+  }
+  return dispatchGenerationCore(jobs, options)
+}
+
+async function dispatchGenerationCore(
   jobs: GenerationJob[],
   options: GenerationDispatcherOptions,
 ): Promise<GenerationDispatchResult> {
@@ -71,11 +90,11 @@ export async function dispatchGeneration(
   let totalChars = 0
   let flaggedSentences = 0
   let timeToFirstAudioMs: number | null = null
-
   const cancelled = () => options.signal?.aborted === true || options.isCancelled?.() === true
 
   for (let jobIndex = 0; jobIndex < jobs.length; jobIndex += 1) {
     if (cancelled()) break
+    options.onJobStart?.(jobIndex)
     const job = jobs[jobIndex]
     const plan = plans[jobIndex]
     const audioParts: Float32Array[] = []
@@ -83,7 +102,6 @@ export async function dispatchGeneration(
     let sampleOffset = 0
     let jobChars = 0
     let jobFlagged = 0
-
     for (const segment of plan) {
       if (cancelled()) break
       if (segment.type === 'pause') {
@@ -98,14 +116,22 @@ export async function dispatchGeneration(
         if (cancelled()) break
         const effectiveSpeed = options.speed * sentence.prosody.rate
         const preparedText = options.applyPronunciations?.(sentence.text) ?? sentence.text
-        const synthesized = await options.synthesize(preparedText, job.voice, effectiveSpeed, job.voiceBin, options.signal)
-        const audio = synthesized && options.processAudio
-          ? await options.processAudio(synthesized, {
-            rate: sentence.prosody.rate,
-            pitchSemitones: sentence.prosody.pitchSemitones,
-          })
-          : synthesized
+        const audio = options.synthesizeWithProsody
+          ? await options.synthesizeWithProsody(preparedText, job.voice, effectiveSpeed, job.voiceBin, sentence.prosody, options.signal)
+          : await options.synthesize(preparedText, job.voice, effectiveSpeed, job.voiceBin, options.signal).then((synthesized) => synthesized && options.processAudio
+            ? options.processAudio(synthesized, {
+              rate: sentence.prosody.rate,
+              pitchSemitones: sentence.prosody.pitchSemitones,
+            })
+            : synthesized)
 
+        let sentenceFlagged = false
+        const flagSentence = () => {
+          if (sentenceFlagged) return
+          sentenceFlagged = true
+          flaggedSentences += 1
+          jobFlagged += 1
+        }
         if (audio) {
           if (audio.sampleRate !== options.sampleRate) throw new Error('Generated chunks used mixed sample rates.')
           if (timeToFirstAudioMs === null && audio.samples.length > 0) {
@@ -114,8 +140,7 @@ export async function dispatchGeneration(
           const durationSeconds = audio.samples.length / options.sampleRate
           const completeness = options.checkCompleteness?.(sentence.text, durationSeconds, effectiveSpeed)
           if (completeness?.suspect) {
-            flaggedSentences += 1
-            jobFlagged += 1
+            flagSentence()
             options.onSuspectAudio?.(sentence.text, {
               speakableChars: completeness.speakableChars,
               minExpectedSeconds: completeness.minExpectedSeconds,
@@ -140,8 +165,7 @@ export async function dispatchGeneration(
           }
           options.onAudio?.(audio, startSec, endSec)
         } else if (!cancelled()) {
-          flaggedSentences += 1
-          jobFlagged += 1
+          flagSentence()
           options.onMissingAudio?.(sentence.text)
         }
         completedSentences += 1
@@ -155,6 +179,7 @@ export async function dispatchGeneration(
       totalSamples: audioParts.reduce((total, part) => total + part.length, 0),
       totalChars: jobChars,
       flaggedSentences: jobFlagged,
+      needsReview: [],
     })
   }
 
@@ -167,5 +192,6 @@ export async function dispatchGeneration(
     flaggedSentences,
     timeToFirstAudioMs,
     cancelled: cancelled(),
+    needsReview: [],
   }
 }

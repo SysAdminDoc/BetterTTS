@@ -28,7 +28,7 @@ export type QueueChunk = {
   cues?: Cue[]
   blobKey?: string
   error?: string
-  /** Non-fatal completeness-check note (possible truncation / skipped text). */
+  /** Non-fatal completeness or quality-check note. */
   warning?: string
 }
 
@@ -254,7 +254,7 @@ export function nextPendingChunk(job: QueueJob): QueueChunk | null {
 export function replaceQueueChunk(
   job: QueueJob,
   chunkIndex: number,
-  patch: Pick<QueueChunk, 'text' | 'status'> & Partial<Pick<QueueChunk, 'voice' | 'role' | 'speaker' | 'chapterTitle' | 'chapterIndex' | 'duration' | 'cues'>>,
+  patch: Pick<QueueChunk, 'text' | 'status'> & Partial<Pick<QueueChunk, 'voice' | 'role' | 'speaker' | 'chapterTitle' | 'chapterIndex' | 'duration' | 'cues' | 'warning'>>,
 ): QueueJob {
   return {
     ...job,
@@ -271,6 +271,7 @@ export function replaceQueueChunk(
             chapterIndex: patch.chapterIndex ?? chunk.chapterIndex,
             duration: patch.duration,
             cues: patch.cues,
+            warning: 'warning' in patch ? patch.warning : chunk.warning,
             error: undefined,
           }
         : chunk

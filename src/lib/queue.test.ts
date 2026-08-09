@@ -365,6 +365,15 @@ describe('queue', () => {
     expect(job.chunks[0].error).toBe('old failure')
   })
 
+  it('bounds persisted quality warnings before rendering', () => {
+    const migrated = migrateQueueJob({
+      ...makeJob('quality', 1),
+      chunks: [{ ...makeJob('quality', 1).chunks[0], warning: 'Needs review: empty-audio' }],
+    })
+
+    expect(migrated.chunks[0].warning).toBe('Needs review: empty-audio')
+  })
+
   it('keeps narrator voice metadata when editing chunk text or titles', () => {
     const job = makeJob('narrator-edit', 1)
     job.chunks[0] = { ...job.chunks[0], role: 'dialogue', speaker: 'Eve', voice: 'af_bella' }

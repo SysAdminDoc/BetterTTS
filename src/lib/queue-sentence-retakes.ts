@@ -107,6 +107,7 @@ export async function spliceSentenceRetake(
     chapterIndex: chunk.chapterIndex,
     duration: `${(spliced.samples.length / original.sampleRate).toFixed(1)}s`,
     cues: spliced.cues,
+    warning: undefined,
   })
   // Audio and cue metadata replace the old record in one IndexedDB transaction.
   await commitQueueChunk(nextJob, chunkIndex, encoded.blob)

@@ -19,6 +19,7 @@ export type ClipRecord = {
   rvc?: RvcClipProvenance
   provenance?: VoiceProvenance
   generationProvenance?: GenerationProvenanceManifest
+  qualityWarning?: string
 }
 
 export type ClipSnapshot = {
@@ -70,6 +71,9 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     : undefined
   const rvc = migrateRvcProvenance(record.rvc)
   const generationProvenance = migrateGenerationProvenance(record.generationProvenance)
+  const qualityWarning = typeof record.qualityWarning === 'string' && record.qualityWarning.trim()
+    ? record.qualityWarning.slice(0, 500)
+    : undefined
   const engine = typeof record.engine === 'string' && record.engine.length > 0 && record.engine.length <= 100
     ? record.engine
     : undefined
@@ -87,6 +91,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     ...(rvc ? { rvc } : {}),
     provenance: record.provenance,
     ...(generationProvenance ? { generationProvenance } : {}),
+    ...(qualityWarning ? { qualityWarning } : {}),
   }
 }
 

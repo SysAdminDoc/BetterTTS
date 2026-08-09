@@ -232,6 +232,7 @@ import { KOKORO_LANGUAGES, VOICES, isEnglishKokoroLocale, kokoroLanguageForLocal
 import { ASS_CAPTION_PRESETS, assembleSubtitleTimeline, parseSubtitleText, subtitleTextForSpeech, type AssCaptionPresetId, type Cue, type ParsedSubtitle, toASS, toSRT, toVTT } from './lib/subtitles.ts'
 import { concatFloat32Arrays, encodeWav } from './lib/wav.ts'
 import { dispatchGeneration } from './lib/generation-dispatcher.ts'
+import type { LongFormQualityOptions, LongFormQualityReview } from './lib/long-form-quality.ts'
 import { useObjectUrls } from './lib/object-urls.ts'
 import { useGeneration } from './hooks/useGeneration.ts'
 import { useLibrary } from './hooks/useLibrary.ts'
@@ -258,6 +259,7 @@ const MELO_SAMPLE_RATE = 44_100
 const MAX_TEXT_CHARS = 5000
 const MAX_IMPORT_BYTES = 25 * 1024 * 1024
 const ARTICLE_IMPORT_TIMEOUT_MS = 15_000
+const QUALITY_CHECKS_STORAGE_KEY = 'bettertts-quality-checks'
 const EMPTY_VTT_URL = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A'
 const PUNCTUATION_PAUSE_FIELDS: ReadonlyArray<{ key: PunctuationPauseKey; symbol: string; label: string }> = [
   { key: 'comma', symbol: ',', label: 'Comma' },
@@ -270,6 +272,10 @@ const PUNCTUATION_PAUSE_FIELDS: ReadonlyArray<{ key: PunctuationPauseKey; symbol
   { key: 'emDash', symbol: '—', label: 'Em dash' },
 ]
 const waveformCache = new Map<string, number[]>()
+
+function summarizeQualityIssues(issues: readonly { code: string }[]): string {
+  return [...new Set(issues.map((issue) => issue.code))].join(', ')
+}
 const ReaderView = lazy(async () => {
   const module = await import('./components/ReaderView.tsx')
   return { default: module.ReaderView }
@@ -307,6 +313,14 @@ const WebGpuDiagnosticsPanel = lazy(async () => {
   return { default: module.WebGpuDiagnosticsPanel }
 })
 const DesktopIntegrationsPanel = lazy(() => import('./DesktopIntegrationsPanel.tsx'))
+const LongFormQualityControl = lazy(async () => {
+  const module = await import('./components/LongFormQualityControl.tsx')
+  return { default: module.LongFormQualityControl }
+})
+const QualityReviewNotice = lazy(async () => {
+  const module = await import('./components/QualityReviewNotice.tsx')
+  return { default: module.QualityReviewNotice }
+})
 
 type Engine = EngineId
 type Theme = 'dark' | 'light'
@@ -365,6 +379,7 @@ type AudioResult = {
   sourceText?: string
   synthesisTextSnapshot?: string
   loudness?: LoudnessMeasurement
+  qualityReview?: LongFormQualityReview[]
   provenanceManifest?: GenerationProvenanceManifest
 }
 
@@ -1178,6 +1193,11 @@ function ResultRow({ result, selected, isSpeaking, assCaptionPreset, onSelect, o
       </button>
       {result.url ? <PlaybackAudio playbackKey={`clip:${result.id}`} src={result.url} label={result.filename} cues={cues} vttUrl={result.vttUrl} /> : null}
       {result.originalUrl ? <PlaybackAudio playbackKey={`clip:${result.id}:before`} src={result.originalUrl} label={`${result.filename} before cleanup`} cues={cues} vttUrl={result.vttUrl} /> : null}
+      {result.qualityReview?.length ? (
+        <Suspense fallback={null}>
+          <QualityReviewNotice issues={result.qualityReview.flatMap((review) => review.issues)} />
+        </Suspense>
+      ) : null}
       {result.synthesisTextSnapshot ? (
         <details className="result-text-snapshot">
           <summary>Synthesized text snapshot</summary>
@@ -1480,6 +1500,13 @@ function App() {
   })
   const [separateLines, setSeparateLines] = useState(false)
   const [streamPlay, setStreamPlay] = useState(true)
+  const [qualityChecksEnabled, setQualityChecksEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem(QUALITY_CHECKS_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
   const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav')
   const [mp3Bitrate, setMp3Bitrate] = useState(160)
   const [useWorker, setUseWorker] = useState(true)
@@ -2125,6 +2152,17 @@ function App() {
     })
   }
 
+  async function currentLongFormQualityGate(): Promise<LongFormQualityOptions | undefined> {
+    if (!qualityChecksEnabled) return undefined
+    const { createLongFormQualityGate } = await import('./lib/long-form-quality-gate.ts')
+    return createLongFormQualityGate(
+      true,
+      whisperStatus?.available === true,
+      whisperLanguage,
+      setStatus,
+    )
+  }
+
   function setVoiceIdForNarratorRole(role: NarratorRole, value: string): void {
     if (role === 'narration') {
       if (engine === 'kokoro') setVoiceId(value)
@@ -2377,6 +2415,10 @@ function App() {
   useEffect(() => {
     persistSetting('bettertts-punctuation-pauses', JSON.stringify(punctuationPauses))
   }, [punctuationPauses])
+
+  useEffect(() => {
+    persistSetting(QUALITY_CHECKS_STORAGE_KEY, qualityChecksEnabled ? '1' : '0')
+  }, [qualityChecksEnabled])
 
   useEffect(() => {
     persistSetting(EXPERIMENTAL_PIPER_STORAGE_KEY, experimentalPiperEnabled ? '1' : '0')
@@ -4014,6 +4056,7 @@ function App() {
       ...job,
       text: applyPunctuationPauses(job.text, punctuationPauses),
     }))
+    const qualityGate = await currentLongFormQualityGate()
     const dispatchResult = await dispatchGeneration(dispatchJobs, {
       sampleRate: outputSampleRate,
       speed,
@@ -4022,6 +4065,7 @@ function App() {
       isCancelled: () => abortRef.current,
       applyPronunciations,
       synthesize,
+      qualityGate,
       processAudio: async (audio, prosody) => prosody.pitchSemitones === 0
         ? audio
         : { ...audio, samples: await shiftPitch(audio.samples, prosody.pitchSemitones, audio.sampleRate) },
@@ -4052,6 +4096,9 @@ function App() {
       },
       onMissingAudio: (sentence) => {
         recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence — it is missing from the output.`, 'synthesis.completeness')
+      },
+      onQualityReview: (review) => {
+        recordDiagnosticEvent('warn', `${review.scope === 'job' ? 'Long-form output' : 'Segment'} needs review after ${review.attempts} attempt${review.attempts === 1 ? '' : 's'}: ${summarizeQualityIssues(review.issues)}.`, 'synthesis.quality.review')
       },
     })
     timeToFirstAudioMs = dispatchResult.timeToFirstAudioMs
@@ -4112,6 +4159,7 @@ function App() {
       if (readerDocument) result.sourceDocumentId = readerDocument.id
       result.sourceText = job.text
       result.synthesisTextSnapshot = synthesisText
+      if (dispatched.needsReview.length > 0) result.qualityReview = dispatched.needsReview
       if (originalBlob) result.originalUrl = rememberUrl(URL.createObjectURL(originalBlob))
       if (cues.length > 0) {
         result.cues = cues
@@ -4148,6 +4196,7 @@ function App() {
         ...(rvcPlan ? { rvc: createRvcClipProvenance(rvcPlan) } : {}),
         provenance: voiceProvenance,
         generationProvenance,
+        ...(dispatched.needsReview.length > 0 ? { qualityWarning: summarizeQualityIssues(dispatched.needsReview.flatMap((review) => review.issues)) } : {}),
       }
       try {
         await saveClip(clipRecord, blob)
@@ -4242,6 +4291,9 @@ function App() {
     if (abortRef.current) {
       setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
       showToast({ tone: 'warn', message: 'Generation cancelled.' })
+    } else if (dispatchResult.needsReview.length > 0) {
+      setStatus(`Local audio ready — ${dispatchResult.needsReview.length} segment${dispatchResult.needsReview.length === 1 ? '' : 's'} need review`)
+      showToast({ tone: 'warn', message: `Audio ready, but ${dispatchResult.needsReview.length} quality check${dispatchResult.needsReview.length === 1 ? '' : 's'} need review. See Diagnostics before exporting.` })
     } else if (flaggedSentences > 0) {
       setStatus('Local audio ready — completeness check flagged output')
       showToast({ tone: 'warn', message: `Audio ready, but ${flaggedSentences} sentence${flaggedSentences === 1 ? ' was' : 's were'} flagged as possibly truncated or missing — details in Diagnostics.` })
@@ -4916,6 +4968,7 @@ function App() {
     voice = job.voice,
     voiceBin?: Float32Array,
   ): Promise<{ blob: Blob; duration: string; cues?: Cue[]; warning?: string } | null> {
+    const qualityGate = await currentLongFormQualityGate()
     const dispatched = await dispatchGeneration([{
       text: applyPunctuationPauses(text, punctuationPauses),
       voice,
@@ -4928,6 +4981,7 @@ function App() {
       isCancelled: () => abortRef.current,
       applyPronunciations,
       synthesize,
+      qualityGate,
       processAudio: async (audio, prosody) => prosody.pitchSemitones === 0
         ? audio
         : { ...audio, samples: await shiftPitch(audio.samples, prosody.pitchSemitones, audio.sampleRate) },
@@ -4941,13 +4995,17 @@ function App() {
     const raw = concatFloat32Arrays(result.audioParts)
     const { blob } = await encodeOutput(raw, sampleRate, job.format, job.bitrate, job.title)
     if (abortRef.current) return null
+    const qualityWarning = result.needsReview.length > 0
+      ? `Needs review: ${summarizeQualityIssues(result.needsReview.flatMap((review) => review.issues))}`
+      : undefined
+    const completenessWarning = result.flaggedSentences > 0
+      ? `${result.flaggedSentences} of ${dispatched.totalSentences} sentence${dispatched.totalSentences === 1 ? '' : 's'} flagged as possibly truncated or missing`
+      : undefined
     return {
       blob,
       duration: `${(raw.length / sampleRate).toFixed(1)}s`,
       cues: result.cues.length > 0 ? result.cues.map((cue, index) => ({ ...cue, index: index + 1 })) : undefined,
-      warning: result.flaggedSentences > 0
-        ? `${result.flaggedSentences} of ${dispatched.totalSentences} sentence${dispatched.totalSentences === 1 ? '' : 's'} flagged as possibly truncated or missing`
-        : undefined,
+      warning: [completenessWarning, qualityWarning].filter(Boolean).join('; ') || undefined,
     }
   }
 
@@ -5166,6 +5224,7 @@ function App() {
         chapterIndex: chunk.chapterIndex,
         duration: replacement.duration,
         cues: replacement.cues,
+        warning: replacement.warning,
       })
       if (nextJob.generationProvenance) {
         nextJob.generationProvenance = updateProvenanceCueSummary(
@@ -6687,7 +6746,7 @@ function App() {
                           <div className="capability-strip warn" role="status">
                             <Info size={15} aria-hidden="true" />
                             <span>
-                              Completeness check: chunk {warnedChunks[0].index + 1} — {shortUiLabel(warnedChunks[0].warning ?? '', 110)}
+                              Quality check: chunk {warnedChunks[0].index + 1} — {shortUiLabel(warnedChunks[0].warning ?? '', 110)}
                               {warnedChunks.length > 1 ? ` (+${warnedChunks.length - 1} more)` : ''}. Edit &amp; regenerate the chunk below.
                             </span>
                           </div>
@@ -8129,6 +8188,10 @@ function App() {
                     </span>
                   </label>
                 ))}
+
+                <Suspense fallback={null}>
+                  <LongFormQualityControl enabled={qualityChecksEnabled} disabled={isGenerating} onChange={setQualityChecksEnabled} />
+                </Suspense>
 
                 {engine === 'kokoro' ? (
                   <>

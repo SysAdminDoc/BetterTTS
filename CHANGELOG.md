@@ -14,6 +14,7 @@
 ### Changed
 - Portable backup restore now stages the incoming archive and previous local state in a versioned journal before replacing IndexedDB data, commits only after verification, and rolls back or cleans up interrupted restores on the next startup.
 - Saved generation provenance now derives model URLs, revisions, artifacts, runtime package identities, and sidecar manifest hashes from the generated capability manifest; Supertonic and Chatterbox downloads use the same immutable revisions.
+- Optional long-form quality checks now inspect waveform duration, clipping, repeated tails, cues, and local Whisper alignment, retry one bounded time, surface segment/job needs-review outcomes, and retain source-text-free review warnings in saved clips and queue chunks.
 
 ## v0.23.0 - 2026-08-03
 

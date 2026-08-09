@@ -143,6 +143,12 @@ export function LibraryClipRow({ clip, onDeleted, onNotice, replayContext, playb
           <span>{replayWarning}</span>
         </div>
       ) : null}
+      {clip.qualityWarning ? (
+        <div className="capability-strip warn" role="status">
+          <Info size={15} aria-hidden="true" />
+          <span>Needs review: {clip.qualityWarning}. Inspect this saved output before sharing.</span>
+        </div>
+      ) : null}
       {audioState === 'missing' ? (
         <div className="library-missing" role="alert">
           <TriangleAlert size={15} aria-hidden="true" />
