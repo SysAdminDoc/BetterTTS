@@ -25,6 +25,8 @@
 - UI copy now has a versioned reviewed-locale catalog with build-time extraction/completeness checks, plural/number/date formatting, recovery/error coverage, and document-direction attributes independent of synthesis-language selection.
 - PWA share targets now accept validated TXT/EPUB/PDF/DOCX multipart POSTs through a short-lived, one-shot service-worker handoff, while retaining GET text/URL and unsupported-browser fallbacks.
 - The strict initial-shell raw budget now includes the sub-1 KiB share-token dispatch needed for that handoff; all share storage and parsing remain lazy.
+- Voice provenance is now versioned in every new generation/export manifest: built-in, user-supplied, cloned, RVC, and sidecar source classes carry bounded model/source details, consent acknowledgement, clone ancestry, and explicit retained/unknown/not-applicable watermark status; clone-derived Web Share prompts a review warning and requires acknowledgement.
+- The initial raw-byte budget now includes the small voice-attribution/share-review contract; full provenance construction remains lazy and gzip delivery stays within the existing ceiling.
 
 ## v0.23.0 - 2026-08-03
 

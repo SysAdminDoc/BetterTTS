@@ -3,6 +3,7 @@ import {
   BYO_MODEL_OPTIONS,
   MAX_BYO_MODELS,
   createByoModelRecord,
+  byoModelToVoiceSource,
   parseByoConsent,
   parseByoModelRecords,
   removeByoModelRecord,
@@ -59,5 +60,23 @@ describe('bring-your-own model metadata', () => {
     expect(records).toHaveLength(MAX_BYO_MODELS + 2)
     expect(upsertByoModelRecord(records.slice(0, MAX_BYO_MODELS), records[MAX_BYO_MODELS])).toHaveLength(MAX_BYO_MODELS)
     expect(removeByoModelRecord([first], first.id)).toEqual([])
+  })
+
+  it('converts a consented registered model into bounded user-supplied voice attribution', () => {
+    const record = createByoModelRecord({
+      modelId: 'f5-tts',
+      weightsPath: 'C:\\Models\\f5',
+      selectionKind: 'directory',
+      license: 'CC-BY-NC-4.0',
+      provenance: 'Reviewed local release.',
+    }, '2026-08-09T12:00:00.000Z')
+    expect(() => byoModelToVoiceSource(record, false)).toThrow(/consent/iu)
+    expect(byoModelToVoiceSource(record, true)).toMatchObject({
+      source: 'user-supplied',
+      sourceId: record.id,
+      modelId: 'f5-tts',
+      consent: { required: true, acknowledged: true, acknowledgedAt: '2026-08-09T12:00:00.000Z' },
+      watermark: { status: 'unknown' },
+    })
   })
 })

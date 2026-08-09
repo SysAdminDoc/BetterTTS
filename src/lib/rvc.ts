@@ -73,11 +73,13 @@ export type RvcInferencePlan = {
 export type RvcClipProvenance = {
   stage: 'rvc'
   appliedAt: string
+  consentAcknowledgedAt?: string
   models: Array<{
     id: string
     name: string
     license: string
     provenance: string
+    acknowledgedAt?: string
   }>
   blendRatio?: number
   pitchSemitones: number
@@ -265,15 +267,21 @@ export function resolveRvcInferencePlan(
 }
 
 export function createRvcClipProvenance(plan: RvcInferencePlan, now = new Date().toISOString()): RvcClipProvenance {
+  const models = [plan.primary, ...(plan.blend ? [plan.blend] : [])].map((model) => ({
+    id: model.id,
+    name: model.modelName,
+    license: model.license,
+    provenance: model.provenance,
+    acknowledgedAt: model.acknowledgedAt,
+  }))
+  const consentAcknowledgedAt = [...models]
+    .sort((left, right) => Date.parse(left.acknowledgedAt) - Date.parse(right.acknowledgedAt))
+    .at(-1)?.acknowledgedAt
   return {
     stage: 'rvc',
     appliedAt: now,
-    models: [plan.primary, ...(plan.blend ? [plan.blend] : [])].map((model) => ({
-      id: model.id,
-      name: model.modelName,
-      license: model.license,
-      provenance: model.provenance,
-    })),
+    ...(consentAcknowledgedAt ? { consentAcknowledgedAt } : {}),
+    models,
     ...(plan.blend ? { blendRatio: plan.blendRatio } : {}),
     pitchSemitones: plan.pitchSemitones,
     indexRate: plan.indexRate,

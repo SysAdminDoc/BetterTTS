@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-598%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-621%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 598 tests across 100 test files
+- **Tests:** 621 tests across 103 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -27,7 +27,7 @@
 
 ## Why BetterTTS?
 
-Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs its engines locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, or 10,000-character monthly cap. Chatterbox is an explicit ownership/permission-gated voice-cloning lab and retains its built-in PerTh watermark.
+Every cloud TTS service gates you behind signups, character limits, and paid tiers. BetterTTS runs its engines locally through WebGPU, WebAssembly, or native Sherpa-ONNX — your text never leaves your device. No API keys, cloud render queue, or 10,000-character monthly cap. Chatterbox is an explicit ownership/permission-gated voice-cloning lab and retains its model-specific PerTh watermark; BetterTTS does not imply that other models are watermarked.
 
 | | BetterTTS | ElevenLabs Free | TTSMaker Free | voice-generator.com |
 |---|---|---|---|---|
@@ -54,12 +54,12 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Kokoro short-input cleanup** — one-to-four-word English renders use padded context and timestamped boundary cropping to remove leading/trailing artifacts across generation, queue chunks, and voice previews
 - **Supertonic speed engine** via Transformers.js — 10 English F/M voices, 44.1 kHz fp32 output, lazy-loaded only when selected
 - **KittenTTS lightweight engine** via `kitten-tts-webgpu` — 8 English voices, WebGPU shader inference, and selectable Nano 15M / Micro 40M / Mini 80M models
-- **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — explicit ownership/permission acknowledgement before local reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, permissive-license gate, local provenance on saved clips, and disclosed PerTh watermark
+- **Chatterbox voice-cloning engine** via Transformers.js 4.2.0 — explicit ownership/permission acknowledgement before local reference clips, English or multilingual 23-language model, WebGPU-preferred inference, emotion exaggeration, permissive-license gate, durable clone/source provenance, and disclosed model-specific PerTh watermark
 - **Experimental Piper-plus engine** behind an explicit flag — Tsukuyomi-chan model, MIT package/runtime path, WASM + ONNX Runtime Web, and JA/EN/ZH/KO/ES/FR/PT/SV language targets
 - **MeloTTS native engine** — pinned MIT Chinese + English VITS archive through Sherpa-ONNX, single speaker, 44.1 kHz, Windows desktop only
 - **Optional desktop Qwen3-TTS 0.6B CustomVoice engine** — multilingual CustomVoice synthesis through a private Python sidecar, with language, speaker, style instruction, progress, cancellation, and explicit first-use setup
-- **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
-- **Versioned generation provenance** — saved clips and resumable jobs retain engine/model revisions, voice, synthesis, cleanup, pronunciation, BGM, encoder, source hash, cues, and RVC context; ZIP/project exports and M4B metadata carry the manifest while source text and article URLs remain opt-in
+- **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and model/source provenance recorded on the saved clip
+- **Versioned generation provenance** — saved clips and resumable jobs retain engine/model revisions, built-in/user-supplied/cloned/RVC/sidecar voice source, acknowledgement, clone ancestry, watermark status, synthesis, cleanup, pronunciation, BGM, encoder, source hash, cues, and RVC model metadata; ZIP/project exports and M4B metadata carry the manifest while source text and article URLs remain opt-in, and clone-derived output is flagged before Web Share
 - **Optional long-form quality checks** — inspect duration, empty/clipped output, repeated tails, cue drift, and local Whisper transcript alignment; retry one bounded time and preserve source-text-free needs-review warnings on generated clips and queue chunks
 - **Interoperable audiobook exports** — EPUB3 Media Overlays carry ordered SMIL/XHTML timing, language, metadata, and optional cover art; M4B and chaptered ZIP fallbacks retain chapter order and pass a local consumer/player conformance lane before download
 - **Text normalization preview** — imported text can show compact rule-grouped before/after changes, toggle cleanup rules, apply or undo them, restore the raw import, and inspect the exact synthesized text snapshot
@@ -212,7 +212,7 @@ Qwen3-TTS is available only in the Windows desktop app. Select it under Voice ch
 
 The **Bring-your-own weights** panel is disabled by default and is available in the Windows desktop app after an explicit non-commercial/restricted-terms acknowledgement. Choose a local file or directory for F5-TTS, XTTS-v2, Fish/OpenAudio S1, Higgs Audio, MaskGCT, Silero, or another compatible model, then record its exact license and provenance. BetterTTS stores only that metadata and the selected path, never downloads or copies the weights, and keeps registered models adapter-gated rather than silently activating them. Unchecking the acknowledgement hides the registered models until it is enabled again.
 
-The **RVC voice conversion** post-stage is available only in the Windows desktop app. Enable the consent gate under **Voice chain -> Engine -> System & diagnostics**, register a local `.pth` model and optional `.index` file with its license and provenance, then enable RVC in Advanced options. A second registered model can be blended through two inference passes. BetterTTS keeps the original files in place and records the selected model metadata on each converted clip; the optional Python 3.10 runtime and `rvc-python` package are installed only when you choose setup. If the package, runtime, or selected model is missing, the stage reports recovery guidance instead of silently falling back.
+The **RVC voice conversion** post-stage is available only in the Windows desktop app. Enable the consent gate under **Voice chain -> Engine -> System & diagnostics**, register a local `.pth` model and optional `.index` file with its license and provenance, then enable RVC in Advanced options. A second registered model can be blended through two inference passes. BetterTTS keeps the original files in place, records the selected model acknowledgements and source classification in each converted clip and export manifest, and marks watermark status unknown unless the model itself documents one; the optional Python 3.10 runtime and `rvc-python` package are installed only when you choose setup. If the package, runtime, or selected model is missing, the stage reports recovery guidance instead of silently falling back.
 
 **Narrator mode** is available in the Voice chain for local engines. Enable it in Advanced options to split ordinary quoted speech and explicit `[speaker:Name]` lines from narration, then choose the narration and dialogue voices. Plain text remains a single narration segment. Queue jobs persist the role, optional speaker, and exact voice on each chunk; ZIP manifests include the same metadata and M4B export uses the already-rendered role-specific audio. Engines with one active voice use the narration voice for both roles.
 
@@ -248,7 +248,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (598 tests across 100 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (621 tests across 103 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 
@@ -295,6 +295,7 @@ src/
 │   ├── chatterbox.ts        # Consent-gated reference audio decode and worker client
 │   ├── chatterbox-config.ts # Chatterbox model IDs, languages, limits, and controls
 │   ├── voice-lab.ts         # Reference-voice consent, license gate, and clip provenance
+│   ├── voice-provenance.ts  # Durable voice source, consent, watermark, and sharing-review contract
 │   ├── whisper.ts            # whisper.cpp JSON word-cue parser and audio bounds
 │   ├── qwen.ts               # Optional desktop Qwen sidecar client and controls
 │   ├── byo-models.ts         # Consent-gated user-supplied weight metadata and provenance
@@ -353,6 +354,7 @@ sidecar/
 - Restricted/non-commercial weights are a metadata-only BYO tier: model options stay hidden until consent, the desktop picker returns an existing file/folder without copying it, license and provenance are required, and no remote URL is ever fetched by the manager
 - The local OpenAI-compatible server is an explicit desktop opt-in, binds only to `127.0.0.1`, requires a per-start Bearer capability, reflects only an explicit browser-origin allowlist, bounds request/input/audio/concurrency/rate/time surfaces, supports raw encoded output plus SSE base64 chunks, and owns a stop path that revokes the token and closes active work
 - RVC is an explicit desktop-only post-stage: consent and model provenance are required, model paths are user-managed, optional blending performs two bounded inference passes, and converted clips retain the selected model metadata
+- Voice exports use explicit watermark states: Chatterbox records its retained PerTh watermark, while other engines and user-managed models remain unknown or not-applicable unless their own model terms provide a claim
 - New engines enter through the v1 adapter SDK: a local manifest declares immutable model files, runtime/license/safety metadata, hardware needs, queue/export capabilities, and required diagnostics fields before an adapter can be registered
 - Narrator mode is a bounded text transformation before synthesis: quoted and explicit-speaker segments receive per-chunk role/voice metadata, plain text remains narration, and queue/M4B exports consume the persisted rendered chunks
 - All audio generation and processing happens client-side — zero network calls after model download

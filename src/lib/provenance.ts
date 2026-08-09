@@ -3,8 +3,17 @@ import type { AudioFormat, LoudnessPresetId } from './encode.ts'
 import type { CleanupOptions, PunctuationPauseSettings } from './text.ts'
 import type { PronunciationDictionary } from './pronunciations.ts'
 import { capabilityEngine, capabilityModel, capabilityModelVariant, capabilityRuntime } from './capabilities.ts'
+import {
+  VOICE_PROVENANCE_SCHEMA_VERSION,
+  createVoiceSourceRecord,
+  normalizeVoiceSourceRecord,
+  type VoiceSourceInput,
+  type VoiceSourceRecord,
+} from './voice-provenance.ts'
+import { voiceLabProvenanceToSource, type VoiceProvenance } from './voice-lab.ts'
+import type { RvcClipProvenance } from './rvc.ts'
 
-export const PROVENANCE_SCHEMA_VERSION = 2 as const
+export const PROVENANCE_SCHEMA_VERSION = 3 as const
 export const PROVENANCE_CUE_SCHEMA_VERSION = 1 as const
 const HASH_PATTERN = /^[a-f0-9]{64}$/iu
 const MAX_TEXT_CHARS = 5000
@@ -14,6 +23,14 @@ export type ProvenanceRuntimeTarget = 'web' | 'desktop'
 export type ProvenanceRuntimeKind = 'browser' | 'native' | 'sidecar'
 export type ProvenanceCueTiming = 'none' | 'sentence' | 'word'
 export type ProvenanceSourceKind = 'text' | 'article' | 'epub' | 'pdf' | 'docx' | 'subtitle' | 'unknown'
+
+export type ProvenanceRvcModel = {
+  id: string
+  name: string
+  license: string
+  provenance: string
+  acknowledgedAt?: string
+}
 
 export type ProvenanceArtifact = {
   path: string
@@ -62,9 +79,10 @@ export type GenerationProvenanceManifest = {
     modelArtifacts?: readonly ProvenanceArtifact[]
     runtimeIdentities?: readonly ProvenanceRuntimeIdentity[]
   }
-  voice: {
+  voice: VoiceSourceRecord & {
     id: string
     locale?: string
+    provenanceSchemaVersion: typeof VOICE_PROVENANCE_SCHEMA_VERSION
   }
   synthesis: {
     speed: number
@@ -111,10 +129,14 @@ export type GenerationProvenanceManifest = {
     timing: ProvenanceCueTiming
   }
   rvc?: {
+    stage: 'rvc'
     enabled: boolean
     modelCount: number
     pitchSemitones: number
     indexRate: number
+    appliedAt?: string
+    consentAcknowledgedAt?: string
+    models?: readonly ProvenanceRvcModel[]
   }
   legacy?: boolean
 }
@@ -168,6 +190,58 @@ export function createProvenanceEngine(
     ...(model?.artifacts ? { modelArtifacts: model.artifacts.map((artifact) => ({ ...artifact })) } : {}),
     ...(runtimeIdentities.length > 0 ? { runtimeIdentities } : {}),
   }
+}
+
+export function createGenerationVoiceSource(
+  engineId: string,
+  voiceId: string,
+  clonedProvenance?: VoiceProvenance,
+  rvcProvenance?: RvcClipProvenance,
+): VoiceSourceInput {
+  const base = clonedProvenance
+    ? voiceLabProvenanceToSource(clonedProvenance)
+    : engineId === 'qwen'
+      ? {
+        source: 'sidecar' as const,
+        sourceId: voiceId,
+        modelId: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
+        modelLabel: 'Qwen3-TTS CustomVoice sidecar',
+        provenance: 'Voice selection is supplied by the local Python sidecar; watermark status is not asserted by BetterTTS.',
+        consent: { required: false, acknowledged: false },
+        watermark: { status: 'unknown' as const, note: 'Sidecar model watermark status is unknown.' },
+      }
+      : engineId === 'byo' || engineId.startsWith('byo-')
+        ? {
+          source: 'user-supplied' as const,
+          sourceId: voiceId,
+          consent: { required: true, acknowledged: true, acknowledgedAt: new Date().toISOString() },
+          watermark: { status: 'unknown' as const, note: 'User-supplied model watermark status must be verified from its recorded terms.' },
+        }
+        : {
+          source: 'built-in' as const,
+          sourceId: voiceId,
+          consent: { required: false, acknowledged: false },
+          watermark: { status: 'not-applicable' as const, note: 'No universal watermark claim is made for built-in voices.' },
+        }
+
+  if (!rvcProvenance) return base
+  const acknowledgedAt = rvcProvenance.consentAcknowledgedAt
+    ?? rvcProvenance.models.map((model) => model.acknowledgedAt).find((value): value is string => Boolean(value))
+  return createVoiceSourceRecord({
+    source: 'rvc',
+    derivedFrom: [base.source, ...(base.derivedFrom ?? [])],
+    sourceId: rvcProvenance.models.map((model) => model.id).join(','),
+    sourceName: rvcProvenance.models.map((model) => model.name).join(' + '),
+    modelId: rvcProvenance.models.map((model) => model.id).join(','),
+    modelLabel: rvcProvenance.models.map((model) => model.name).join(' + '),
+    modelLicense: rvcProvenance.models.map((model) => model.license).join('; '),
+    provenance: rvcProvenance.models.map((model) => `${model.name}: ${model.provenance}`).join(' | '),
+    consent: { required: true, acknowledged: true, acknowledgedAt },
+    watermark: {
+      status: 'unknown',
+      note: 'RVC voice conversion does not imply a universal watermark; the selected model watermark status is not verified by BetterTTS.',
+    },
+  })
 }
 
 export type ProvenanceEncoderInput = {
@@ -256,6 +330,7 @@ export type ProvenanceInput = {
   pronunciations: PronunciationDictionary
   backgroundMusic: Omit<GenerationProvenanceManifest['backgroundMusic'], 'enabled'> & { enabled?: boolean }
   encoder: ProvenanceEncoderInput
+  voiceProvenance?: VoiceSourceInput
   sourceText?: string
   source?: Partial<Pick<GenerationProvenanceManifest['source'], 'kind' | 'documentId' | 'title' | 'articleUrl'>>
   includeSourceText?: boolean
@@ -291,6 +366,7 @@ export async function createGenerationProvenance(input: ProvenanceInput): Promis
     ...(input.includeSourceText && sourceText ? { text: sourceText.slice(0, MAX_TEXT_CHARS) } : {}),
     ...(input.includeArticleUrl && boundedUrl(input.source?.articleUrl) ? { articleUrl: boundedUrl(input.source?.articleUrl) } : {}),
   }
+  const voiceProvenance = createVoiceSourceRecord(input.voiceProvenance ?? { source: 'unknown' })
 
   return normalizeManifest({
     schemaVersion: PROVENANCE_SCHEMA_VERSION,
@@ -312,6 +388,8 @@ export async function createGenerationProvenance(input: ProvenanceInput): Promis
     voice: {
       id: boundedString(input.voiceId, MAX_STRING_CHARS) ?? 'unknown',
       ...(boundedString(input.locale, 80) ? { locale: boundedString(input.locale, 80) } : {}),
+      provenanceSchemaVersion: VOICE_PROVENANCE_SCHEMA_VERSION,
+      ...voiceProvenance,
     },
     synthesis: {
       speed: clampFinite(input.speed, 0.25, 4, 1),
@@ -365,13 +443,18 @@ export function createLegacyProvenanceManifest(input: {
 } = {}): GenerationProvenanceManifest {
   const candidateDate = Number.isFinite(input.createdAt) ? new Date(Number(input.createdAt)) : null
   const createdAt = candidateDate && Number.isFinite(candidateDate.getTime()) ? candidateDate.toISOString() : new Date(0).toISOString()
+  const voiceProvenance = createVoiceSourceRecord({ source: 'unknown' })
   return {
     schemaVersion: PROVENANCE_SCHEMA_VERSION,
     createdAt,
     app: { name: 'BetterTTS', version: 'unknown' },
     runtime: { target: 'web', label: 'unknown', platform: 'unknown' },
     engine: { id: 'unknown', modelId: 'unknown', modelRevision: 'unknown' },
-    voice: { id: boundedString(input.voice, MAX_STRING_CHARS) ?? 'unknown' },
+    voice: {
+      id: boundedString(input.voice, MAX_STRING_CHARS) ?? 'unknown',
+      provenanceSchemaVersion: VOICE_PROVENANCE_SCHEMA_VERSION,
+      ...voiceProvenance,
+    },
     synthesis: { speed: clampFinite(input.speed ?? 1, 0.25, 4, 1), pitchSemitones: 0 },
     cleanup: {
       text: emptyCleanup(),
@@ -401,7 +484,7 @@ export function migrateGenerationProvenance(raw: unknown, legacyInput?: Paramete
     return legacyInput ? createLegacyProvenanceManifest(legacyInput) : null
   }
   const candidate = raw as Record<string, unknown>
-  if (candidate.schemaVersion === 1) {
+  if (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) {
     try {
       return normalizeManifest({ ...candidate, schemaVersion: PROVENANCE_SCHEMA_VERSION })
     } catch {
@@ -490,6 +573,8 @@ function normalizeManifest(raw: unknown): GenerationProvenanceManifest {
   if (engine.modelSourceUrl !== undefined && modelSourceUrl === undefined) throw new Error('Invalid provenance model source URL.')
   const modelArtifacts = engine.modelArtifacts === undefined ? undefined : normalizeArtifacts(engine.modelArtifacts)
   const runtimeIdentities = engine.runtimeIdentities === undefined ? undefined : normalizeRuntimeIdentities(engine.runtimeIdentities)
+  if (voice.provenanceSchemaVersion !== undefined && voice.provenanceSchemaVersion !== VOICE_PROVENANCE_SCHEMA_VERSION) throw new Error('Invalid voice provenance schema.')
+  const voiceProvenance = normalizeVoiceSourceRecord(voice)
   const manifest: GenerationProvenanceManifest = {
     schemaVersion: PROVENANCE_SCHEMA_VERSION,
     createdAt: new Date(String(value.createdAt)).toISOString(),
@@ -510,6 +595,8 @@ function normalizeManifest(raw: unknown): GenerationProvenanceManifest {
     voice: {
       id: boundedString(voice.id, MAX_STRING_CHARS) ?? 'unknown',
       ...(boundedString(voice.locale, 80) ? { locale: boundedString(voice.locale, 80) } : {}),
+      provenanceSchemaVersion: VOICE_PROVENANCE_SCHEMA_VERSION,
+      ...voiceProvenance,
     },
     synthesis: {
       speed: clampFinite(synthesis.speed, 0.25, 4, 1),
@@ -630,11 +717,43 @@ function normalizeRuntimeIdentities(value: unknown): ProvenanceRuntimeIdentity[]
 
 function normalizeRvc(value: unknown): NonNullable<GenerationProvenanceManifest['rvc']> {
   const candidate = record(value)
+  const models = candidate?.models === undefined
+    ? undefined
+    : !Array.isArray(candidate.models)
+      ? (() => { throw new Error('Invalid provenance RVC models.') })()
+      : candidate.models.slice(0, 2).map((model) => normalizeRvcModel(model))
+  const appliedAt = isDate(candidate?.appliedAt) ? candidate?.appliedAt as string : undefined
+  const consentAcknowledgedAt = isDate(candidate?.consentAcknowledgedAt) ? candidate?.consentAcknowledgedAt as string : undefined
   return {
+    stage: 'rvc',
     enabled: candidate?.enabled === true,
     modelCount: Math.round(clampFinite(candidate?.modelCount, 0, 2, 0)),
     pitchSemitones: clampFinite(candidate?.pitchSemitones, -24, 24, 0),
     indexRate: clampFinite(candidate?.indexRate, 0, 1, 0),
+    ...(appliedAt ? { appliedAt } : {}),
+    ...(consentAcknowledgedAt ? { consentAcknowledgedAt } : {}),
+    ...(models ? { models } : {}),
+  }
+}
+
+function normalizeRvcModel(value: unknown): ProvenanceRvcModel {
+  const candidate = record(value)
+  const id = boundedString(candidate?.id, 120)
+  const name = boundedString(candidate?.name, 120)
+  const license = boundedString(candidate?.license, 200)
+  const provenance = boundedString(candidate?.provenance, 600)
+  const acknowledgedAt = candidate?.acknowledgedAt === undefined
+    ? undefined
+    : isDate(candidate.acknowledgedAt)
+      ? candidate.acknowledgedAt as string
+      : null
+  if (!id || !name || !license || !provenance || acknowledgedAt === null) throw new Error('Invalid provenance RVC model.')
+  return {
+    id,
+    name,
+    license,
+    provenance,
+    ...(acknowledgedAt ? { acknowledgedAt } : {}),
   }
 }
 

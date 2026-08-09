@@ -77,6 +77,7 @@ import {
   serializeRvcModelRecords,
   serializeRvcSettings,
   upsertRvcModelRecord,
+  type RvcClipProvenance,
   type RvcModelRecord,
   type RvcSettings,
 } from './lib/rvc.ts'
@@ -132,6 +133,7 @@ import { cancelRvcGeneration, chooseRvcIndex, chooseRvcModel, convertRvcAudio, g
 import { type VoiceMixEntry, blendVoiceBins, fetchVoiceBin, formatMixFormula } from './lib/voice-mix.ts'
 import { type ClipRecord, type ClipSnapshot, clearLibraryWithSnapshot, enforceLibraryCap, freeLibrarySpace, listClips, restoreClipSnapshots, saveClip } from './lib/library.ts'
 import type { VoiceProvenance } from './lib/voice-lab.ts'
+import type { VoiceSourceInput } from './lib/voice-provenance.ts'
 import type { GenerationProvenanceManifest, ProvenanceCueTiming, ProvenanceReplayContext } from './lib/provenance.ts'
 import type { M4bCapability } from './lib/m4b.ts'
 import {
@@ -333,6 +335,10 @@ function outputSampleRateForEngine(engine: Engine): number {
   if (engine === 'piper') return PIPER_PLUS_SAMPLE_RATE
   if (engine === 'melo') return MELO_SAMPLE_RATE
   return KOKORO_SAMPLE_RATE
+}
+
+function isCloneDerivedVoice(voice: { source?: string; derivedFrom?: readonly string[] } | null | undefined): boolean {
+  return voice?.source === 'cloned' || voice?.derivedFrom?.includes('cloned') === true
 }
 
 type ByoDraft = {
@@ -2185,11 +2191,14 @@ function App() {
     formatOverride?: AudioFormat
     bitrateOverride?: number
     loudnessPresetOverride?: LoudnessPresetId
+    voiceProvenance?: VoiceSourceInput
+    clonedProvenance?: VoiceProvenance
+    rvcSource?: RvcClipProvenance
     source?: Partial<GenerationProvenanceManifest['source']>
     rvc?: GenerationProvenanceManifest['rvc']
   }): Promise<GenerationProvenanceManifest> {
     const selectedEngine = options.engineId ?? engine
-    const { createGenerationProvenance, createProvenanceEncoder, createProvenanceEngine } = await import('./lib/provenance.ts')
+    const { createGenerationProvenance, createGenerationVoiceSource, createProvenanceEncoder, createProvenanceEngine } = await import('./lib/provenance.ts')
     return createGenerationProvenance({
       appVersion: APP_VERSION,
       runtime: provenanceRuntime(),
@@ -2201,6 +2210,7 @@ function App() {
       ),
       voiceId: options.voiceId ?? 'unknown',
       locale: selectedEngine === 'kokoro' ? synthesisLocale : selectedEngine === 'piper' ? piperLanguage : selectedEngine === 'chatterbox' ? chatterboxLanguageId : undefined,
+      voiceProvenance: options.voiceProvenance ?? createGenerationVoiceSource(selectedEngine, options.voiceId ?? 'unknown', options.clonedProvenance, options.rvcSource),
       speed: options.speedOverride ?? speed,
       pitchSemitones: selectedEngine === 'kokoro' && options.postProcessing !== false ? pitchSemitones : 0,
       cleanup,
@@ -4248,18 +4258,20 @@ function App() {
         result.vttUrl = rememberUrl(URL.createObjectURL(new Blob([toVTT(cues)], { type: 'text/vtt' })))
       }
 
+      const rvcClipProvenance = rvcPlan ? createRvcClipProvenance(rvcPlan) : undefined
       const generationProvenance = await createCurrentProvenance({
         voiceId: job.voice,
         sourceText: synthesisText,
         sampleRate: outputSampleRate,
         cueCount: cues.length,
         cueTiming: wordTimestamps && englishKokoro ? 'word' : cues.length > 0 ? 'sentence' : 'none',
-        rvc: rvcPlan ? {
+        rvc: rvcClipProvenance ? {
+          ...rvcClipProvenance,
           enabled: true,
-          modelCount: rvcPlan.blend ? 2 : 1,
-          pitchSemitones: rvcPlan.pitchSemitones,
-          indexRate: rvcPlan.indexRate,
+          modelCount: rvcPlan?.blend ? 2 : 1,
         } : undefined,
+        clonedProvenance: voiceProvenance,
+        rvcSource: rvcClipProvenance,
       })
       result.provenanceManifest = generationProvenance
 
@@ -4274,7 +4286,7 @@ function App() {
         size: blob.size,
         duration: result.duration,
         cues: result.cues,
-        ...(rvcPlan ? { rvc: createRvcClipProvenance(rvcPlan) } : {}),
+        ...(rvcClipProvenance ? { rvc: rvcClipProvenance } : {}),
         provenance: voiceProvenance,
         generationProvenance,
         ...(dispatched.needsReview.length > 0 ? { qualityWarning: summarizeQualityIssues(dispatched.needsReview.flatMap((review) => review.issues)) } : {}),
@@ -4472,7 +4484,7 @@ function App() {
     }))
     await runSynthesis(jobs, {
       zipPrefix: 'bettertts-chatterbox',
-      successMessage: 'Chatterbox audio generated locally. PerTh watermark retained.',
+      successMessage: 'Chatterbox audio generated locally. Its model-specific PerTh watermark is retained.',
     })
   }
 
@@ -4708,6 +4720,10 @@ function App() {
 
   async function shareResult(result: AudioResult) {
     if (!result.url || !navigator.canShare) return
+    if (isCloneDerivedVoice(result.provenanceManifest?.voice)) {
+      const confirmed = window.confirm('This audio is derived from a reference or cloned voice. Review consent and model terms before sharing or publishing it. Continue?')
+      if (!confirmed) return
+    }
     try {
       const res = await fetch(result.url)
       const blob = await res.blob()
@@ -7076,7 +7092,7 @@ function App() {
                   >
                     <span>{engine === 'chatterbox' ? <Check size={17} aria-hidden="true" /> : null}</span>
                     <strong>Chatterbox</strong>
-                    <small>{chatterboxModelLabel(chatterboxModel)}. Reference-voice cloning, GPU preferred, PerTh watermark.</small>
+                    <small>{chatterboxModelLabel(chatterboxModel)}. Reference-voice cloning, GPU preferred, model-specific PerTh watermark.</small>
                   </button>
                 ) : null}
                 {desktopSidecar ? (
@@ -7902,7 +7918,7 @@ function App() {
                     onChange={(event) => setChatterboxExaggeration(Number(event.target.value))}
                   />
                 </div>
-                <small className="engine-note">Higher values exaggerate delivery and emotion. Generated audio retains Chatterbox&apos;s built-in PerTh watermark.</small>
+                <small className="engine-note">Higher values exaggerate delivery and emotion. Chatterbox output retains its model-specific PerTh watermark; other engines make no universal watermark claim.</small>
               </>
             ) : engine === 'melo' ? (
               <p className="engine-note">

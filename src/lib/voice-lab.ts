@@ -6,6 +6,7 @@ import {
   type ChatterboxModelVariant,
 } from './chatterbox-config.ts'
 import type { ChatterboxReference } from './chatterbox.ts'
+import { createVoiceSourceRecord, type VoiceConsentRecord, type VoiceSourceRecord, type VoiceWatermarkRecord } from './voice-provenance.ts'
 
 export type VoiceLabLicenseTier = 'permissive' | 'restricted' | 'non-commercial'
 
@@ -21,6 +22,7 @@ export type VoiceLabModel = {
 
 export type VoiceProvenance = {
   kind: 'reference-voice'
+  source: 'cloned'
   referenceId: string
   referenceName: string
   referenceDurationSeconds: number
@@ -29,6 +31,8 @@ export type VoiceProvenance = {
   modelLabel: string
   modelLicenseSpdx: string
   modelLicenseTier: 'permissive'
+  consent: VoiceConsentRecord
+  watermark: VoiceWatermarkRecord
 }
 
 export type VoiceProvenanceInput = {
@@ -92,6 +96,7 @@ export function createVoiceProvenance(input: VoiceProvenanceInput): VoiceProvena
   if (!modelId || !modelLabel || !modelLicenseSpdx) throw new Error('Voice-lab model metadata is incomplete.')
   return {
     kind: 'reference-voice',
+    source: 'cloned',
     referenceId,
     referenceName,
     referenceDurationSeconds: input.referenceDurationSeconds,
@@ -100,6 +105,17 @@ export function createVoiceProvenance(input: VoiceProvenanceInput): VoiceProvena
     modelLabel,
     modelLicenseSpdx,
     modelLicenseTier: 'permissive',
+    consent: {
+      required: true,
+      acknowledged: true,
+      acknowledgedAt: input.acknowledgedAt,
+    },
+    watermark: {
+      status: 'retained',
+      label: 'PerTh',
+      modelId,
+      note: 'Chatterbox model-specific watermark retained; this status does not apply to other voice models.',
+    },
   }
 }
 
@@ -113,12 +129,28 @@ export default function createChatterboxVoiceProvenance(reference: ChatterboxRef
   })
 }
 
+export function voiceLabProvenanceToSource(provenance: VoiceProvenance): VoiceSourceRecord {
+  return createVoiceSourceRecord({
+    source: 'cloned',
+    sourceId: provenance.referenceId,
+    sourceName: provenance.referenceName,
+    sourceDurationSeconds: provenance.referenceDurationSeconds,
+    modelId: provenance.modelId,
+    modelLabel: provenance.modelLabel,
+    modelLicense: provenance.modelLicenseSpdx,
+    provenance: 'Reference clip supplied by the operator; source audio is not persisted by BetterTTS.',
+    consent: provenance.consent,
+    watermark: provenance.watermark,
+  })
+}
+
 /** Fail closed when old or externally edited library records lack the policy fields. */
 export function migrateVoiceProvenance(value: unknown): VoiceProvenance | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const candidate = value as Partial<VoiceProvenance>
   if (
     candidate.kind !== 'reference-voice'
+    || (candidate.source !== undefined && candidate.source !== 'cloned')
     || candidate.modelLicenseTier !== 'permissive'
     || !validTimestamp(candidate.acknowledgedAt)
     || !validReferenceDuration(candidate.referenceDurationSeconds)
@@ -129,8 +161,13 @@ export function migrateVoiceProvenance(value: unknown): VoiceProvenance | null {
   const modelLabel = boundedText(candidate.modelLabel, 200)
   const modelLicenseSpdx = boundedText(candidate.modelLicenseSpdx, 120)
   if (!referenceId || !referenceName || !modelId || !modelLabel || !modelLicenseSpdx) return null
+  const consent = candidate.consent
+  if (consent !== undefined && (consent.required !== true || consent.acknowledged !== true || consent.acknowledgedAt !== candidate.acknowledgedAt)) return null
+  const watermark = candidate.watermark
+  if (watermark !== undefined && (watermark.status !== 'retained' || watermark.modelId !== modelId)) return null
   return {
     kind: 'reference-voice',
+    source: 'cloned',
     referenceId,
     referenceName,
     referenceDurationSeconds: candidate.referenceDurationSeconds,
@@ -139,5 +176,16 @@ export function migrateVoiceProvenance(value: unknown): VoiceProvenance | null {
     modelLabel,
     modelLicenseSpdx,
     modelLicenseTier: 'permissive',
+    consent: consent ?? {
+      required: true,
+      acknowledged: true,
+      acknowledgedAt: candidate.acknowledgedAt,
+    },
+    watermark: watermark ?? {
+      status: 'retained',
+      label: 'PerTh',
+      modelId,
+      note: 'Chatterbox model-specific watermark retained; this status does not apply to other voice models.',
+    },
   }
 }

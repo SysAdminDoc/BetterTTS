@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "shell": {
-    "maxRawBytes": 614400,
+    "maxRawBytes": 615600,
     "maxGzipBytes": 177000,
     "maxTimeToInteractiveMs": 5000,
     "maxInitialRequests": 8,

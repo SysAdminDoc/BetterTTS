@@ -4,6 +4,8 @@
  * these files until a future compatible adapter is explicitly selected.
  */
 
+import type { VoiceSourceInput } from './voice-provenance.ts'
+
 export const BYO_MODELS_STORAGE_KEY = 'bettertts-byo-models'
 export const BYO_CONSENT_STORAGE_KEY = 'bettertts-byo-non-commercial-consent'
 export const MAX_BYO_MODELS = 12
@@ -175,4 +177,26 @@ export function upsertByoModelRecord(records: ByoModelRecord[], next: ByoModelRe
 
 export function removeByoModelRecord(records: ByoModelRecord[], recordId: string): ByoModelRecord[] {
   return records.filter((record) => record.id !== recordId)
+}
+
+export function byoModelToVoiceSource(record: ByoModelRecord, consent: boolean): VoiceSourceInput {
+  if (!consent) throw new Error('Enable the BYO consent gate before attributing a user-supplied voice.')
+  return {
+    source: 'user-supplied',
+    sourceId: record.id,
+    sourceName: record.modelName,
+    modelId: record.modelId,
+    modelLabel: record.modelName,
+    modelLicense: record.license,
+    provenance: record.provenance,
+    consent: {
+      required: true,
+      acknowledged: true,
+      acknowledgedAt: record.acknowledgedAt,
+    },
+    watermark: {
+      status: 'unknown',
+      note: 'User-supplied model watermark status must be verified from its recorded terms.',
+    },
+  }
 }

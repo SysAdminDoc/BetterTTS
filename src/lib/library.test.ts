@@ -68,6 +68,7 @@ describe('library', () => {
       ...record('reference', 1),
       provenance: {
         kind: 'reference-voice' as const,
+        source: 'cloned' as const,
         referenceId: 'reference-a',
         referenceName: 'speaker.wav',
         referenceDurationSeconds: 4.25,
@@ -76,6 +77,17 @@ describe('library', () => {
         modelLabel: 'Chatterbox English',
         modelLicenseSpdx: 'MIT',
         modelLicenseTier: 'permissive' as const,
+        consent: {
+          required: true,
+          acknowledged: true,
+          acknowledgedAt: '2026-08-03T12:00:00.000Z',
+        },
+        watermark: {
+          status: 'retained' as const,
+          label: 'PerTh',
+          modelId: 'onnx-community/chatterbox-ONNX',
+          note: 'Chatterbox model-specific watermark retained; this status does not apply to other voice models.',
+        },
       },
     }
     await saveClip(valid, new Blob(['reference']))

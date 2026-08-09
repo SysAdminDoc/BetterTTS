@@ -70,6 +70,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
       })
     : undefined
   const rvc = migrateRvcProvenance(record.rvc)
+  const provenance = record.provenance
   const generationProvenance = migrateGenerationProvenance(record.generationProvenance)
   const qualityWarning = typeof record.qualityWarning === 'string' && record.qualityWarning.trim()
     ? record.qualityWarning.slice(0, 500)
@@ -89,7 +90,7 @@ export function migrateClipRecord(raw: unknown): ClipRecord | null {
     duration: record.duration,
     cues,
     ...(rvc ? { rvc } : {}),
-    provenance: record.provenance,
+    ...(provenance ? { provenance } : {}),
     ...(generationProvenance ? { generationProvenance } : {}),
     ...(qualityWarning ? { qualityWarning } : {}),
   }
@@ -108,14 +109,23 @@ function migrateRvcProvenance(value: unknown): RvcClipProvenance | null {
       || typeof item.name !== 'string' || !item.name || item.name.length > 120
       || typeof item.license !== 'string' || !item.license || item.license.length > 200
       || typeof item.provenance !== 'string' || !item.provenance || item.provenance.length > 600
+      || (item.acknowledgedAt !== undefined && (typeof item.acknowledgedAt !== 'string' || !Number.isFinite(Date.parse(item.acknowledgedAt))))
     ) return []
-    return [{ id: item.id, name: item.name, license: item.license, provenance: item.provenance }]
+    return [{
+      id: item.id,
+      name: item.name,
+      license: item.license,
+      provenance: item.provenance,
+      ...(item.acknowledgedAt ? { acknowledgedAt: item.acknowledgedAt } : {}),
+    }]
   })
   if (models.length !== candidate.models.length || typeof candidate.appliedAt !== 'string' || !Number.isFinite(Date.parse(candidate.appliedAt))) return null
   if (candidate.blendRatio !== undefined && (!Number.isFinite(candidate.blendRatio) || candidate.blendRatio < 0 || candidate.blendRatio > 1)) return null
+  if (candidate.consentAcknowledgedAt !== undefined && (typeof candidate.consentAcknowledgedAt !== 'string' || !Number.isFinite(Date.parse(candidate.consentAcknowledgedAt)))) return null
   return {
     stage: 'rvc',
     appliedAt: candidate.appliedAt,
+    ...(candidate.consentAcknowledgedAt ? { consentAcknowledgedAt: candidate.consentAcknowledgedAt } : {}),
     models,
     ...(candidate.blendRatio === undefined ? {} : { blendRatio: candidate.blendRatio }),
     pitchSemitones: Math.max(-24, Math.min(24, Number(candidate.pitchSemitones))),

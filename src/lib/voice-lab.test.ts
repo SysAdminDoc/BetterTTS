@@ -48,6 +48,7 @@ describe('voice lab policy', () => {
     })
     expect(provenance).toEqual({
       kind: 'reference-voice',
+      source: 'cloned',
       referenceId: 'reference-a',
       referenceName: 'speaker.wav',
       referenceDurationSeconds: 4.25,
@@ -56,6 +57,17 @@ describe('voice lab policy', () => {
       modelLabel: 'Chatterbox English',
       modelLicenseSpdx: 'MIT',
       modelLicenseTier: 'permissive',
+      consent: {
+        required: true,
+        acknowledged: true,
+        acknowledgedAt: '2026-08-03T12:00:00.000Z',
+      },
+      watermark: {
+        status: 'retained',
+        label: 'PerTh',
+        modelId: 'onnx-community/chatterbox-ONNX',
+        note: 'Chatterbox model-specific watermark retained; this status does not apply to other voice models.',
+      },
     })
     expect(() => createVoiceProvenance({
       referenceId: 'reference-a',

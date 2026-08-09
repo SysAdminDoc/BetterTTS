@@ -98,6 +98,45 @@ describe('generation provenance', () => {
     expect(optedIn.source.articleUrl).toBe('https://example.test/private')
   })
 
+  it('exports voice source, acknowledgement, and model watermark status', async () => {
+    const manifest = await createGenerationProvenance({
+      ...input,
+      voiceProvenance: {
+        source: 'cloned',
+        sourceId: 'reference-a',
+        sourceName: 'speaker.wav',
+        sourceDurationSeconds: 4.25,
+        modelId: 'onnx-community/chatterbox-ONNX',
+        modelLabel: 'Chatterbox English',
+        modelLicense: 'MIT',
+        consent: { required: true, acknowledged: true, acknowledgedAt: '2026-08-03T12:00:00.000Z' },
+        watermark: { status: 'retained', label: 'PerTh', modelId: 'onnx-community/chatterbox-ONNX' },
+      },
+      rvc: {
+        stage: 'rvc',
+        enabled: true,
+        modelCount: 1,
+        pitchSemitones: 0,
+        indexRate: 0.5,
+        consentAcknowledgedAt: '2026-08-03T12:00:00.000Z',
+        models: [{ id: 'rvc-a', name: 'RVC A', license: 'MIT', provenance: 'Local', acknowledgedAt: '2026-08-03T12:00:00.000Z' }],
+      },
+    })
+    expect(manifest.schemaVersion).toBe(PROVENANCE_SCHEMA_VERSION)
+    expect(manifest.voice).toMatchObject({
+      provenanceSchemaVersion: 1,
+      source: 'cloned',
+      sourceId: 'reference-a',
+      consent: { required: true, acknowledged: true, acknowledgedAt: '2026-08-03T12:00:00.000Z' },
+      watermark: { status: 'retained', label: 'PerTh' },
+    })
+    expect(manifest.rvc).toMatchObject({
+      stage: 'rvc',
+      consentAcknowledgedAt: '2026-08-03T12:00:00.000Z',
+      models: [{ id: 'rvc-a', acknowledgedAt: '2026-08-03T12:00:00.000Z' }],
+    })
+  })
+
   it('migrates absent and version-zero manifests to an explicit replay warning', () => {
     const legacy = migrateGenerationProvenance(undefined, { voice: 'af_heart', speed: 1, format: 'wav' })
     expect(legacy?.legacy).toBe(true)
@@ -114,6 +153,24 @@ describe('generation provenance', () => {
       legacy: true,
       engine: { id: 'kokoro', modelId: 'old-model', modelRevision: 'old-revision' },
       voice: { id: 'af_bella' },
+    })
+  })
+
+  it('migrates schema-two manifests without inventing a watermark or consent claim', async () => {
+    const current = await createGenerationProvenance(input)
+    const old = {
+      ...current,
+      schemaVersion: 2,
+      voice: { id: current.voice.id, locale: current.voice.locale },
+    }
+    const migrated = migrateGenerationProvenance(old)
+    expect(migrated).toMatchObject({
+      schemaVersion: PROVENANCE_SCHEMA_VERSION,
+      voice: {
+        source: 'unknown',
+        consent: { required: false, acknowledged: false },
+        watermark: { status: 'unknown' },
+      },
     })
   })
 
@@ -153,7 +210,7 @@ describe('generation provenance', () => {
       voiceId: 'af_bella',
     })
     expect(manifest).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       legacy: true,
       engine: { id: 'kokoro', modelId: 'old-model', modelRevision: 'old-revision' },
       voice: { id: 'af_bella' },

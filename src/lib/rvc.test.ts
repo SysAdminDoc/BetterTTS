@@ -78,9 +78,10 @@ describe('RVC inference planning', () => {
     expect(createRvcClipProvenance(plan!, '2026-08-03T12:01:00.000Z')).toEqual({
       stage: 'rvc',
       appliedAt: '2026-08-03T12:01:00.000Z',
+      consentAcknowledgedAt: '2026-08-03T12:00:00.000Z',
       models: [
-        { id: first.id, name: 'Voice A', license: 'MIT', provenance: 'Local model owned by the operator.' },
-        { id: second.id, name: 'Voice B', license: 'CC-BY-4.0', provenance: 'Downloaded from a reviewed release.' },
+        { id: first.id, name: 'Voice A', license: 'MIT', provenance: 'Local model owned by the operator.', acknowledgedAt: '2026-08-03T12:00:00.000Z' },
+        { id: second.id, name: 'Voice B', license: 'CC-BY-4.0', provenance: 'Downloaded from a reviewed release.', acknowledgedAt: '2026-08-03T12:00:00.000Z' },
       ],
       blendRatio: 0.7,
       pitchSemitones: 2,
