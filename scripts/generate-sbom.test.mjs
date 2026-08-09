@@ -13,7 +13,9 @@ describe('CycloneDX release SBOM', () => {
     expect(new Set(runtimePackages
       .filter((component) => component.properties?.some((entry) => entry.name === 'bettertts:runtime-direct' && entry.value === 'true'))
       .map((component) => component.name)).size).toBe(21)
-    expect(models).toHaveLength(11)
+    expect(models).toHaveLength(12)
+    expect(models.every((component) => !['main', 'sidecar-managed', 'browser-managed', 'user-managed'].includes(component.version))).toBe(true)
+    expect(models.find((component) => component['bom-ref'] === 'model:qwen')?.version).toBe('85e237c12c027371202489a0ec509ded67b5e4b5')
     expect(files.length).toBeGreaterThan(30)
     expect(files.every((component) => component.hashes?.some((hash) => hash.alg === 'SHA-256'))).toBe(true)
     expect(files.some((component) => component.properties?.some((entry) => entry.value === 'github-pages-model-cache'))).toBe(true)

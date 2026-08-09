@@ -1,7 +1,7 @@
-import type { CapabilityEngine } from './capabilities.ts'
+import type { CapabilityEngineCore } from './capabilities.ts'
 
 export const APP_VERSION = "0.23.0"
-export const CORE_ENGINES: readonly CapabilityEngine[] = [
+export const CORE_ENGINES: readonly CapabilityEngineCore[] = [
   {
     "id": "kokoro",
     "label": "Kokoro local",
@@ -238,3 +238,4 @@ export const CORE_ENGINES: readonly CapabilityEngine[] = [
     "postStages": []
   }
 ]
+export const CORE_SUPERTONIC_MODEL_REVISION = "cff123c84b0655d9d647641f1b532c3cbb8f7faa"

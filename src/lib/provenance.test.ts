@@ -6,6 +6,7 @@ import {
   PROVENANCE_SCHEMA_VERSION,
   createGenerationProvenance,
   createLegacyProvenanceManifest,
+  createProvenanceEngine,
   migrateGenerationProvenance,
   provenanceReplayWarning,
   updateProvenanceCueSummary,
@@ -41,6 +42,36 @@ const input = {
 }
 
 describe('generation provenance', () => {
+  it('derives immutable model and runtime identities from the capability manifest', () => {
+    expect(createProvenanceEngine('supertonic')).toMatchObject({
+      modelId: 'onnx-community/Supertonic-TTS-ONNX',
+      modelRevision: 'cff123c84b0655d9d647641f1b532c3cbb8f7faa',
+      modelSourceUrl: 'https://huggingface.co/onnx-community/Supertonic-TTS-ONNX/tree/cff123c84b0655d9d647641f1b532c3cbb8f7faa',
+      runtimeIdentities: [expect.objectContaining({ id: 'transformers-browser', kind: 'npm' })],
+    })
+    expect(createProvenanceEngine('chatterbox', 'multilingual')).toMatchObject({
+      modelId: 'onnx-community/chatterbox-multilingual-ONNX',
+      modelRevision: '452d3f434aa592098f1eedac9099f33642ab2da5',
+    })
+    expect(createProvenanceEngine('kitten', 'english', 'browser', 'mini')).toMatchObject({
+      modelId: 'KittenML/kitten-tts-mini-0.8',
+      modelRevision: 'c02725660cea441db4c383af69f1f26f5cd00947',
+    })
+    expect(createProvenanceEngine('piper', 'english', 'native')).toMatchObject({
+      modelId: 'csukuangfj/vits-piper-en_GB-cori-medium',
+      modelRevision: 'e304c95c578725ba9cab0cff451c4e5d9aaf889e',
+      runtimeIdentities: [expect.objectContaining({ id: 'sherpa-native' })],
+    })
+    expect(createProvenanceEngine('qwen', 'english', 'sidecar')).toMatchObject({
+      modelRevision: '85e237c12c027371202489a0ec509ded67b5e4b5',
+      runtimeIdentities: [expect.objectContaining({ id: 'qwen-sidecar', manifestSha256: expect.any(String) })],
+    })
+    expect(createProvenanceEngine('browser')).toMatchObject({
+      modelRevision: '8307ee199cbcaa8a26f6d86663b9d803d1cc8d0f',
+      runtimeIdentities: [expect.objectContaining({ id: 'web-speech-api', kind: 'platform' })],
+    })
+  })
+
   it('records bounded generation details while keeping source text and URLs opt-in', async () => {
     const manifest = await createGenerationProvenance(input)
 
@@ -122,7 +153,7 @@ describe('generation provenance', () => {
       voiceId: 'af_bella',
     })
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       legacy: true,
       engine: { id: 'kokoro', modelId: 'old-model', modelRevision: 'old-revision' },
       voice: { id: 'af_bella' },

@@ -2,16 +2,45 @@ import type { AudioCleanupMode } from '../platform/index.ts'
 import type { AudioFormat, LoudnessPresetId } from './encode.ts'
 import type { CleanupOptions, PunctuationPauseSettings } from './text.ts'
 import type { PronunciationDictionary } from './pronunciations.ts'
+import { capabilityEngine, capabilityModel, capabilityModelVariant, capabilityRuntime } from './capabilities.ts'
 
-export const PROVENANCE_SCHEMA_VERSION = 1 as const
+export const PROVENANCE_SCHEMA_VERSION = 2 as const
 export const PROVENANCE_CUE_SCHEMA_VERSION = 1 as const
 const HASH_PATTERN = /^[a-f0-9]{64}$/iu
 const MAX_TEXT_CHARS = 5000
 const MAX_STRING_CHARS = 300
 
 export type ProvenanceRuntimeTarget = 'web' | 'desktop'
+export type ProvenanceRuntimeKind = 'browser' | 'native' | 'sidecar'
 export type ProvenanceCueTiming = 'none' | 'sentence' | 'word'
 export type ProvenanceSourceKind = 'text' | 'article' | 'epub' | 'pdf' | 'docx' | 'subtitle' | 'unknown'
+
+export type ProvenanceArtifact = {
+  path: string
+  sizeBytes: number
+  sha256: string
+  sourceUrl?: string
+}
+
+export type ProvenanceRuntimePackage = {
+  name: string
+  version: string
+  integrity?: string
+  resolved?: string
+  sha256?: string
+  sourceUrl?: string
+}
+
+export type ProvenanceRuntimeIdentity = {
+  id: string
+  runtime: ProvenanceRuntimeKind
+  kind: 'npm' | 'sidecar' | 'platform'
+  revision: string
+  sourceUrl: string
+  packages: readonly ProvenanceRuntimePackage[]
+  manifestFile?: string
+  manifestSha256?: string
+}
 
 export type GenerationProvenanceManifest = {
   schemaVersion: typeof PROVENANCE_SCHEMA_VERSION
@@ -29,6 +58,9 @@ export type GenerationProvenanceManifest = {
     id: string
     modelId: string
     modelRevision: string
+    modelSourceUrl?: string
+    modelArtifacts?: readonly ProvenanceArtifact[]
+    runtimeIdentities?: readonly ProvenanceRuntimeIdentity[]
   }
   voice: {
     id: string
@@ -91,21 +123,51 @@ export type ProvenanceEngineInput = {
   id: string
   modelId: string
   modelRevision: string
+  modelSourceUrl?: string
+  modelArtifacts?: readonly ProvenanceArtifact[]
+  runtimeIdentities?: readonly ProvenanceRuntimeIdentity[]
 }
 
-export function createProvenanceEngine(engineId: string, chatterboxModel: 'english' | 'multilingual' = 'english'): ProvenanceEngineInput {
-  if (engineId === 'kokoro') return { id: 'kokoro', modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX', modelRevision: '1939ad2a8e416c0acfeecc08a694d14ef25f2231' }
-  if (engineId === 'supertonic') return { id: 'supertonic', modelId: 'onnx-community/Supertonic-TTS-ONNX', modelRevision: 'main' }
-  if (engineId === 'kitten') return { id: 'kitten', modelId: 'kitten-tts-webgpu', modelRevision: '0.1.1' }
-  if (engineId === 'chatterbox') return {
-    id: 'chatterbox',
-    modelId: chatterboxModel === 'multilingual' ? 'onnx-community/chatterbox-multilingual-ONNX' : 'onnx-community/chatterbox-ONNX',
-    modelRevision: 'main',
+export function createProvenanceEngine(
+  engineId: string,
+  chatterboxModel: 'english' | 'multilingual' = 'english',
+  runtimeKind?: ProvenanceRuntimeKind,
+  modelVariant?: string,
+): ProvenanceEngineInput {
+  const engine = capabilityEngine(engineId)
+  const modelIds = engine?.provenance.modelIds ?? ['browser']
+  const variantModelId = engineId === 'chatterbox'
+    ? chatterboxModel === 'multilingual' ? 'chatterbox-multilingual' : 'chatterbox'
+    : undefined
+  const routeModelId = variantModelId ?? (runtimeKind === 'native'
+    ? modelIds.find((id) => id.startsWith('sherpa-'))
+    : runtimeKind === 'browser'
+      ? modelIds.find((id) => !id.startsWith('sherpa-'))
+      : undefined) ?? modelIds[0]
+  const model = modelVariant && engineId === 'kitten'
+    ? capabilityModelVariant('kitten', modelVariant) ?? capabilityModel(routeModelId)
+    : capabilityModel(routeModelId)
+  const runtimeIdentities = (engine?.provenance.runtimeIds ?? ['web-speech-api'])
+    .map((id) => capabilityRuntime(id))
+    .filter((runtime): runtime is NonNullable<ReturnType<typeof capabilityRuntime>> => runtime !== undefined && (runtimeKind === undefined || runtime.runtime === runtimeKind))
+    .map((runtime) => ({
+      id: runtime.id,
+      runtime: runtime.runtime,
+      kind: runtime.kind,
+      revision: runtime.revision,
+      sourceUrl: runtime.sourceUrl,
+      packages: runtime.packages.map((packageIdentity) => ({ ...packageIdentity })),
+      ...(runtime.manifestFile ? { manifestFile: runtime.manifestFile } : {}),
+      ...(runtime.manifestSha256 ? { manifestSha256: runtime.manifestSha256 } : {}),
+    }))
+  return {
+    id: engine?.id ?? 'browser',
+    modelId: model?.modelId ?? 'Web Speech API',
+    modelRevision: model?.revision ?? '8307ee199cbcaa8a26f6d86663b9d803d1cc8d0f',
+    ...(model?.sourceUrl ? { modelSourceUrl: model.sourceUrl } : {}),
+    ...(model?.artifacts ? { modelArtifacts: model.artifacts.map((artifact) => ({ ...artifact })) } : {}),
+    ...(runtimeIdentities.length > 0 ? { runtimeIdentities } : {}),
   }
-  if (engineId === 'piper') return { id: 'piper', modelId: 'ayousanz/piper-plus-tsukuyomi-chan', modelRevision: '0.6.0' }
-  if (engineId === 'melo') return { id: 'melo', modelId: 'myshell-ai/MeloTTS-Chinese', modelRevision: 'af5d207a364ea4208c6f589c89f57f88414bdd16' }
-  if (engineId === 'qwen') return { id: 'qwen', modelId: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice', modelRevision: 'sidecar-managed' }
-  return { id: 'browser', modelId: 'Web Speech API', modelRevision: 'browser-managed' }
 }
 
 export type ProvenanceEncoderInput = {
@@ -243,6 +305,9 @@ export async function createGenerationProvenance(input: ProvenanceInput): Promis
       id: boundedString(input.engine.id, 80) ?? 'unknown',
       modelId: boundedString(input.engine.modelId, MAX_STRING_CHARS) ?? 'unknown',
       modelRevision: boundedString(input.engine.modelRevision, MAX_STRING_CHARS) ?? 'unknown',
+      ...(input.engine.modelSourceUrl !== undefined ? { modelSourceUrl: boundedUrl(input.engine.modelSourceUrl) } : {}),
+      ...(input.engine.modelArtifacts !== undefined ? { modelArtifacts: normalizeArtifacts(input.engine.modelArtifacts) } : {}),
+      ...(input.engine.runtimeIdentities !== undefined ? { runtimeIdentities: normalizeRuntimeIdentities(input.engine.runtimeIdentities) } : {}),
     },
     voice: {
       id: boundedString(input.voiceId, MAX_STRING_CHARS) ?? 'unknown',
@@ -336,6 +401,13 @@ export function migrateGenerationProvenance(raw: unknown, legacyInput?: Paramete
     return legacyInput ? createLegacyProvenanceManifest(legacyInput) : null
   }
   const candidate = raw as Record<string, unknown>
+  if (candidate.schemaVersion === 1) {
+    try {
+      return normalizeManifest({ ...candidate, schemaVersion: PROVENANCE_SCHEMA_VERSION })
+    } catch {
+      return legacyInput ? createLegacyProvenanceManifest(legacyInput) : null
+    }
+  }
   if (candidate.schemaVersion !== PROVENANCE_SCHEMA_VERSION) {
     if (candidate.schemaVersion === 0 || candidate.version === 0) {
       const migrated = createLegacyProvenanceManifest(legacyInput ?? {})
@@ -414,6 +486,10 @@ function normalizeManifest(raw: unknown): GenerationProvenanceManifest {
   if (textHash === undefined) throw new Error('Invalid provenance source hash.')
   const dictionaryHash = pronunciation.dictionaryHash === '' ? '' : normalizeHash(pronunciation.dictionaryHash)
   if (dictionaryHash === undefined) throw new Error('Invalid pronunciation hash.')
+  const modelSourceUrl = engine.modelSourceUrl === undefined ? undefined : boundedUrl(engine.modelSourceUrl)
+  if (engine.modelSourceUrl !== undefined && modelSourceUrl === undefined) throw new Error('Invalid provenance model source URL.')
+  const modelArtifacts = engine.modelArtifacts === undefined ? undefined : normalizeArtifacts(engine.modelArtifacts)
+  const runtimeIdentities = engine.runtimeIdentities === undefined ? undefined : normalizeRuntimeIdentities(engine.runtimeIdentities)
   const manifest: GenerationProvenanceManifest = {
     schemaVersion: PROVENANCE_SCHEMA_VERSION,
     createdAt: new Date(String(value.createdAt)).toISOString(),
@@ -427,6 +503,9 @@ function normalizeManifest(raw: unknown): GenerationProvenanceManifest {
       id: boundedString(engine.id, 80) ?? 'unknown',
       modelId: boundedString(engine.modelId, MAX_STRING_CHARS) ?? 'unknown',
       modelRevision: boundedString(engine.modelRevision, MAX_STRING_CHARS) ?? 'unknown',
+      ...(modelSourceUrl ? { modelSourceUrl } : {}),
+      ...(modelArtifacts ? { modelArtifacts } : {}),
+      ...(runtimeIdentities ? { runtimeIdentities } : {}),
     },
     voice: {
       id: boundedString(voice.id, MAX_STRING_CHARS) ?? 'unknown',
@@ -482,6 +561,71 @@ function normalizeManifest(raw: unknown): GenerationProvenanceManifest {
     ...(value.legacy === true ? { legacy: true } : {}),
   }
   return manifest
+}
+
+function normalizeArtifacts(value: unknown): ProvenanceArtifact[] {
+  if (!Array.isArray(value)) throw new Error('Invalid provenance model artifacts.')
+  return value.slice(0, 64).map((artifact) => {
+    const candidate = record(artifact)
+    const path = boundedString(candidate?.path, MAX_STRING_CHARS)
+    const sha256 = normalizeHash(candidate?.sha256)
+    const sourceUrl = candidate?.sourceUrl === undefined ? undefined : boundedUrl(candidate.sourceUrl)
+    if (!path || !Number.isSafeInteger(candidate?.sizeBytes) || Number(candidate?.sizeBytes) < 0 || !sha256 || (candidate?.sourceUrl !== undefined && !sourceUrl)) {
+      throw new Error('Invalid provenance model artifact.')
+    }
+    return {
+      path,
+      sizeBytes: Number(candidate?.sizeBytes),
+      sha256,
+      ...(sourceUrl ? { sourceUrl } : {}),
+    }
+  })
+}
+
+function normalizeRuntimeIdentities(value: unknown): ProvenanceRuntimeIdentity[] {
+  if (!Array.isArray(value)) throw new Error('Invalid provenance runtime identities.')
+  return value.slice(0, 16).map((identity) => {
+    const candidate = record(identity)
+    const id = boundedString(candidate?.id, MAX_STRING_CHARS)
+    const runtime = candidate?.runtime === 'native' || candidate?.runtime === 'sidecar' ? candidate.runtime : candidate?.runtime === 'browser' ? 'browser' : undefined
+    const kind = candidate?.kind === 'npm' || candidate?.kind === 'sidecar' || candidate?.kind === 'platform' ? candidate.kind : undefined
+    const revision = boundedString(candidate?.revision, MAX_STRING_CHARS)
+    const sourceUrl = boundedUrl(candidate?.sourceUrl)
+    if (!id || !runtime || !kind || !revision || !sourceUrl || !Array.isArray(candidate?.packages)) throw new Error('Invalid provenance runtime identity.')
+    const packages = candidate.packages.slice(0, 32).map((packageValue) => {
+      const packageCandidate = record(packageValue)
+      const name = boundedString(packageCandidate?.name, MAX_STRING_CHARS)
+      const version = boundedString(packageCandidate?.version, 80)
+      const packageSourceUrl = packageCandidate?.sourceUrl === undefined ? undefined : boundedUrl(packageCandidate.sourceUrl)
+      const resolved = packageCandidate?.resolved === undefined ? undefined : boundedUrl(packageCandidate.resolved)
+      const integrity = packageCandidate?.integrity === undefined ? undefined : boundedString(packageCandidate.integrity, MAX_STRING_CHARS)
+      const sha256 = packageCandidate?.sha256 === undefined ? undefined : normalizeHash(packageCandidate.sha256)
+      if (!name || !version || (packageCandidate?.sourceUrl !== undefined && !packageSourceUrl) || (packageCandidate?.resolved !== undefined && !resolved) || (packageCandidate?.integrity !== undefined && !integrity) || (packageCandidate?.sha256 !== undefined && !sha256)) {
+        throw new Error('Invalid provenance runtime package identity.')
+      }
+      return {
+        name,
+        version,
+        ...(integrity ? { integrity } : {}),
+        ...(resolved ? { resolved } : {}),
+        ...(sha256 ? { sha256 } : {}),
+        ...(packageSourceUrl ? { sourceUrl: packageSourceUrl } : {}),
+      }
+    })
+    const manifestFile = candidate?.manifestFile === undefined ? undefined : boundedString(candidate.manifestFile, MAX_STRING_CHARS)
+    const manifestSha256 = candidate?.manifestSha256 === undefined ? undefined : normalizeHash(candidate.manifestSha256)
+    if (candidate?.manifestFile !== undefined && !manifestFile || candidate?.manifestSha256 !== undefined && !manifestSha256) throw new Error('Invalid provenance runtime manifest identity.')
+    return {
+      id,
+      runtime,
+      kind,
+      revision,
+      sourceUrl,
+      packages,
+      ...(manifestFile ? { manifestFile } : {}),
+      ...(manifestSha256 ? { manifestSha256 } : {}),
+    }
+  })
 }
 
 function normalizeRvc(value: unknown): NonNullable<GenerationProvenanceManifest['rvc']> {

@@ -9,9 +9,11 @@
 - The opt-in loopback OpenAI-compatible server now issues a fresh Bearer token per start, uses an exact browser-origin allowlist instead of wildcard CORS, bounds concurrent/rate-limited requests, enforces deadlines, and revokes active work and credentials on shutdown.
 - Qwen desktop setup now uses a Windows/Python 3.12 runtime manifest with a fully hashed pip lock, staged venv promotion and crash recovery, offline wheelhouse repair, disk/memory/GPU preflight, immutable model revision and per-file verification, and bounded setup/generation timeouts; the bridge reports qwenVersion and torchVersion consistently.
 - Native Sherpa pack setup now single-flights concurrent installs per pinned pack, while the inference host owns one request at a time, implements cancel-one/cancel-all, bounds PCM transport to 512 MiB, and restarts after a hung generation or blocked cancellation.
+- Capability metadata is now a versioned provenance contract: every engine references immutable model revisions, HTTPS sources, available artifact hashes, exact npm lockfile identities, or hashed sidecar/platform manifests; `npm run capabilities:check` rejects mutable or stale identities before release.
 
 ### Changed
 - Portable backup restore now stages the incoming archive and previous local state in a versioned journal before replacing IndexedDB data, commits only after verification, and rolls back or cleans up interrupted restores on the next startup.
+- Saved generation provenance now derives model URLs, revisions, artifacts, runtime package identities, and sidecar manifest hashes from the generated capability manifest; Supertonic and Chatterbox downloads use the same immutable revisions.
 
 ## v0.23.0 - 2026-08-03
 

@@ -1,6 +1,6 @@
 import type { ByoModelOptionId } from './byo-models.ts'
 import { CORE_ENGINES } from './capabilities-core.ts'
-import type { CapabilityEngine, CapabilityEngineId } from './capabilities.ts'
+import type { CapabilityEngineCore, CapabilityEngineId } from './capabilities.ts'
 
 export type {
   EngineAccelerator,
@@ -41,7 +41,7 @@ export const POST_STAGE_REGISTRY: PostStageDescriptor[] = [
   { id: 'rvc', label: 'RVC voice conversion', desktopOnly: true, consentRequired: true },
 ]
 
-export type EngineDescriptor = CapabilityEngine
+export type EngineDescriptor = CapabilityEngineCore
 
 export type EngineFlags = {
   piperPlus: boolean

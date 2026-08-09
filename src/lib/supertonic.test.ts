@@ -7,7 +7,7 @@ describe('supertonic metadata', () => {
   })
 
   it('builds the speaker embedding URL expected by Transformers.js', () => {
-    expect(supertonicVoiceUrl('F1')).toBe('https://huggingface.co/onnx-community/Supertonic-TTS-ONNX/resolve/main/voices/F1.bin')
+    expect(supertonicVoiceUrl('F1')).toBe('https://huggingface.co/onnx-community/Supertonic-TTS-ONNX/resolve/cff123c84b0655d9d647641f1b532c3cbb8f7faa/voices/F1.bin')
   })
 
   it('keeps Supertonic controls in the documented operating range', () => {

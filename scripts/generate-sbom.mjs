@@ -233,7 +233,10 @@ function normalizePackageLicense(value) {
 function buildModelComponent(model, sources) {
   const relatedSources = sources.filter((source) => source.capabilityIds.includes(model.id))
   const revisions = [...new Set(relatedSources.map((source) => source.revision))]
-  const revision = revisions[0] ?? defaultRevision(model)
+  const revision = model.revision
+  if (revisions.some((sourceRevision) => sourceRevision !== revision)) {
+    throw new Error(`SBOM model ${model.id} has a source revision that does not match capabilities.json.`)
+  }
   const route = relatedSources.length > 0 ? [...new Set(relatedSources.map((source) => source.distributionRoute))].join(',') : defaultRoute(model)
   const component = {
     type: 'machine-learning-model',
@@ -245,8 +248,9 @@ function buildModelComponent(model, sources) {
     properties: [
       property('bettertts:capability-id', model.id),
       property('bettertts:model-id', model.modelId),
-      property('bettertts:repository', modelRepositoryUrl(model.modelId)),
+      property('bettertts:repository', model.sourceUrl),
       property('bettertts:revision', revision),
+      property('bettertts:source-url', model.sourceUrl),
       property('bettertts:distribution-route', route),
       property('bettertts:license-tier', model.license.tier),
       property('bettertts:execution-payload', executionPayload(model)),
@@ -254,7 +258,9 @@ function buildModelComponent(model, sources) {
   }
   if (model.modelId.includes('/')) {
     component.purl = huggingFacePurl(model.modelId, revision)
-    component.externalReferences = [{ type: 'distribution', url: modelRepositoryUrl(model.modelId) }]
+    component.externalReferences = [{ type: 'distribution', url: model.sourceUrl }]
+  } else {
+    component.externalReferences = [{ type: 'documentation', url: model.sourceUrl }]
   }
   return component
 }
@@ -392,16 +398,6 @@ function npmPurl(name, version) {
 
 function huggingFacePurl(modelId, revision) {
   return `pkg:huggingface/${modelId}@${encodeURIComponent(revision)}`
-}
-
-function modelRepositoryUrl(modelId) {
-  return modelId.includes('/') ? `https://huggingface.co/${modelId}` : 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API'
-}
-
-function defaultRevision(model) {
-  if (model.modelId === 'Web Speech API') return 'device-managed'
-  if (model.id === 'qwen') return 'user-managed'
-  return 'main (runtime-managed)'
 }
 
 function defaultRoute(model) {

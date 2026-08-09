@@ -5,6 +5,7 @@ import {
   chatterboxModelId,
   type ChatterboxModelVariant,
 } from '../lib/chatterbox-config.ts'
+import { capabilityModel } from '../lib/capabilities.ts'
 import {
   chatterboxVoiceLabModel,
   createVoiceProvenance,
@@ -48,6 +49,13 @@ let loadedModel: ChatterboxModelVariant | null = null
 const cancelledIds = new Set<number>()
 const speakerCache = new Map<string, Record<string, unknown>>()
 
+function chatterboxModelRevision(variant: ChatterboxModelVariant): string {
+  const modelId = variant === 'multilingual' ? 'chatterbox-multilingual' : 'chatterbox'
+  const revision = capabilityModel(modelId)?.revision
+  if (!revision) throw new Error(`Missing pinned Chatterbox revision for ${modelId}.`)
+  return revision
+}
+
 function outputSamples(output: unknown): Float32Array | null {
   if (!output || typeof output !== 'object' || !('data' in output)) return null
   const data = (output as { data: unknown }).data
@@ -79,9 +87,11 @@ self.addEventListener('message', async (event: MessageEvent<ChatterboxWorkerRequ
     try {
       const { ChatterboxModel, ChatterboxProcessor } = await import('@huggingface/transformers')
       processor = (await ChatterboxProcessor.from_pretrained(chatterboxModelId(message.model), {
+        revision: chatterboxModelRevision(message.model),
         progress_callback: (info: unknown) => self.postMessage({ type: 'progress', info: info as ProgressInfo } satisfies ChatterboxWorkerResponse),
       })) as unknown as ChatterboxProcessorLike
       model = (await ChatterboxModel.from_pretrained(chatterboxModelId(message.model), {
+        revision: chatterboxModelRevision(message.model),
         device: message.device,
         dtype: {
           embed_tokens: 'fp32',

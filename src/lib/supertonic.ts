@@ -1,6 +1,8 @@
 import type { ProgressInfo } from './kokoro.ts'
+import { CORE_SUPERTONIC_MODEL_REVISION } from './capabilities-core.ts'
 
 export const SUPERTONIC_MODEL_ID = 'onnx-community/Supertonic-TTS-ONNX'
+export const SUPERTONIC_MODEL_REVISION = CORE_SUPERTONIC_MODEL_REVISION
 export const SUPERTONIC_SAMPLE_RATE = 44100
 export const SUPERTONIC_DEFAULT_STEPS = 5
 
@@ -47,7 +49,7 @@ export type SupertonicSynthesizedAudio = {
 let supertonicPromise: Promise<SupertonicPipeline> | null = null
 
 export function supertonicVoiceUrl(voiceId: SupertonicVoiceId): string {
-  return `https://huggingface.co/${SUPERTONIC_MODEL_ID}/resolve/main/voices/${voiceId}.bin`
+  return `https://huggingface.co/${SUPERTONIC_MODEL_ID}/resolve/${SUPERTONIC_MODEL_REVISION}/voices/${voiceId}.bin`
 }
 
 export function clampSupertonicSpeed(speed: number): number {
@@ -65,9 +67,10 @@ export async function loadSupertonic(onProgress: (info: ProgressInfo) => void): 
   const createPipeline = pipeline as unknown as (
     task: 'text-to-speech',
     model: string,
-    options: { progress_callback: (info: unknown) => void },
+    options: { progress_callback: (info: unknown) => void; revision: string },
   ) => Promise<SupertonicPipeline>
   supertonicPromise = createPipeline('text-to-speech', SUPERTONIC_MODEL_ID, {
+    revision: SUPERTONIC_MODEL_REVISION,
     progress_callback: (info: unknown) => onProgress(info as ProgressInfo),
   })
 

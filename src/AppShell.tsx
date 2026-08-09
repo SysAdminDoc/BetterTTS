@@ -2053,6 +2053,12 @@ function App() {
     }
   }
 
+  function provenanceRuntimeKind(engineId: string, label: string): 'browser' | 'native' | 'sidecar' {
+    if (engineId === 'qwen') return 'sidecar'
+    if (label.startsWith('Sherpa-ONNX')) return 'native'
+    return 'browser'
+  }
+
   const currentReplayContext: ProvenanceReplayContext = {
     engineId: engine,
     modelId: '',
@@ -2080,7 +2086,12 @@ function App() {
     return createGenerationProvenance({
       appVersion: APP_VERSION,
       runtime: provenanceRuntime(),
-      engine: createProvenanceEngine(selectedEngine, chatterboxModel),
+      engine: createProvenanceEngine(
+        selectedEngine,
+        chatterboxModel,
+        provenanceRuntimeKind(selectedEngine, runtimeLabel),
+        selectedEngine === 'kitten' ? kittenModelSize : undefined,
+      ),
       voiceId: options.voiceId ?? 'unknown',
       locale: selectedEngine === 'kokoro' ? synthesisLocale : selectedEngine === 'piper' ? piperLanguage : selectedEngine === 'chatterbox' ? chatterboxLanguageId : undefined,
       speed: options.speedOverride ?? speed,

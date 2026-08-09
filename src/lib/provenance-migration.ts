@@ -7,7 +7,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/iu
 export function migrateGenerationProvenance(raw: unknown): GenerationProvenanceManifest | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const candidate = raw as Record<string, unknown>
-  if (candidate.schemaVersion === 1) {
+  if (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) {
     const app = record(candidate.app)
     const engine = record(candidate.engine)
     const source = record(candidate.source)
@@ -18,7 +18,7 @@ export function migrateGenerationProvenance(raw: unknown): GenerationProvenanceM
       || !nonEmpty(engine.id) || !nonEmpty(engine.modelId) || !nonEmpty(engine.modelRevision)
       || (textHash !== null && !hash(textHash))
     ) return null
-    return candidate as unknown as GenerationProvenanceManifest
+    return { ...candidate, schemaVersion: 2 } as unknown as GenerationProvenanceManifest
   }
   return candidate.schemaVersion === 0 || candidate.version === 0 ? legacyManifest(candidate) : null
 }
@@ -29,7 +29,7 @@ function legacyManifest(candidate: Record<string, unknown>): GenerationProvenanc
   const emptyCleanup = { citations: false, urls: false, acronyms: false, markdown: false, footnotes: false, pageArtifacts: false, pdfReflow: false, numbers: false, metadata: false }
   const emptyPauses = { comma: 0, semicolon: 0, colon: 0, period: 0, question: 0, exclamation: 0, ellipsis: 0, emDash: 0 }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     createdAt: new Date(0).toISOString(),
     app: { name: 'BetterTTS', version: 'unknown' },
     runtime: { target: 'web', label: 'unknown', platform: 'unknown' },
