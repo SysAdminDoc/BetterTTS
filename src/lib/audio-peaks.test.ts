@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_WAVEFORM_BINS, buildPeakEnvelope } from './audio-peaks.ts'
+import { MAX_WAVEFORM_BINS, buildPeakEnvelope, readBoundedResponseBytes } from './audio-peaks.ts'
 
 describe('bounded output waveform peaks', () => {
   it('returns one bounded peak per requested bin', () => {
@@ -22,5 +22,13 @@ describe('bounded output waveform peaks', () => {
 
   it('ignores non-finite samples instead of contaminating the envelope', () => {
     expect(buildPeakEnvelope([Number.NaN, Number.POSITIVE_INFINITY, 0.25], 1)).toEqual([0.25])
+  })
+
+  it('bounds streamed waveform bytes before decoding', async () => {
+    const response = new Response(new Uint8Array([1, 2, 3, 4]))
+    await expect(readBoundedResponseBytes(response, 3)).rejects.toThrow(/limited to/)
+
+    const small = await readBoundedResponseBytes(new Response(new Uint8Array([1, 2, 3])), 3)
+    expect(Array.from(new Uint8Array(small))).toEqual([1, 2, 3])
   })
 })

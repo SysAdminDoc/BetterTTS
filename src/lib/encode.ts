@@ -1,5 +1,7 @@
 import { encodeWav } from './wav.ts'
 
+import { throwIfAborted, waitForEncoderCapacity, withAbort } from './playback-resources.ts'
+
 export type AudioFormat = 'wav' | 'mp3' | 'opus' | 'flac' | 'm4b'
 
 export type LoudnessPresetId = 'off' | 'audiobook-mono' | 'podcast-stereo'
@@ -51,15 +53,16 @@ export function cropAudioToTimeRange(samples: Float32Array, sampleRate: number, 
   return start === 0 && end === samples.length ? samples : samples.slice(start, end)
 }
 
-export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128): Promise<Blob> {
+export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128, signal?: AbortSignal): Promise<Blob> {
+  throwIfAborted(signal, 'Audio encoding was cancelled.')
   if (samples.length === 0) {
     return Promise.reject(new Error('No audio samples to encode — the export would be an empty file.'))
   }
   if (format === 'mp3' && !(MP3_SUPPORTED_RATES as readonly number[]).includes(sampleRate)) {
     return Promise.reject(new Error(`MP3 cannot encode ${sampleRate} Hz audio — export WAV or Opus instead.`))
   }
-  if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate)
-  if (format === 'opus') return encodeOpus(samples, sampleRate, bitrate)
+  if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate, signal)
+  if (format === 'opus') return encodeOpus(samples, sampleRate, bitrate, signal)
   if (format === 'flac' || format === 'm4b') return Promise.reject(new Error(`${format.toUpperCase()} export requires the Windows desktop FFmpeg path.`))
   return Promise.resolve(new Blob([encodeWav(samples, sampleRate)], { type: 'audio/wav' }))
 }
@@ -68,7 +71,7 @@ export function opusSupported(): boolean {
   return typeof AudioEncoder !== 'undefined'
 }
 
-async function encodeMp3(samples: Float32Array, sampleRate: number, kbps: number): Promise<Blob> {
+async function encodeMp3(samples: Float32Array, sampleRate: number, kbps: number, signal?: AbortSignal): Promise<Blob> {
   const { Mp3Encoder } = await import('@breezystack/lamejs')
   const effectiveKbps = sampleRate <= 24000 ? Math.min(kbps, MAX_MP3_KBPS_24K) : kbps
   const encoder = new Mp3Encoder(1, sampleRate, effectiveKbps)
@@ -83,6 +86,7 @@ async function encodeMp3(samples: Float32Array, sampleRate: number, kbps: number
   const chunks: BlobPart[] = []
   const blockSize = 1152
   for (let i = 0; i < pcm.length; i += blockSize) {
+    throwIfAborted(signal, 'MP3 encoding was cancelled.')
     const block = pcm.subarray(i, i + blockSize)
     const mp3buf = encoder.encodeBuffer(block)
     if (mp3buf.length > 0) chunks.push(mp3buf as Uint8Array<ArrayBuffer>)
@@ -93,8 +97,9 @@ async function encodeMp3(samples: Float32Array, sampleRate: number, kbps: number
   return new Blob(chunks, { type: 'audio/mpeg' })
 }
 
-async function encodeOpus(samples: Float32Array, sampleRate: number, kbps: number): Promise<Blob> {
+async function encodeOpus(samples: Float32Array, sampleRate: number, kbps: number, signal?: AbortSignal): Promise<Blob> {
   if (typeof AudioEncoder === 'undefined') throw new Error('Opus encoding requires a browser with WebCodecs AudioEncoder')
+  throwIfAborted(signal, 'Opus encoding was cancelled.')
 
   // WebCodecs Opus encoder works at 48 kHz; resample if source differs.
   let pcm = samples
@@ -137,37 +142,45 @@ async function encodeOpus(samples: Float32Array, sampleRate: number, kbps: numbe
     },
   })
 
-  encoder.configure({
-    codec: 'opus',
-    sampleRate,
-    numberOfChannels: 1,
-    bitrate: kbps * 1000,
-  })
-
   const frameSize = 960
-  for (let i = 0; i < pcm.length; i += frameSize) {
-    const end = Math.min(i + frameSize, pcm.length)
-    const frame = pcm.subarray(i, end)
-    // Pad the last frame to a full 960 samples so the encoder accepts it.
-    const padded = frame.length < frameSize ? (() => {
-      const buf = new Float32Array(frameSize)
-      buf.set(frame)
-      return buf
-    })() : frame
-    const audioData = new AudioData({
-      format: 'f32-planar',
+  try {
+    encoder.configure({
+      codec: 'opus',
       sampleRate,
-      numberOfFrames: frameSize,
       numberOfChannels: 1,
-      timestamp: Math.round((i / sampleRate) * 1_000_000),
-      data: padded as Float32Array<ArrayBuffer>,
+      bitrate: kbps * 1000,
     })
-    encoder.encode(audioData)
-    audioData.close()
-  }
 
-  await encoder.flush()
-  encoder.close()
+    for (let i = 0; i < pcm.length; i += frameSize) {
+      throwIfAborted(signal, 'Opus encoding was cancelled.')
+      await waitForEncoderCapacity(encoder, signal)
+      const end = Math.min(i + frameSize, pcm.length)
+      const frame = pcm.subarray(i, end)
+      // Pad the last frame to a full 960 samples so the encoder accepts it.
+      const padded = frame.length < frameSize ? (() => {
+        const buf = new Float32Array(frameSize)
+        buf.set(frame)
+        return buf
+      })() : frame
+      const audioData = new AudioData({
+        format: 'f32-planar',
+        sampleRate,
+        numberOfFrames: frameSize,
+        numberOfChannels: 1,
+        timestamp: Math.round((i / sampleRate) * 1_000_000),
+        data: padded as Float32Array<ArrayBuffer>,
+      })
+      try {
+        encoder.encode(audioData)
+      } finally {
+        audioData.close()
+      }
+    }
+
+    await withAbort(encoder.flush(), signal, 'Opus encoding was cancelled.')
+  } finally {
+    if (encoder.state !== 'closed') encoder.close()
+  }
 
   // Wrap raw Opus frames in a minimal WebM container (universally playable).
   const paddedSamples = pcm.length % frameSize === 0 ? 0 : frameSize - (pcm.length % frameSize)

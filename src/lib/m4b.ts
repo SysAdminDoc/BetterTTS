@@ -1,5 +1,7 @@
 import type { GenerationProvenanceManifest } from './provenance.ts'
 
+import { throwIfAborted, waitForEncoderCapacity, withAbort } from './playback-resources.ts'
+
 export type M4bChunkSource = {
   blob: Blob
   text?: string
@@ -191,8 +193,10 @@ export async function buildM4bFromBlobs(opts: {
   chunks: M4bChunkSource[]
   bitrate?: number
   provenanceManifest?: GenerationProvenanceManifest
+  signal?: AbortSignal
   onProgress?: (progress: M4bProgress) => void
 }): Promise<{ blob: Blob; chapterCount: number }> {
+  throwIfAborted(opts.signal, 'M4B export was cancelled.')
   if (!m4bSupported()) {
     throw new Error('M4B export requires a browser with WebCodecs AAC support.')
   }
@@ -200,15 +204,16 @@ export async function buildM4bFromBlobs(opts: {
   const chapters = normalizeM4bChapters(opts.chunks)
   if (chapters.length === 0) throw new Error('No completed chunks are available for M4B export.')
 
-  const decoded = await decodeChapterSources(chapters, opts.onProgress)
-  const sampleRate = await chooseAacSampleRate(decoded.sampleRate)
+  const decoded = await decodeChapterSources(chapters, opts.onProgress, opts.signal)
+  const sampleRate = await chooseAacSampleRate(decoded.sampleRate, opts.signal)
   const chaptersForEncoding = sampleRate === decoded.sampleRate
     ? decoded.chapters
     : decoded.chapters.map((chapter) => ({
       title: chapter.title,
       samples: resampleLinear(chapter.samples, decoded.sampleRate, sampleRate),
     }))
-  const encoded = await encodeAacChapters(chaptersForEncoding, sampleRate, opts.bitrate ?? 128000, opts.onProgress)
+  const encoded = await encodeAacChapters(chaptersForEncoding, sampleRate, opts.bitrate ?? 128000, opts.onProgress, opts.signal)
+  throwIfAborted(opts.signal, 'M4B export was cancelled.')
   opts.onProgress?.({ phase: 'mux', done: 0, total: 1 })
   const blob = buildM4bContainer({
     title: opts.title,
@@ -229,6 +234,7 @@ export async function buildM4bFromBlobs(opts: {
 async function decodeChapterSources(
   chapters: M4bChapterSource[],
   onProgress?: (progress: M4bProgress) => void,
+  signal?: AbortSignal,
 ): Promise<DecodeResult> {
   const totalChunks = chapters.reduce((sum, chapter) => sum + chapter.chunks.length, 0)
   let done = 0
@@ -240,8 +246,10 @@ async function decodeChapterSources(
     for (const chapter of chapters) {
       const parts: Float32Array[] = []
       for (const chunk of chapter.chunks) {
+        throwIfAborted(signal, 'M4B decoding was cancelled.')
+        const bytes = await withAbort(chunk.blob.arrayBuffer(), signal, 'M4B decoding was cancelled.')
         const buffer = await withTimeout(
-          audioCtx.decodeAudioData(await chunk.blob.arrayBuffer()),
+          withAbort(audioCtx.decodeAudioData(bytes), signal, 'M4B decoding was cancelled.'),
           AUDIO_DECODE_TIMEOUT_MS,
           'Timed out decoding a queue chunk for M4B export.',
         )
@@ -260,12 +268,12 @@ async function decodeChapterSources(
   }
 }
 
-async function chooseAacSampleRate(preferredRate: number): Promise<number> {
+async function chooseAacSampleRate(preferredRate: number, signal?: AbortSignal): Promise<number> {
   // The mp4a sample entry stores the rate as 16.16 fixed-point (max 65535 Hz),
   // so a 88.2/96 kHz device output rate must be resampled down, not encoded —
   // some platform AAC encoders would otherwise accept it and muxing would fail.
   const rates = Array.from(new Set([preferredRate, ...AAC_CANDIDATE_SAMPLE_RATES])).filter((rate) => rate <= 48000)
-  const sampleRate = await findSupportedAacSampleRate(AudioEncoder, rates)
+  const sampleRate = await findSupportedAacSampleRate(AudioEncoder, rates, signal)
   if (sampleRate != null) return sampleRate
   throw new Error('This browser does not expose a WebCodecs AAC encoder.')
 }
@@ -273,16 +281,18 @@ async function chooseAacSampleRate(preferredRate: number): Promise<number> {
 async function findSupportedAacSampleRate(
   audioEncoder: AudioEncoderSupportProbe,
   rates = AAC_CANDIDATE_SAMPLE_RATES,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   for (const sampleRate of rates) {
+    throwIfAborted(signal, 'M4B AAC capability check was cancelled.')
     try {
       const support = await withTimeout(
-        audioEncoder.isConfigSupported({
+        withAbort(audioEncoder.isConfigSupported({
           codec: AAC_CODEC,
           sampleRate,
           numberOfChannels: 1,
           bitrate: 128000,
-        }),
+        }), signal, 'M4B AAC capability check was cancelled.'),
         AAC_SUPPORT_TIMEOUT_MS,
         'Timed out checking this browser\'s AAC encoder support.',
       )
@@ -339,6 +349,7 @@ async function encodeAacChapters(
   sampleRate: number,
   bitrate: number,
   onProgress?: (progress: M4bProgress) => void,
+  signal?: AbortSignal,
 ): Promise<{
   frames: AacFrame[]
   chapters: Array<{ title: string; startSample: number }>
@@ -384,22 +395,25 @@ async function encodeAacChapters(
     let pending = new Float32Array(0)
     let sourceSamplesSeen = 0
     for (const chapter of chapters) {
+      throwIfAborted(signal, 'M4B encoding was cancelled.')
       chapterMarks.push({ title: chapter.title, startSample: sourceSamplesSeen })
-      pending = appendAndEncode(encoder, pending, chapter.samples, sampleRate, sourceSamplesSeen - pending.length)
+      pending = await appendAndEncode(encoder, pending, chapter.samples, sampleRate, sourceSamplesSeen - pending.length, signal)
       sourceSamplesSeen += chapter.samples.length
     }
 
     if (pending.length > 0 || frames.length === 0) {
+      throwIfAborted(signal, 'M4B encoding was cancelled.')
       const padded = new Float32Array(AAC_FRAME_SAMPLES)
       padded.set(pending)
+      await waitForEncoderCapacity(encoder, signal)
       encodeFrame(encoder, padded, sampleRate, sourceSamplesSeen - pending.length)
     }
 
-    await withTimeout(
+    await withAbort(withTimeout(
       Promise.race([encoder.flush(), errorPromise]),
       AAC_FLUSH_TIMEOUT_MS,
       'Timed out finalizing AAC frames for M4B export.',
-    )
+    ), signal, 'M4B encoding was cancelled.')
     if (frames.length === 0) throw new Error('No AAC frames were produced.')
 
     return {
@@ -412,19 +426,22 @@ async function encodeAacChapters(
   }
 }
 
-function appendAndEncode(
+async function appendAndEncode(
   encoder: AudioEncoder,
   pending: Float32Array,
   next: Float32Array,
   sampleRate: number,
   absoluteSampleOffset: number,
-): Float32Array<ArrayBuffer> {
+  signal?: AbortSignal,
+): Promise<Float32Array<ArrayBuffer>> {
   const combined = new Float32Array(pending.length + next.length)
   combined.set(pending)
   combined.set(next, pending.length)
 
   let cursor = 0
   while (combined.length - cursor >= AAC_FRAME_SAMPLES) {
+    throwIfAborted(signal, 'M4B encoding was cancelled.')
+    await waitForEncoderCapacity(encoder, signal)
     encodeFrame(encoder, combined.subarray(cursor, cursor + AAC_FRAME_SAMPLES), sampleRate, absoluteSampleOffset + cursor)
     cursor += AAC_FRAME_SAMPLES
   }
@@ -444,8 +461,11 @@ function encodeFrame(encoder: AudioEncoder, samples: Float32Array, sampleRate: n
     timestamp: Math.round((startSample / sampleRate) * 1_000_000),
     data: frame,
   })
-  encoder.encode(audioData)
-  audioData.close()
+  try {
+    encoder.encode(audioData)
+  } finally {
+    audioData.close()
+  }
 }
 
 export function buildM4bContainer(opts: M4bContainerOptions): Blob {

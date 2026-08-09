@@ -100,4 +100,58 @@ describe('shared playback controller', () => {
     controller.register('second', second as unknown as HTMLAudioElement, 'Second')
     expect(second.sinkId).toBe('headphones')
   })
+
+  it('publishes Media Session metadata and bounded position state', async () => {
+    const mediaSession = {
+      metadata: null as unknown,
+      playbackState: 'none' as MediaSessionPlaybackState,
+      handlers: new Map<string, (details: MediaSessionActionDetails) => void>(),
+      positions: [] as MediaPositionState[],
+      setActionHandler(action: MediaSessionAction, handler: ((details: MediaSessionActionDetails) => void) | null) {
+        if (handler) this.handlers.set(action, handler)
+        else this.handlers.delete(action)
+      },
+      setPositionState(position: MediaPositionState) {
+        this.positions.push(position)
+      },
+    }
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    const originalMetadata = Object.getOwnPropertyDescriptor(globalThis, 'MediaMetadata')
+    class FakeMetadata {
+      title: string
+      artist: string
+
+      constructor(init: { title: string; artist: string }) {
+        this.title = init.title
+        this.artist = init.artist
+      }
+    }
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaSession } })
+    Object.defineProperty(globalThis, 'MediaMetadata', { configurable: true, value: FakeMetadata })
+
+    try {
+      const controller = new PlaybackController()
+      const audio = new FakeAudio()
+      const unregister = controller.register('chapter', audio as unknown as HTMLAudioElement, 'Chapter one')
+      await controller.play('chapter')
+      audio.currentTime = 12
+      audio.dispatchEvent(new Event('timeupdate'))
+      controller.setPlaybackRate(1.5)
+
+      expect(mediaSession.metadata).toMatchObject({ title: 'Chapter one', artist: 'BetterTTS' })
+      expect(mediaSession.playbackState).toBe('playing')
+      expect(mediaSession.positions.at(-1)).toEqual({ duration: 30, playbackRate: 1.5, position: 12 })
+
+      mediaSession.handlers.get('seekto')?.({ seekTime: 7 } as MediaSessionActionDetails)
+      expect(audio.currentTime).toBe(7)
+      unregister()
+      expect(mediaSession.metadata).toBeNull()
+      expect(mediaSession.playbackState).toBe('none')
+    } finally {
+      if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
+      else Reflect.deleteProperty(globalThis, 'navigator')
+      if (originalMetadata) Object.defineProperty(globalThis, 'MediaMetadata', originalMetadata)
+      else Reflect.deleteProperty(globalThis, 'MediaMetadata')
+    }
+  })
 })

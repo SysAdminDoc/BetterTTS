@@ -98,7 +98,6 @@ import {
   opusSupported,
   shiftPitch,
 } from './lib/encode.ts'
-import { decodeAudioPeaks } from './lib/audio-peaks.ts'
 import { buildEpubQueueChunks } from './lib/epub-queue.ts'
 import type { EpubMappingChapter } from './lib/epub-mapping.ts'
 import { SerialTaskQueue } from './lib/serial-task-queue.ts'
@@ -189,6 +188,8 @@ import {
   shouldPersistPlayback,
 } from './lib/playback.ts'
 import { playbackController } from './lib/playback-controller.ts'
+import type { BoundedAudioStreamScheduler } from './lib/audio-stream-scheduler.ts'
+import { BoundedPlaybackResourcePool, playEphemeralAudio, releaseAudioElement, type PlaybackResourceLease, type PlaybackResourceReleaseReason } from './lib/playback-resources.ts'
 import {
   addListeningSeconds,
   DEFAULT_LISTENING_TRAINER,
@@ -785,8 +786,8 @@ async function copyTextToClipboard(value: string): Promise<void> {
 
 async function getDurationLabel(blob: Blob) {
   const url = URL.createObjectURL(blob)
+  const audio = document.createElement('audio')
   try {
-    const audio = document.createElement('audio')
     audio.preload = 'metadata'
 
     return await new Promise<string>((resolve) => {
@@ -804,6 +805,7 @@ async function getDurationLabel(blob: Blob) {
       audio.src = url
     })
   } finally {
+    releaseAudioElement(audio)
     URL.revokeObjectURL(url)
   }
 }
@@ -826,6 +828,8 @@ type PlaybackAudioProps = {
   cues?: Cue[]
   vttUrl?: string
   srcLang?: string
+  onEnded?: () => void
+  onPlay?: () => void
 }
 
 type OutputMonitorTransportProps = {
@@ -836,6 +840,8 @@ type OutputMonitorTransportProps = {
   onError: (message: string) => void
   hasOutputs: boolean
 }
+
+const queuePlaybackResourcePool = new BoundedPlaybackResourcePool()
 
 function OutputMonitorTransport({ result, sampleRate, theme, onClear, onError, hasOutputs }: OutputMonitorTransportProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -872,23 +878,33 @@ function OutputMonitorTransport({ result, sampleRate, theme, onClear, onError, h
 
   useEffect(() => {
     let cancelled = false
+    const decodeController = new AbortController()
     setPeaks([])
     setWaveformError(null)
-    if (!result?.url) return () => { cancelled = true }
+    if (!result?.url) return () => {
+      cancelled = true
+      decodeController.abort()
+    }
     const cacheKey = `${result.id}:${result.url}`
     const cached = readLruEntry(waveformCache, cacheKey)
     if (cached) {
       setPeaks(cached)
-      return () => { cancelled = true }
+      return () => {
+        cancelled = true
+        decodeController.abort()
+      }
     }
-    decodeAudioPeaks(result.url).then((next) => {
+    import('./lib/audio-peaks.ts').then(({ decodeAudioPeaks }) => decodeAudioPeaks(result.url!, undefined, decodeController.signal)).then((next) => {
       if (cancelled) return
       writeLruEntry(waveformCache, cacheKey, next, 24)
       setPeaks(next)
     }).catch((error) => {
       if (!cancelled) setWaveformError(error instanceof Error ? error.message : 'Waveform unavailable.')
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      decodeController.abort()
+    }
   }, [result?.id, result?.url])
 
   useEffect(() => {
@@ -1036,7 +1052,7 @@ function OutputMonitorTransport({ result, sampleRate, theme, onClear, onError, h
   )
 }
 
-function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang = 'en' }: PlaybackAudioProps) {
+function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang = 'en', onEnded, onPlay }: PlaybackAudioProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeCueRef = useRef<HTMLButtonElement | null>(null)
   const [followAlong, setFollowAlong] = useState(false)
@@ -1089,9 +1105,12 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang
       clearPlaybackState(playbackKey)
       setActiveIdx(-1)
       setResumeNote(null)
+      onEnded?.()
     }
+    const start = () => onPlay?.()
 
     el.addEventListener('loadedmetadata', restore)
+    el.addEventListener('play', start)
     const persistProgress = () => persist()
     const persistImmediately = () => persist(true)
     el.addEventListener('timeupdate', persistProgress)
@@ -1101,12 +1120,13 @@ function PlaybackAudio({ playbackKey, src, label, cues: cueList, vttUrl, srcLang
     if (el.readyState >= 1) restore()
     return () => {
       el.removeEventListener('loadedmetadata', restore)
+      el.removeEventListener('play', start)
       el.removeEventListener('timeupdate', persistProgress)
       el.removeEventListener('pause', persistImmediately)
       el.removeEventListener('seeked', persistImmediately)
       el.removeEventListener('ended', end)
     }
-  }, [playbackKey, cues])
+  }, [cues, onEnded, onPlay, playbackKey])
 
   useEffect(() => {
     const el = audioRef.current
@@ -1309,6 +1329,27 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
   const [loading, setLoading] = useState(false)
   const vttUrl = useMemo(() => cueDataUrl(chunk.cues), [chunk.cues])
   const label = `Chunk ${chunk.index + 1}: ${chunk.chapterTitle ?? chunk.text.slice(0, 38)}`
+  const resourceKey = `queue:${jobId}:${chunk.index}`
+  const mountedRef = useRef(false)
+  const loadedUrlRef = useRef<string | null>(null)
+  const resourceLeaseRef = useRef<PlaybackResourceLease | null>(null)
+  const releaseLoadedPlayerRef = useRef<(reason?: PlaybackResourceReleaseReason) => void>(() => {})
+  releaseLoadedPlayerRef.current = (reason = 'released') => {
+    resourceLeaseRef.current?.release(reason)
+    resourceLeaseRef.current = null
+    const current = loadedUrlRef.current
+    loadedUrlRef.current = null
+    if (current) URL.revokeObjectURL(current)
+    if (mountedRef.current) setUrl(null)
+  }
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      releaseLoadedPlayerRef.current('released')
+    }
+  }, [resourceKey])
 
   useEffect(() => {
     if (!editing) {
@@ -1318,29 +1359,43 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
   }, [chunk.text, chunk.chapterTitle, editing])
 
   useEffect(() => {
-    setUrl((current) => {
-      if (current) URL.revokeObjectURL(current)
-      return null
-    })
+    releaseLoadedPlayerRef.current('released')
   }, [chunk.cues, chunk.text, chunk.duration])
-
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url)
-    }
-  }, [url])
 
   const loadPlayer = async () => {
     if (url) return
     setLoading(true)
+    const lease = queuePlaybackResourcePool.acquire(
+      resourceKey,
+      (reason) => releaseLoadedPlayerRef.current(reason),
+      () => {
+        const snapshot = playbackController.getSnapshot()
+        return snapshot.key === resourceKey && snapshot.playing
+      },
+    )
+    if (!lease) {
+      onNotice({ tone: 'warn', message: 'Playback already has four loaded chunks. Pause one and try again to release its resources.' })
+      setLoading(false)
+      return
+    }
+    resourceLeaseRef.current = lease
     try {
       const blob = await getChunkBlob(jobId, chunk.index)
       if (!blob) {
+        lease.release('error')
         onNotice({ tone: 'warn', message: `Audio is missing for chunk ${chunk.index + 1}. Resume the job, then try again.` })
         return
       }
-      setUrl(URL.createObjectURL(blob))
+      const nextUrl = URL.createObjectURL(blob)
+      if (!mountedRef.current) {
+        URL.revokeObjectURL(nextUrl)
+        lease.release('released')
+        return
+      }
+      loadedUrlRef.current = nextUrl
+      setUrl(nextUrl)
     } catch {
+      lease.release('error')
       onNotice({ tone: 'error', message: `Could not load chunk ${chunk.index + 1}.` })
     } finally {
       setLoading(false)
@@ -1367,7 +1422,15 @@ function QueueChunkPlayer({ jobId, chunk, format, regenerating, onRegenerate, on
         {editing ? 'Close' : 'Edit'}
       </button>
       {url ? (
-        <PlaybackAudio playbackKey={`queue:${jobId}:${chunk.index}`} src={url} label={label} cues={chunk.cues} vttUrl={vttUrl} />
+        <PlaybackAudio
+          playbackKey={resourceKey}
+          src={url}
+          label={label}
+          cues={chunk.cues}
+          vttUrl={vttUrl}
+          onPlay={() => resourceLeaseRef.current?.touch()}
+          onEnded={() => releaseLoadedPlayerRef.current('ended')}
+        />
       ) : null}
       {editing ? (
         <div className="queue-chunk-editor">
@@ -2996,7 +3059,9 @@ function App() {
     format: AudioFormat,
     bitrate: number,
     title: string,
+    signal?: AbortSignal,
   ): Promise<{ blob: Blob; extension: string; loudness: LoudnessMeasurement | null }> {
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Audio encoding was cancelled.', 'AbortError')
     const nativeFfmpeg = desktopFfmpeg && ffmpegStatus?.available ? desktopFfmpeg : null
     const nativeExportAvailable = nativeFfmpeg !== null
     const targetLufs = loudnessTargetForPreset(loudnessPreset)
@@ -3033,6 +3098,7 @@ function App() {
         cleanupMode: effectiveAudioCleanupMode,
       })
       const blob = new Blob([encoded.bytes as Uint8Array<ArrayBuffer>], { type: encoded.mime })
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Audio encoding was cancelled.', 'AbortError')
       return {
         blob,
         extension: encoded.extension,
@@ -3041,7 +3107,7 @@ function App() {
           : await measureEncodedLoudness(blob, exportSamples, sampleRate, targetLufs, fallbackLoudness),
       }
     }
-    const blob = await encodeAudio(exportSamples, sampleRate, format, bitrate)
+    const blob = await encodeAudio(exportSamples, sampleRate, format, bitrate, signal)
     return {
       blob,
       extension: formatExtension(format),
@@ -3270,11 +3336,14 @@ function App() {
   }, [])
 
   function clearCaptionResult() {
+    playbackController.releaseByPrefix('caption:')
     clearCaptionUrls()
     setCaptionResult(null)
   }
 
   function clearOutputs() {
+    playbackController.releaseByPrefix('clip:')
+    playbackController.releaseByPrefix('monitor:')
     clearOutputUrls()
     setResults([])
     setActiveOutputId(null)
@@ -4048,25 +4117,22 @@ function App() {
     let warnedBgmEmpty = false
     let warnedQuota = false
 
-    let audioCtx: AudioContext | null = null
-    let nextPlayTime = 0
+    let streamScheduler: BoundedAudioStreamScheduler | null = null
     if (streamPlay && !rvcPlan) {
-      audioCtx = new AudioContext({ sampleRate: outputSampleRate })
-      nextPlayTime = audioCtx.currentTime + 0.05
+      const { BoundedAudioStreamScheduler: Scheduler } = await import('./lib/audio-stream-scheduler.ts')
+      const audioCtx = new AudioContext({ sampleRate: outputSampleRate })
+      streamScheduler = new Scheduler(audioCtx, outputSampleRate, {
+        signal: generationAbortRef.current?.signal,
+      })
     }
     let streamCloseScheduled = false
-    const closeStreamContext = (delayMs = 0) => {
-      if (!audioCtx || streamCloseScheduled) return
-      const ctx = audioCtx
-      audioCtx = null
+    const closeStreamContext = (immediate = false) => {
+      if (!streamScheduler || streamCloseScheduled) return
+      const scheduler = streamScheduler
+      streamScheduler = null
       streamCloseScheduled = true
-      if (delayMs <= 0) {
-        ctx.close().catch(() => {})
-        return
-      }
-      setTimeout(() => {
-        ctx.close().catch(() => {})
-      }, delayMs)
+      if (immediate) void scheduler.dispose('cancelled')
+      else scheduler.closeWhenDrained()
     }
 
     try {
@@ -4094,16 +4160,10 @@ function App() {
           setStatus(`Generated ${done} / ${totalSentences}`)
         }
       },
-      onAudio: (audio) => {
+      onAudio: async (audio) => {
         voiceProvenance ??= audio.provenance
-        if (!audioCtx) return
-        const buf = audioCtx.createBuffer(1, audio.samples.length, outputSampleRate)
-        buf.getChannelData(0).set(audio.samples)
-        const src = audioCtx.createBufferSource()
-        src.buffer = buf
-        src.connect(audioCtx.destination)
-        src.start(nextPlayTime)
-        nextPlayTime = Math.max(nextPlayTime, audioCtx.currentTime) + buf.duration
+        if (!streamScheduler) return
+        await streamScheduler.enqueue(audio.samples)
       },
       onSuspectAudio: (_sentence, completeness) => {
         recordDiagnosticEvent(
@@ -4165,7 +4225,7 @@ function App() {
           showToast({ tone: 'warn', message: 'Background music file contained no audio — exported speech only.' })
         }
       }
-      const encoded = await encodeOutput(processed, outputSampleRate, audioFormat, mp3Bitrate, job.label)
+      const encoded = await encodeOutput(processed, outputSampleRate, audioFormat, mp3Bitrate, job.label, generationAbortRef.current?.signal)
       const { blob, extension: ext } = encoded
       const originalBlob = effectiveAudioCleanupMode === 'off'
         ? undefined
@@ -4259,9 +4319,7 @@ function App() {
       setResults([...generated])
     }
 
-    if (audioCtx) {
-      closeStreamContext(abortRef.current ? 0 : Math.max(0, (nextPlayTime - audioCtx.currentTime) * 1000) + 200)
-    }
+    if (streamScheduler) closeStreamContext(abortRef.current)
 
     if (generated.length > 1) {
       const { zip } = await import('fflate')
@@ -4603,7 +4661,7 @@ function App() {
       const cached = readLruEntry(previewCacheRef.current, id)
       if (cached) {
         const audio = new Audio(cached)
-        await audio.play()
+        await playEphemeralAudio(audio)
         setPreviewingVoice(null)
         return
       }
@@ -4614,7 +4672,7 @@ function App() {
         const url = URL.createObjectURL(blob)
         writeLruEntry(previewCacheRef.current, id, url, PREVIEW_CACHE_MAX_ENTRIES, (staleUrl) => URL.revokeObjectURL(staleUrl))
         const player = new Audio(url)
-        await player.play()
+        await playEphemeralAudio(player)
         refreshModelCacheStatus().catch(() => {})
       }
     } catch (err) {
@@ -5011,7 +5069,7 @@ function App() {
     const result = dispatched.jobs[0]
     if (!result || result.audioParts.length === 0) throw new Error('No audio produced')
     const raw = concatFloat32Arrays(result.audioParts)
-    const { blob } = await encodeOutput(raw, sampleRate, job.format, job.bitrate, job.title)
+    const { blob } = await encodeOutput(raw, sampleRate, job.format, job.bitrate, job.title, generationAbortRef.current?.signal)
     if (abortRef.current) return null
     const qualityWarning = result.needsReview.length > 0
       ? `Needs review: ${summarizeQualityIssues(result.needsReview.flatMap((review) => review.issues))}`
@@ -6177,6 +6235,7 @@ function App() {
       audioFormat,
       mp3Bitrate,
       `Re-voiced subtitles · ${sourceStem}`,
+      controller.signal,
     )
     if (controller.signal.aborted) throw new DOMException('Subtitle re-voicing cancelled.', 'AbortError')
     const filename = `${slugify(sourceStem)}-revoiced${encoded.extension}`

@@ -4,6 +4,7 @@ import {
   previousCueIndex,
 } from './playback.ts'
 import type { Cue } from './subtitles.ts'
+import { PlaybackChoppinessTracker, releaseAudioElement, type PlaybackChoppinessSnapshot } from './playback-resources.ts'
 
 export type PlaybackSnapshot = {
   key: string | null
@@ -17,6 +18,7 @@ type PlaybackEntry = {
   audio: HTMLAudioElement
   label: string
   cues: readonly Cue[]
+  choppiness: PlaybackChoppinessTracker
   cleanup: () => void
 }
 
@@ -44,15 +46,31 @@ export class PlaybackController {
     this.entries.get(key)?.cleanup()
     audio.playbackRate = this.playbackRate
     if (this.sinkId) void this.applySink(audio, this.sinkId)
+    const choppiness = new PlaybackChoppinessTracker()
     const update = () => this.updateSnapshot(key)
     const onPlay = () => {
+      choppiness.start()
+      choppiness.recordPlaying()
       this.activate(key)
       update()
     }
     const onPause = () => update()
     const onTimeUpdate = () => update()
     const onLoadedMetadata = () => update()
+    const onWaiting = () => {
+      choppiness.recordWaiting()
+      update()
+    }
+    const onStalled = () => {
+      choppiness.recordStalled()
+      update()
+    }
+    const onPlaying = () => {
+      choppiness.recordPlaying()
+      update()
+    }
     const onEnded = () => {
+      choppiness.recordPlaying()
       if (this.snapshot.key === key) {
         this.snapshot = {
           key,
@@ -69,6 +87,9 @@ export class PlaybackController {
     audio.addEventListener('pause', onPause)
     audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    audio.addEventListener('waiting', onWaiting)
+    audio.addEventListener('stalled', onStalled)
+    audio.addEventListener('playing', onPlaying)
     audio.addEventListener('ended', onEnded)
     this.installMediaSession()
 
@@ -77,7 +98,12 @@ export class PlaybackController {
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('waiting', onWaiting)
+      audio.removeEventListener('stalled', onStalled)
+      audio.removeEventListener('playing', onPlaying)
       audio.removeEventListener('ended', onEnded)
+      choppiness.finish()
+      releaseAudioElement(audio)
       if (this.entries.get(key)?.audio === audio) this.entries.delete(key)
       if (this.snapshot.key === key) {
         this.snapshot = emptySnapshot()
@@ -85,7 +111,7 @@ export class PlaybackController {
         this.emit()
       }
     }
-    this.entries.set(key, { audio, label, cues, cleanup })
+    this.entries.set(key, { audio, label, cues, choppiness, cleanup })
     update()
     return cleanup
   }
@@ -104,6 +130,7 @@ export class PlaybackController {
     if (!Number.isFinite(rate)) return
     this.playbackRate = Math.min(4, Math.max(0.25, rate))
     for (const entry of this.entries.values()) entry.audio.playbackRate = this.playbackRate
+    this.syncMediaSession()
   }
 
   getPlaybackRate(): number {
@@ -125,6 +152,12 @@ export class PlaybackController {
     return this.entries.size > 0
   }
 
+  releaseByPrefix(prefix: string): void {
+    for (const [key, entry] of Array.from(this.entries.entries())) {
+      if (key.startsWith(prefix)) entry.cleanup()
+    }
+  }
+
   getCueCount(key = this.snapshot.key): number {
     return key ? this.entries.get(key)?.cues.length ?? 0 : 0
   }
@@ -135,6 +168,11 @@ export class PlaybackController {
     if (!entry) return null
     const index = cueIndexAtTime(entry.cues, this.snapshot.currentTime)
     return index >= 0 ? entry.cues[index] ?? null : null
+  }
+
+  getChoppiness(key = this.snapshot.key): PlaybackChoppinessSnapshot {
+    if (!key) return emptyChoppinessSnapshot()
+    return this.entries.get(key)?.choppiness.snapshot() ?? emptyChoppinessSnapshot()
   }
 
   seekRelativeCue(direction: -1 | 1, key = this.snapshot.key): void {
@@ -258,6 +296,18 @@ export const playbackController = new PlaybackController()
 
 function emptySnapshot(): PlaybackSnapshot {
   return { key: null, label: null, playing: false, currentTime: 0, duration: 0 }
+}
+
+function emptyChoppinessSnapshot(): PlaybackChoppinessSnapshot {
+  return {
+    waitingEvents: 0,
+    stalledEvents: 0,
+    recoveries: 0,
+    observedSeconds: 0,
+    bufferingSeconds: 0,
+    choppyRatio: 0,
+    status: 'insufficient',
+  }
 }
 
 function finiteTime(value: number): number {

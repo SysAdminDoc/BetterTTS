@@ -16,6 +16,8 @@
 - Saved generation provenance now derives model URLs, revisions, artifacts, runtime package identities, and sidecar manifest hashes from the generated capability manifest; Supertonic and Chatterbox downloads use the same immutable revisions.
 - Optional long-form quality checks now inspect waveform duration, clipping, repeated tails, cues, and local Whisper alignment, retry one bounded time, surface segment/job needs-review outcomes, and retain source-text-free review warnings in saved clips and queue chunks.
 - EPUB3 Media Overlay, M4B, and chaptered ZIP exports now carry interoperable chapter/language/metadata/cover contracts and run local golden-fixture consumer/player conformance checks before download.
+- Long-form playback now has an explicit resource contract: queue players are capped and evicted safely, waveform reads are bounded and abortable, streaming synthesis applies audio-buffer backpressure, WebCodecs resources close on cancellation, and Media Session/choppiness behavior is covered by deterministic tests.
+- The initial-shell performance budget now accounts for the small shared playback contract while keeping waveform and streaming scheduler code lazy.
 
 ## v0.23.0 - 2026-08-03
 

@@ -51,7 +51,7 @@ export type GenerationDispatcherOptions = {
   qualityGate?: LongFormQualityOptions
   checkCompleteness?: (text: string, durationSeconds: number, speed: number) => { suspect: boolean; speakableChars: number; minExpectedSeconds: number }
   onProgress?: (completed: number, total: number) => void
-  onAudio?: (audio: GeneratedSentence, startSec: number, endSec: number) => void
+  onAudio?: (audio: GeneratedSentence, startSec: number, endSec: number) => void | Promise<void>
   onSuspectAudio?: (text: string, completeness: { speakableChars: number; minExpectedSeconds: number; durationSeconds: number }) => void
   onMissingAudio?: (text: string) => void
   onQualityRetry?: (text: string, attempt: number, issues: readonly LongFormQualityIssue[]) => void
@@ -163,7 +163,7 @@ async function dispatchGenerationCore(
           } else {
             cues.push({ startSec, endSec, text: sentence.text })
           }
-          options.onAudio?.(audio, startSec, endSec)
+          await options.onAudio?.(audio, startSec, endSec)
         } else if (!cancelled()) {
           flagSentence()
           options.onMissingAudio?.(sentence.text)
