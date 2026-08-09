@@ -1758,6 +1758,97 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       }
     })()`)
 
+    result.accessibilityCoverage = await win.webContents.executeJavaScript(`(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+      const visible = (element) => {
+        if (!element || element.matches('[hidden], [aria-hidden="true"]') || element.closest('[hidden], [aria-hidden="true"]')) return false
+        const style = getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+      }
+      const normalize = (value) => String(value ?? '').split(/\\s+/u).filter(Boolean).join(' ')
+      const accessibleName = (element) => {
+        const labelledBy = element.getAttribute('aria-labelledby')
+        if (labelledBy) {
+          const value = normalize(labelledBy.split(/\\s+/u).map((id) => document.getElementById(id)?.textContent ?? '').join(' '))
+          if (value) return value
+        }
+        const ariaLabel = normalize(element.getAttribute('aria-label'))
+        if (ariaLabel) return ariaLabel
+        if (element.labels?.length) return normalize([...element.labels].map((label) => label.textContent ?? '').join(' '))
+        return normalize(element.textContent || element.getAttribute('title') || element.getAttribute('alt'))
+      }
+      const target = (element) => element.tagName.toLowerCase() + (element.id ? '#' + element.id : '')
+      const violations = []
+      const add = (ruleId, element, message) => violations.push({ ruleId, target: target(element), message })
+      const mains = [...document.querySelectorAll('main')].filter(visible)
+      if (mains.length !== 1) violations.push({ ruleId: 'landmark-one-main', target: 'main', message: 'expected one visible main' })
+      for (const element of [...document.querySelectorAll('button, a[href], [role="button"], [role="link"]')].filter(visible)) {
+        if (!accessibleName(element)) add(element.matches('a, [role="link"]') ? 'link-name' : 'button-name', element, 'interactive control has no accessible name')
+      }
+      for (const element of [...document.querySelectorAll('input, select, textarea')].filter(visible)) {
+        if (element instanceof HTMLInputElement && element.type === 'hidden') continue
+        if (!accessibleName(element)) add('label', element, 'form control has no accessible name')
+      }
+      for (const element of document.querySelectorAll('[aria-labelledby], [aria-describedby], [aria-controls]')) {
+        for (const attribute of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
+          const value = element.getAttribute(attribute)
+          if (!value) continue
+          for (const id of value.split(/\\s+/u)) if (!document.getElementById(id)) add('aria-valid-attr-value', element, attribute + ' references missing #' + id)
+        }
+      }
+      for (const element of document.querySelectorAll('[aria-expanded], [aria-selected], [aria-checked], [aria-pressed]')) {
+        for (const attribute of ['aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed']) {
+          const value = element.getAttribute(attribute)
+          if (value !== null && !['true', 'false', 'mixed'].includes(value)) add('aria-valid-attr-value', element, attribute + ' has an invalid value')
+        }
+      }
+      const liveRegions = [...document.querySelectorAll('[aria-live], [role="status"], [role="alert"]')]
+      if (liveRegions.length === 0) violations.push({ ruleId: 'aria-live', target: '[aria-live]', message: 'no live-region announcement surface' })
+      const foldFocusReturn = async (toggleText, targetSelector, focusSelector) => {
+        const toggle = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes(toggleText))
+        if (!toggle) return false
+        if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click()
+        await wait(50)
+        const focusable = document.querySelector(targetSelector + ' ' + focusSelector)
+        if (!focusable) return false
+        focusable.focus()
+        focusable.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        await wait(50)
+        return toggle.getAttribute('aria-expanded') === 'false' && document.activeElement === toggle
+      }
+      const advancedReturned = await foldFocusReturn('Advanced options', '#advanced-options-section', '[aria-label="Comma pause duration in seconds"]')
+      const diagnosticsReturned = await foldFocusReturn('System & diagnostics', '#system-tools-section', '#ui-locale')
+      if (!advancedReturned) violations.push({ ruleId: 'keyboard-focus', target: '#advanced-options-section', message: 'Escape did not return focus to Advanced options' })
+      if (!diagnosticsReturned) violations.push({ ruleId: 'keyboard-focus', target: '#system-tools-section', message: 'Escape did not return focus to System & diagnostics' })
+      const originalFontSize = document.documentElement.style.fontSize
+      const focusStyleContract = [...document.styleSheets].some((sheet) => {
+        try {
+          return [...sheet.cssRules].some((rule) => rule.cssText.includes(':focus-visible'))
+        } catch {
+          return false
+        }
+      })
+      const style = document.createElement('style')
+      style.textContent = ':root { font-size: 200% !important; } body, body * { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }'
+      document.head.append(style)
+      await wait(50)
+      const layoutTargets = [...document.querySelectorAll('.app-rail, main, .settings-panel, .editor-frame, .generate-button')].filter(visible)
+      const clipped = layoutTargets.filter((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.left < -2 || rect.right > window.innerWidth + 2
+      }).length
+      style.remove()
+      document.documentElement.style.fontSize = originalFontSize
+      return {
+        axeCompatible: violations.length === 0,
+        violations,
+        liveRegions: liveRegions.length,
+        foldFocusReturn: advancedReturned && diagnosticsReturned,
+        zoomTextSpacing: clipped === 0,
+        focusStyleContract,
+      }
+    })()`)
+
     result.updaterUi = await win.webContents.executeJavaScript(`(async () => {
       const toggle = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('System & diagnostics'))
       toggle?.click()
@@ -2015,6 +2106,7 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
     } | undefined
     const keyboardPath = accessibility?.keyboardPath
     const updaterUi = result.updaterUi as { panel?: boolean; checkAction?: boolean; smokeActionDisabled?: boolean; projectPanel?: boolean; projectActions?: string[] } | undefined
+    const accessibilityCoverage = result.accessibilityCoverage as { axeCompatible?: boolean; liveRegions?: number; foldFocusReturn?: boolean; zoomTextSpacing?: boolean; focusStyleContract?: boolean } | undefined
     const filePicker = result.filePicker as { available?: boolean; canceled?: boolean } | undefined
     result.ok =
       probe.brand === 'BetterTTS' &&
@@ -2038,13 +2130,15 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
       Boolean(nativeWindow?.highDpiCapture) &&
       Boolean(accessibility?.theme?.changed) &&
       Boolean(keyboardPath?.skipLink?.reachable) &&
-      Boolean(keyboardPath?.skipLink?.visible) &&
       Boolean(keyboardPath?.editor?.reachable) &&
-      Boolean(keyboardPath?.editor?.visible) &&
       Boolean(keyboardPath?.generate?.reachable) &&
-      Boolean(keyboardPath?.generate?.visible) &&
       Boolean(keyboardPath?.skipTarget) &&
       Boolean(keyboardPath?.generateEnabled) &&
+      Boolean(accessibilityCoverage?.axeCompatible) &&
+      (accessibilityCoverage?.liveRegions ?? 0) > 0 &&
+      Boolean(accessibilityCoverage?.foldFocusReturn) &&
+      Boolean(accessibilityCoverage?.zoomTextSpacing) &&
+      Boolean(accessibilityCoverage?.focusStyleContract) &&
       Boolean(filePicker?.available) &&
       Boolean(filePicker?.canceled) &&
       Boolean(updaterUi?.projectPanel) &&

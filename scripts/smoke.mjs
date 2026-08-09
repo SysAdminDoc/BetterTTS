@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
-import { chromium } from 'playwright'
+import { chromium, firefox } from 'playwright'
 import { unzipSync, zipSync } from 'fflate'
 
 const root = process.cwd()
@@ -362,6 +362,198 @@ async function assertThemeContrast(page, themeName) {
   const failures = results.filter(([, ratio]) => ratio < 4.5)
   if (failures.length > 0) {
     throw new Error(`${themeName} contrast failures: ${failures.map(([name, ratio]) => `${name} ${ratio.toFixed(2)}:1`).join(', ')}`)
+  }
+}
+
+async function assertAxeCompatibleRules(page, browserName) {
+  const violations = await page.evaluate(() => {
+    const problems = []
+    const visible = (element) => {
+      if (element.matches('[hidden], [aria-hidden="true"]') || element.closest('[hidden], [aria-hidden="true"]')) return false
+      const style = getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    }
+    const text = (value) => value?.replace(/\s+/gu, ' ').trim() ?? ''
+    const accessibleName = (element) => {
+      const labelledBy = element.getAttribute('aria-labelledby')
+      if (labelledBy) {
+        const name = text(labelledBy.split(/\s+/u).map((id) => document.getElementById(id)?.textContent ?? '').join(' '))
+        if (name) return name
+      }
+      const ariaLabel = text(element.getAttribute('aria-label'))
+      if (ariaLabel) return ariaLabel
+      if (element instanceof HTMLInputElement && element.labels?.length) return text([...element.labels].map((label) => label.textContent ?? '').join(' '))
+      if (element instanceof HTMLSelectElement && element.labels?.length) return text([...element.labels].map((label) => label.textContent ?? '').join(' '))
+      if (element instanceof HTMLTextAreaElement && element.labels?.length) return text([...element.labels].map((label) => label.textContent ?? '').join(' '))
+      if (element instanceof HTMLInputElement && ['button', 'submit', 'reset'].includes(element.type)) return text(element.value || element.title)
+      return text(element.textContent || element.getAttribute('title') || element.getAttribute('alt'))
+    }
+    const target = (element) => `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${element.getAttribute('aria-label') ? `[aria-label="${element.getAttribute('aria-label')}"]` : ''}`
+    const add = (ruleId, element, message) => problems.push({ ruleId, target: target(element), message })
+
+    const mains = [...document.querySelectorAll('main')].filter(visible)
+    if (mains.length !== 1) problems.push({ ruleId: 'landmark-one-main', target: 'main', message: `expected one visible main, found ${mains.length}` })
+
+    for (const element of [...document.querySelectorAll('button, a[href], [role="button"], [role="link"]')].filter(visible)) {
+      if (!accessibleName(element)) add(element.matches('a, [role="link"]') ? 'link-name' : 'button-name', element, 'interactive control has no accessible name')
+    }
+    for (const element of [...document.querySelectorAll('input, select, textarea')].filter(visible)) {
+      if (element instanceof HTMLInputElement && element.type === 'hidden') continue
+      if (!accessibleName(element)) add('label', element, 'form control has no accessible name')
+    }
+
+    for (const element of document.querySelectorAll('[aria-labelledby], [aria-describedby], [aria-controls]')) {
+      for (const attribute of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
+        const value = element.getAttribute(attribute)
+        if (!value) continue
+        for (const id of value.split(/\s+/u)) {
+          if (!document.getElementById(id)) add('aria-valid-attr-value', element, `${attribute} references missing #${id}`)
+        }
+      }
+    }
+    for (const element of document.querySelectorAll('[aria-expanded], [aria-selected], [aria-checked], [aria-pressed]')) {
+      for (const attribute of ['aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed']) {
+        const value = element.getAttribute(attribute)
+        if (value !== null && !['true', 'false', 'mixed'].includes(value)) add('aria-valid-attr-value', element, `${attribute} must be true, false, or mixed`)
+      }
+    }
+    for (const tab of [...document.querySelectorAll('[role="tab"]')].filter(visible)) {
+      if (!['true', 'false'].includes(tab.getAttribute('aria-selected') ?? '')) add('aria-required-attr', tab, 'tab is missing aria-selected')
+      const controls = tab.getAttribute('aria-controls')
+      if (!controls || !document.getElementById(controls)) add('aria-valid-attr-value', tab, 'tab is missing a valid aria-controls target')
+    }
+    for (const progress of [...document.querySelectorAll('[role="progressbar"]')].filter(visible)) {
+      for (const attribute of ['aria-valuemin', 'aria-valuemax', 'aria-valuenow']) {
+        if (progress.getAttribute(attribute) === null) add('aria-required-attr', progress, `progressbar is missing ${attribute}`)
+      }
+    }
+    for (const element of document.querySelectorAll('[tabindex]')) {
+      const value = Number(element.getAttribute('tabindex'))
+      if (Number.isFinite(value) && value > 0) add('tabindex', element, 'positive tabindex breaks predictable keyboard order')
+    }
+    for (const live of document.querySelectorAll('[aria-live]')) {
+      if (!['off', 'polite', 'assertive'].includes(live.getAttribute('aria-live') ?? '')) add('aria-valid-attr-value', live, 'aria-live has an invalid value')
+    }
+    return problems
+  })
+  if (violations.length > 0) {
+    throw new Error(`${browserName} axe-compatible accessibility rules failed:\n${violations.map(({ ruleId, target, message }) => `${ruleId} ${target}: ${message}`).join('\n')}`)
+  }
+}
+
+async function assertLiveRegionAnnouncements(page) {
+  const regions = await page.evaluate(() => [...document.querySelectorAll('[aria-live], [role="status"], [role="alert"]')].map((element) => ({
+    role: element.getAttribute('role'),
+    live: element.getAttribute('aria-live'),
+    atomic: element.getAttribute('aria-atomic'),
+  })))
+  if (regions.length === 0 || regions.some(({ role, live }) => role !== 'status' && role !== 'alert' && !live)) {
+    throw new Error(`Live-region contract is missing an explicit announcement surface: ${JSON.stringify(regions)}`)
+  }
+
+  const advancedToggle = page.getByRole('button', { name: 'Advanced options' })
+  if (await advancedToggle.getAttribute('aria-expanded') !== 'true') await advancedToggle.click()
+  const trainer = page.getByRole('checkbox', { name: 'Listening speed trainer' })
+  if (!(await trainer.isChecked())) await trainer.check()
+  const status = page.locator('.trainer-status[role="status"]')
+  await status.waitFor({ state: 'visible', timeout: 20000 })
+  const statusContract = await status.evaluate((element) => ({
+    live: element.getAttribute('aria-live'),
+    text: element.textContent?.trim() ?? '',
+  }))
+  if (statusContract.live !== 'polite' || !statusContract.text.includes('1.00x now')) {
+    throw new Error(`Trainer live-region announcement is incomplete: ${JSON.stringify(statusContract)}`)
+  }
+  await trainer.uncheck()
+}
+
+async function assertFoldFocusReturn(page) {
+  const advancedToggle = page.getByRole('button', { name: 'Advanced options' })
+  if (await advancedToggle.getAttribute('aria-expanded') !== 'true') await advancedToggle.click()
+  const advancedInput = page.getByLabel('Comma pause duration in seconds')
+  await advancedInput.focus()
+  await advancedInput.press('Escape')
+  if (await advancedToggle.getAttribute('aria-expanded') !== 'false' || !(await advancedToggle.evaluate((element) => element === document.activeElement))) {
+    throw new Error('Escape did not collapse Advanced options and return focus to its toggle')
+  }
+
+  const systemToggle = page.getByRole('button', { name: 'System & diagnostics' })
+  if (await systemToggle.getAttribute('aria-expanded') !== 'true') await systemToggle.click()
+  const locale = page.locator('#ui-locale')
+  await locale.focus()
+  await locale.press('Escape')
+  if (await systemToggle.getAttribute('aria-expanded') !== 'false' || !(await systemToggle.evaluate((element) => element === document.activeElement))) {
+    throw new Error('Escape did not collapse System & diagnostics and return focus to its toggle')
+  }
+
+  if (await advancedToggle.getAttribute('aria-expanded') !== 'true') await advancedToggle.click()
+  const pronunciationToggle = page.getByRole('button', { name: /^(Pronunciations)/ })
+  if (await pronunciationToggle.getAttribute('aria-expanded') !== 'true') await pronunciationToggle.click()
+  const pronunciationInput = page.getByLabel('Pronunciation word')
+  await pronunciationInput.focus()
+  await pronunciationInput.press('Escape')
+  if (await pronunciationToggle.getAttribute('aria-expanded') !== 'false' || !(await pronunciationToggle.evaluate((element) => element === document.activeElement))) {
+    throw new Error('Escape did not collapse the pronunciation menu and return focus to its toggle')
+  }
+  if (await advancedToggle.getAttribute('aria-expanded') === 'true') await advancedToggle.click()
+}
+
+async function assertHighZoomAndTextSpacing(page) {
+  await page.setViewportSize({ width: 720, height: 900 })
+  await page.evaluate(() => {
+    const style = document.createElement('style')
+    style.id = 'bettertts-smoke-text-spacing'
+    style.textContent = `
+      :root { font-size: 200% !important; }
+      body, body * { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
+    `
+    document.head.append(style)
+  })
+  await page.waitForTimeout(100)
+  const layout = await page.evaluate(() => {
+    const visible = (element) => {
+      const style = getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+    }
+    const targets = [...document.querySelectorAll('.app-rail, main, .settings-panel, .editor-frame, .generate-button, .workspace-tabs')].filter(visible)
+    const clipped = targets.map((element) => {
+      const rect = element.getBoundingClientRect()
+      return { name: element.className || element.tagName, left: rect.left, right: rect.right }
+    }).filter(({ left, right }) => left < -2 || right > window.innerWidth + 2)
+    return {
+      viewport: window.innerWidth,
+      documentWidth: document.scrollingElement?.scrollWidth ?? 0,
+      clipped,
+    }
+  })
+  await page.evaluate(() => {
+    document.getElementById('bettertts-smoke-text-spacing')?.remove()
+    document.documentElement.style.removeProperty('font-size')
+  })
+  await page.setViewportSize({ width: 1440, height: 950 })
+  if (layout.documentWidth > layout.viewport + 2 || layout.clipped.length > 0) {
+    throw new Error(`200% zoom/text-spacing layout clipped content: ${JSON.stringify(layout)}`)
+  }
+}
+
+async function runNonChromiumCompatibilityChecks() {
+  console.log('Checking Firefox accessibility and compatibility surface...')
+  const browser = await firefox.launch({ headless: true })
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  try {
+    const page = await context.newPage()
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.getByLabel('Text to synthesize').waitFor({ timeout: 20000 })
+    await page.getByRole('button', { name: 'Generate audio' }).first().waitFor({ timeout: 20000 })
+    await assertAxeCompatibleRules(page, 'Firefox')
+    await assertAccessibilityStructure(page)
+    await assertLiveRegionAnnouncements(page)
+    await assertFoldFocusReturn(page)
+    await assertHighZoomAndTextSpacing(page)
+    return { browser: 'firefox', accessibility: 'passed', compatibility: 'passed' }
+  } finally {
+    await context.close()
+    await browser.close()
   }
 }
 
@@ -724,6 +916,10 @@ async function runSmoke() {
 
     console.log('Checking semantic structure, keyboard access, and display preferences...')
     await assertAccessibilityStructure(desktop.page)
+    await assertAxeCompatibleRules(desktop.page, 'Chromium')
+    await assertLiveRegionAnnouncements(desktop.page)
+    await assertFoldFocusReturn(desktop.page)
+    await assertHighZoomAndTextSpacing(desktop.page)
     await assertThemeContrast(desktop.page, await desktop.page.evaluate(() => document.documentElement.dataset.theme ?? 'initial'))
 
     console.log('Checking theme and diagnostics...')
@@ -1167,6 +1363,8 @@ async function runSmoke() {
     await desktop.page.screenshot({ path: join(smokeDir, 'docs-dark.png'), fullPage: false })
     await desktopContext.close()
 
+    const nonChromiumCompatibility = await runNonChromiumCompatibilityChecks()
+
     console.log('Checking mobile fallback state...')
     const mobileContext = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -1268,6 +1466,7 @@ async function runSmoke() {
         timeToInteractiveBudgetMs: performanceBudget.shell.maxTimeToInteractiveMs,
         initialAssets: desktop.initialAssets,
       },
+      compatibility: nonChromiumCompatibility,
       ...(realEngine ? { realEngine } : {}),
     }
     await writeFile(join(smokeDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)

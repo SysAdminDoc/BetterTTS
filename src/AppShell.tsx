@@ -1765,9 +1765,9 @@ function App() {
       const target = event.target instanceof Node ? event.target : null
       if (!target) return
       const folds: Array<[HTMLElement | null, () => void, HTMLButtonElement | null]> = [
+        [pronunciationsSectionRef.current, () => setShowPronunciations(false), pronunciationsToggleRef.current],
         [advancedSectionRef.current, () => setShowAdvanced(false), advancedToggleRef.current],
         [systemToolsSectionRef.current, () => setShowSystemTools(false), systemToolsToggleRef.current],
-        [pronunciationsSectionRef.current, () => setShowPronunciations(false), pronunciationsToggleRef.current],
       ]
       for (const [container, collapse, toggle] of folds) {
         if (container?.contains(target)) {
@@ -7157,13 +7157,14 @@ function App() {
                 ref={systemToolsToggleRef}
                 onClick={() => setShowSystemTools(!showSystemTools)}
                 aria-expanded={showSystemTools}
+                aria-controls={showSystemTools ? 'system-tools-section' : undefined}
               >
                 <Settings2 size={15} aria-hidden="true" />
                 System & diagnostics
                 <ChevronDown size={15} aria-hidden="true" className={showSystemTools ? 'chevron-open' : ''} />
               </button>
               {showSystemTools ? (
-              <div className="system-tools-section" role="group" aria-labelledby="diagnostics-heading" ref={systemToolsSectionRef}>
+              <div id="system-tools-section" className="system-tools-section" role="group" aria-labelledby="diagnostics-heading" ref={systemToolsSectionRef}>
                 <h3 id="diagnostics-heading" className="sr-only">System and diagnostics</h3>
                 <div className="diagnostics-panel ui-locale-panel" aria-label={uiText(uiLocale, 'interfaceLanguage')}>
                   <div className="cache-manager-head">
@@ -8026,6 +8027,7 @@ function App() {
               ref={advancedToggleRef}
               onClick={() => setShowAdvanced(!showAdvanced)}
               aria-expanded={showAdvanced}
+              aria-controls={showAdvanced ? 'advanced-options-section' : undefined}
             >
               <Settings2 size={15} aria-hidden="true" />
               Advanced options
@@ -8033,7 +8035,7 @@ function App() {
             </button>
 
             {showAdvanced ? (
-              <div className="advanced-section" role="group" aria-label="Advanced options" ref={advancedSectionRef}>
+              <div id="advanced-options-section" className="advanced-section" role="group" aria-label="Advanced options" ref={advancedSectionRef}>
                 {engine === 'kokoro' ? (
                   <div className="range-row">
                     <label htmlFor="pitch">Pitch</label>
@@ -8582,6 +8584,7 @@ function App() {
                       ref={pronunciationsToggleRef}
                       onClick={() => setShowPronunciations(!showPronunciations)}
                       aria-expanded={showPronunciations}
+                      aria-controls={showPronunciations ? 'pronunciation-dictionary' : undefined}
                     >
                       Pronunciations ({Object.keys(pronunciations).length})
                     </button>
@@ -8604,7 +8607,7 @@ function App() {
                       />
                     </div>
                     {showPronunciations ? (
-                      <div className="speaker-map" role="group" aria-label="Pronunciation dictionary" ref={pronunciationsSectionRef}>
+                      <div id="pronunciation-dictionary" className="speaker-map" role="group" aria-label="Pronunciation dictionary" ref={pronunciationsSectionRef}>
                         {Object.entries(pronunciations).map(([word, pron]) => (
                           <div className="speaker-row pronunciation-entry" key={word}>
                             <span>{word}</span>
