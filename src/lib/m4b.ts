@@ -49,6 +49,12 @@ export type AacFrame = {
 
 export type M4bContainerOptions = {
   title: string
+  language?: string
+  narrator?: string
+  cover?: {
+    bytes: Uint8Array
+    mimeType: 'image/jpeg' | 'image/png'
+  }
   sampleRate: number
   bitrate: number
   audioSpecificConfig: Uint8Array
@@ -176,6 +182,12 @@ export function normalizeM4bChapters(chunks: M4bChunkSource[]): M4bChapterSource
 
 export async function buildM4bFromBlobs(opts: {
   title: string
+  language?: string
+  narrator?: string
+  cover?: {
+    bytes: Uint8Array
+    mimeType: 'image/jpeg' | 'image/png'
+  }
   chunks: M4bChunkSource[]
   bitrate?: number
   provenanceManifest?: GenerationProvenanceManifest
@@ -200,6 +212,9 @@ export async function buildM4bFromBlobs(opts: {
   opts.onProgress?.({ phase: 'mux', done: 0, total: 1 })
   const blob = buildM4bContainer({
     title: opts.title,
+    language: opts.language,
+    narrator: opts.narrator,
+    cover: opts.cover,
     sampleRate,
     bitrate: opts.bitrate ?? 128000,
     audioSpecificConfig: encoded.audioSpecificConfig,
@@ -436,6 +451,7 @@ function encodeFrame(encoder: AudioEncoder, samples: Float32Array, sampleRate: n
 export function buildM4bContainer(opts: M4bContainerOptions): Blob {
   if (opts.frames.length === 0) throw new Error('M4B export needs at least one AAC frame.')
   if (opts.chapters.length === 0) throw new Error('M4B export needs at least one chapter.')
+  const cover = normalizeM4bCover(opts.cover)
 
   const audioSamples = opts.frames.map((frame) => frame.data)
   const audioBytes = byteLength(audioSamples)
@@ -444,14 +460,25 @@ export function buildM4bContainer(opts: M4bContainerOptions): Blob {
   const chapterSamples = makeChapterSamples(opts.chapters, totalAudioDuration, opts.sampleRate)
   const mdatParts = [...audioSamples, ...chapterSamples.map((sample) => sample.data)]
   const ftyp = makeFtyp()
-  let moov = makeMoov(opts, movieDuration, totalAudioDuration, chapterSamples, 0, 0)
+  let moov = makeMoov({ ...opts, cover }, movieDuration, totalAudioDuration, chapterSamples, 0, 0)
   const audioOffset = ftyp.length + moov.length + 8
   const chapterOffset = audioOffset + audioBytes
   if (chapterOffset > MAX_UINT32) throw new Error('M4B export is too large for the browser muxer.')
 
-  moov = makeMoov(opts, movieDuration, totalAudioDuration, chapterSamples, audioOffset, chapterOffset)
+  moov = makeMoov({ ...opts, cover }, movieDuration, totalAudioDuration, chapterSamples, audioOffset, chapterOffset)
   const mdat = box('mdat', ...mdatParts)
   return new Blob([ftyp as Uint8Array<ArrayBuffer>, moov as Uint8Array<ArrayBuffer>, mdat as Uint8Array<ArrayBuffer>], { type: 'audio/mp4' })
+}
+
+function normalizeM4bCover(cover: M4bContainerOptions['cover']): M4bContainerOptions['cover'] | undefined {
+  if (!cover) return undefined
+  if (!(cover.bytes instanceof Uint8Array) || cover.bytes.length === 0 || cover.bytes.length > 10 * 1024 * 1024) {
+    throw new Error('M4B cover art must contain between 1 byte and 10 MB of image data.')
+  }
+  if (cover.mimeType !== 'image/jpeg' && cover.mimeType !== 'image/png') {
+    throw new Error('M4B cover art must be JPEG or PNG.')
+  }
+  return { mimeType: cover.mimeType, bytes: new Uint8Array(cover.bytes) }
 }
 
 function makeMoov(
@@ -466,8 +493,8 @@ function makeMoov(
     'moov',
     makeMvhd(movieDuration, 3),
     makeAudioTrack(opts, movieDuration, audioDuration, audioOffset),
-    makeChapterTrack(movieDuration, chapterSamples, chapterOffset),
-    makeUdta(opts.title, chapterSamples, opts.provenanceJson),
+    makeChapterTrack(opts, movieDuration, chapterSamples, chapterOffset),
+    makeUdta(opts.title, chapterSamples, opts.provenanceJson, opts.narrator, opts.language, opts.cover),
   )
 }
 
@@ -478,7 +505,7 @@ function makeAudioTrack(opts: M4bContainerOptions, movieDuration: number, audioD
     box('tref', box('chap', u32(2))),
     box(
       'mdia',
-      makeMdhd(opts.sampleRate, audioDuration),
+      makeMdhd(opts.sampleRate, audioDuration, opts.language),
       makeHdlr('soun', 'SoundHandler'),
       box(
         'minf',
@@ -495,6 +522,7 @@ function makeAudioTrack(opts: M4bContainerOptions, movieDuration: number, audioD
 }
 
 function makeChapterTrack(
+  opts: M4bContainerOptions,
   movieDuration: number,
   chapterSamples: Array<{ data: Uint8Array; duration: number; start100ns: bigint; title: string }>,
   chunkOffset: number,
@@ -504,7 +532,7 @@ function makeChapterTrack(
     makeTkhd(2, movieDuration, 0),
     box(
       'mdia',
-      makeMdhd(MOVIE_TIMESCALE, movieDuration),
+      makeMdhd(MOVIE_TIMESCALE, movieDuration, opts.language),
       makeHdlr('text', 'TextHandler'),
       box(
         'minf',
@@ -562,8 +590,8 @@ function makeTkhd(trackId: number, duration: number, volume: number): Uint8Array
   )
 }
 
-function makeMdhd(timescale: number, duration: number): Uint8Array {
-  return fullBox('mdhd', 0, 0, u32(0), u32(0), u32(timescale), u32(duration), u16(languageCode('und')), u16(0))
+function makeMdhd(timescale: number, duration: number, language?: string): Uint8Array {
+  return fullBox('mdhd', 0, 0, u32(0), u32(0), u32(timescale), u32(duration), u16(languageCode(language ?? 'und')), u16(0))
 }
 
 function makeHdlr(handler: string, name: string): Uint8Array {
@@ -650,16 +678,32 @@ function makeGmhd(): Uint8Array {
   )
 }
 
-function makeUdta(title: string, chapters: Array<{ start100ns: bigint; title: string }>, provenanceJson?: string): Uint8Array {
-  return box('udta', makeMeta(title, provenanceJson), makeChpl(chapters))
+function makeUdta(
+  title: string,
+  chapters: Array<{ start100ns: bigint; title: string }>,
+  provenanceJson?: string,
+  narrator?: string,
+  language?: string,
+  cover?: M4bContainerOptions['cover'],
+): Uint8Array {
+  return box('udta', makeMeta(title, provenanceJson, narrator, language, cover), makeChpl(chapters))
 }
 
-function makeMeta(title: string, provenanceJson?: string): Uint8Array {
+function makeMeta(
+  title: string,
+  provenanceJson?: string,
+  narrator?: string,
+  language?: string,
+  cover?: M4bContainerOptions['cover'],
+): Uint8Array {
   const items = [
     box([0xa9, 0x6e, 0x61, 0x6d], box('data', u32(1), u32(0), utf8(title))),
+    ...(narrator?.trim() ? [box([0xa9, 0x41, 0x52, 0x54], box('data', u32(1), u32(0), utf8(narrator.trim())))] : []),
+    ...(language?.trim() ? [box([0xa9, 0x6c, 0x61, 0x6e], box('data', u32(1), u32(0), utf8(language.trim())))] : []),
     ...(provenanceJson
       ? [box([0xa9, 0x63, 0x6d, 0x74], box('data', u32(1), u32(0), truncateUtf8(provenanceJson, 64 * 1024)))]
       : []),
+    ...(cover ? [box('covr', box('data', u32(cover.mimeType === 'image/png' ? 14 : 13), u32(0), cover.bytes))] : []),
   ]
   return fullBox(
     'meta',
@@ -788,7 +832,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 function languageCode(language: string): number {
-  const chars = language.slice(0, 3).padEnd(3, 'd')
+  const token = language.trim().toLowerCase().split(/[-_]/u)[0]
+  const iso639 = token.length === 2
+    ? ({ de: 'deu', en: 'eng', es: 'spa', fr: 'fra', hi: 'hin', it: 'ita', ja: 'jpn', ko: 'kor', pt: 'por', ru: 'rus', zh: 'zho' }[token] ?? 'und')
+    : token.length === 3 ? token : 'und'
+  const chars = iso639.slice(0, 3).padEnd(3, 'd')
   return ((chars.charCodeAt(0) - 0x60) << 10) | ((chars.charCodeAt(1) - 0x60) << 5) | (chars.charCodeAt(2) - 0x60)
 }
 

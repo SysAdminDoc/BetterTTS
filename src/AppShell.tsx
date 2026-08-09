@@ -176,7 +176,7 @@ import {
   type ChatterboxModelVariant,
   type ChatterboxReference,
 } from './lib/chatterbox.ts'
-import { type QueueEngine, type QueueJob, type QueueVoiceMixEntry, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
+import { type QueueChunk, type QueueEngine, type QueueJob, type QueueVoiceMixEntry, commitQueueChunk, deleteJobWithSnapshot, getChunkBlob, jobProgress, listJobs, replaceQueueChunk, restoreQueueJob, saveJob } from './lib/queue.ts'
 import {
   clampResumeTime,
   clearPlaybackState,
@@ -738,6 +738,24 @@ function m4bCapabilityTone(capability: M4bCapability | null): 'ok' | 'warn' | 'm
 
 function m4bCapabilityText(capability: M4bCapability | null): string {
   return capability?.message ?? 'Checking M4B WebCodecs AAC support…'
+}
+
+function chapterTitlesForInterop(chunks: ReadonlyArray<Pick<QueueChunk, 'chapterTitle' | 'chapterIndex' | 'text'>>): string[] {
+  const titles: string[] = []
+  let previousKey: string | null = null
+  chunks.forEach((chunk, index) => {
+    const key = Number.isSafeInteger(chunk.chapterIndex)
+      ? `index:${chunk.chapterIndex}`
+      : `title:${chunk.chapterTitle?.trim() || `Chapter ${index + 1}`}`
+    if (key !== previousKey) titles.push(chunk.chapterTitle?.trim() || `Chapter ${index + 1}`)
+    previousKey = key
+  })
+  return titles
+}
+
+function interopFailureMessage(report: { issues: readonly { message: string }[] }): string {
+  const detail = report.issues.slice(0, 2).map((issue) => issue.message).join(' ')
+  return detail ? `Export interoperability check failed. ${detail}` : 'Export interoperability check failed.'
 }
 
 function crossOriginStorageShortLabel(usable: boolean): string {
@@ -5466,14 +5484,27 @@ function App() {
       for (const entry of blobEntries) {
         entries[entry.filename] = new Uint8Array(await entry.blob.arrayBuffer())
       }
+      const coverType = m4bCoverFile?.type === 'image/png'
+        ? 'image/png'
+        : m4bCoverFile?.type === 'image/jpeg'
+          ? 'image/jpeg'
+          : null
+      const coverFilename = coverType === 'image/png' ? 'cover.png' : coverType === 'image/jpeg' ? 'cover.jpg' : null
+      if (m4bCoverFile && (!coverType || m4bCoverFile.size > 10 * 1024 * 1024)) {
+        throw new Error('Cover art must be a JPEG or PNG no larger than 10 MB.')
+      }
+      if (m4bCoverFile && coverFilename) entries[`cover/${coverFilename}`] = new Uint8Array(await m4bCoverFile.arrayBuffer())
       entries['chapters.json'] = new TextEncoder().encode(JSON.stringify({
+        schemaVersion: 2,
         app: 'BetterTTS',
         title: job.title,
         engine: job.engine,
         voice: job.voice,
+        language: job.language,
         format: job.format,
         bitrate: job.bitrate,
         exportedAt: new Date().toISOString(),
+        cover: coverFilename ? { filename: `cover/${coverFilename}`, mimeType: coverType } : undefined,
         chunks: manifestChunks,
       }, null, 2))
       const provenanceManifest = job.generationProvenance
@@ -5493,6 +5524,14 @@ function App() {
       const zipped = await new Promise<Uint8Array>((resolve, reject) => {
         zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)))
       })
+      const { validateAudiobookExport } = await import('./lib/audiobook-interoperability.ts')
+      const interop = validateAudiobookExport('zip', zipped, {
+        title: job.title,
+        language: job.language ?? 'en',
+        chapterTitles: chapterTitlesForInterop(manifestChunks),
+        requireCover: Boolean(coverFilename),
+      })
+      if (!interop.valid) throw new Error(interopFailureMessage(interop))
       const zipBlob = new Blob([zipped as Uint8Array<ArrayBuffer>], { type: 'application/zip' })
       const url = URL.createObjectURL(zipBlob)
       const a = document.createElement('a')
@@ -5533,6 +5572,8 @@ function App() {
         const result = await desktopFfmpeg.audiobook({
           chunks,
           title: job.title,
+          language: job.language ?? 'und',
+          narrator: 'BetterTTS',
           bitrate: Math.max(64, Math.min(192, job.bitrate)),
           loudnessTarget: loudnessTargetForPreset(loudnessPreset),
           cover: m4bCoverFile ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()) } : undefined,
@@ -5544,6 +5585,15 @@ function App() {
             )
             : undefined,
         })
+        const { validateAudiobookExport } = await import('./lib/audiobook-interoperability.ts')
+        const interop = validateAudiobookExport('m4b', new Uint8Array(result.bytes), {
+          title: job.title,
+          language: job.language ?? 'und',
+          narrator: 'BetterTTS',
+          chapterTitles: chunks.map((chunk) => chunk.title),
+          requireCover: Boolean(m4bCoverFile),
+        })
+        if (!interop.valid) throw new Error(interopFailureMessage(interop))
         const url = URL.createObjectURL(new Blob([result.bytes as Uint8Array<ArrayBuffer>], { type: result.mime }))
         const a = document.createElement('a')
         a.href = url
@@ -5595,7 +5645,12 @@ function App() {
       const { buildM4bFromBlobs } = await m4bModule
       const { blob, chapterCount } = await buildM4bFromBlobs({
         title: job.title,
+        language: job.language ?? 'und',
+        narrator: 'BetterTTS',
         chunks,
+        cover: m4bCoverFile && (m4bCoverFile.type === 'image/jpeg' || m4bCoverFile.type === 'image/png')
+          ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()), mimeType: m4bCoverFile.type }
+          : undefined,
         bitrate: Math.max(64, Math.min(192, job.bitrate)) * 1000,
         provenanceManifest: job.generationProvenance
           ? updateProvenanceCueSummary(
@@ -5612,6 +5667,16 @@ function App() {
           setStatus(info.phase === 'decode' ? 'Decoding queue audio…' : info.phase === 'encode' ? 'Encoding AAC…' : 'Writing M4B chapters…')
         },
       })
+      const { normalizeM4bChapters } = await m4bModule
+      const { validateAudiobookExport } = await import('./lib/audiobook-interoperability.ts')
+      const interop = validateAudiobookExport('m4b', new Uint8Array(await blob.arrayBuffer()), {
+        title: job.title,
+        language: job.language ?? 'und',
+        narrator: 'BetterTTS',
+        chapterTitles: normalizeM4bChapters(chunks).map((chapter) => chapter.title),
+        requireCover: Boolean(m4bCoverFile && (m4bCoverFile.type === 'image/jpeg' || m4bCoverFile.type === 'image/png')),
+      })
+      if (!interop.valid) throw new Error(interopFailureMessage(interop))
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -5649,6 +5714,7 @@ function App() {
           index: chunk.index,
           text: chunk.text,
           title: chunk.chapterTitle,
+          chapterTitle: chunk.chapterTitle,
           chapterIndex: chunk.chapterIndex,
           format: job.format,
           blob,
@@ -5670,7 +5736,19 @@ function App() {
         language: job.language,
         narrator: 'BetterTTS',
         bitrate: job.bitrate,
+        cover: m4bCoverFile && (m4bCoverFile.type === 'image/jpeg' || m4bCoverFile.type === 'image/png')
+          ? { bytes: new Uint8Array(await m4bCoverFile.arrayBuffer()), mimeType: m4bCoverFile.type, filename: m4bCoverFile.name }
+          : undefined,
       })
+      const { validateAudiobookExport } = await import('./lib/audiobook-interoperability.ts')
+      const interop = validateAudiobookExport('epub', new Uint8Array(await result.blob.arrayBuffer()), {
+        title: job.title,
+        language: job.language ?? 'en',
+        narrator: 'BetterTTS',
+        chapterTitles: chapterTitlesForInterop(chunks),
+        requireCover: Boolean(m4bCoverFile && (m4bCoverFile.type === 'image/jpeg' || m4bCoverFile.type === 'image/png')),
+      })
+      if (!interop.valid) throw new Error(interopFailureMessage(interop))
       const url = URL.createObjectURL(result.blob)
       const a = document.createElement('a')
       a.href = url

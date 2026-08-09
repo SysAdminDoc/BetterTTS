@@ -37,6 +37,12 @@ describe('FFmpeg export arguments', () => {
     expect(metadata).toContain('START=1250\nEND=3250\ntitle=Two\\=End')
   })
 
+  it('keeps audiobook language and narrator metadata in the ffmetadata input', () => {
+    const metadata = buildChapterMetadata('Book', [{ title: 'One' }], [1.25], undefined, 'en-US', 'BetterTTS')
+    expect(metadata).toContain('artist=BetterTTS')
+    expect(metadata).toContain('language=en-US')
+  })
+
   it('embeds the optional provenance manifest as audiobook metadata', () => {
     const metadata = buildChapterMetadata('Book', [{ title: 'One' }], [1.25], { schemaVersion: 1, source: { textHash: 'private' } })
     expect(metadata).toContain('comment={"schemaVersion":1,"source":{"textHash":"private"}}')

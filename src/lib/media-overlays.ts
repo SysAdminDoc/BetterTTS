@@ -30,6 +30,11 @@ export type EpubMediaOverlayOptions = {
   language?: string
   narrator?: string
   bitrate?: number
+  cover?: {
+    bytes: Uint8Array
+    mimeType: 'image/jpeg' | 'image/png'
+    filename?: string
+  }
 }
 
 export async function buildEpubMediaOverlay(options: EpubMediaOverlayOptions): Promise<{ blob: Blob; chunkCount: number }> {
@@ -48,6 +53,11 @@ export async function buildEpubMediaOverlay(options: EpubMediaOverlayOptions): P
   entries['OEBPS/styles.css'] = strToU8(stylesCss())
   manifestRows.push('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>')
   manifestRows.push('<item id="style" href="styles.css" media-type="text/css"/>')
+  const cover = normalizeCover(options.cover)
+  if (cover) {
+    entries[`OEBPS/${cover.path}`] = cover.bytes
+    manifestRows.push(`<item id="cover-image" href="${cover.path}" media-type="${cover.mimeType}" properties="cover-image"/>`)
+  }
 
   for (const [position, chunk] of chunks.entries()) {
     const fileNumber = String(position + 1).padStart(4, '0')
@@ -87,6 +97,7 @@ export async function buildEpubMediaOverlay(options: EpubMediaOverlayOptions): P
     overlayDurations,
     manifestRows,
     spineRows,
+    cover: cover ? 'cover-image' : undefined,
   }))
 
   const zipped = zipSync(entries, { level: 0 })
@@ -195,6 +206,7 @@ function renderPackage(input: {
   overlayDurations: ReadonlyArray<{ smilId: string; duration: string }>
   manifestRows: string[]
   spineRows: string[]
+  cover?: string
 }): string {
   const identifier = `urn:uuid:${uuidFromJobId(input.jobId)}`
   const overlayMetadata = input.overlayDurations
@@ -210,12 +222,24 @@ function renderPackage(input: {
     <meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/u, 'Z')}</meta>
     <meta property="media:duration">${input.duration}</meta>
     <meta property="media:active-class">-epub-media-overlay-active</meta>
-${overlayMetadata}
+${input.cover ? `    <meta name="cover" content="${escapeXml(input.cover)}"/>\n` : ''}${overlayMetadata}
   </metadata>
   <manifest>${input.manifestRows.join('')}</manifest>
   <spine>${input.spineRows.join('')}</spine>
 </package>
 `
+}
+
+function normalizeCover(cover: EpubMediaOverlayOptions['cover']): { path: string; mimeType: string; bytes: Uint8Array } | null {
+  if (!cover) return null
+  if (!(cover.bytes instanceof Uint8Array) || cover.bytes.length === 0 || cover.bytes.length > 10 * 1024 * 1024) {
+    throw new Error('EPUB cover art must contain between 1 byte and 10 MB of image data.')
+  }
+  const extension = cover.mimeType === 'image/png' ? 'png' : cover.mimeType === 'image/jpeg' ? 'jpg' : null
+  if (!extension) throw new Error('EPUB cover art must be JPEG or PNG.')
+  const requested = cover.filename?.trim().replace(/[^a-z0-9._-]+/giu, '-')
+  const filename = requested && /\.(?:jpe?g|png)$/iu.test(requested) ? requested : `cover.${extension}`
+  return { path: `images/${filename}`, mimeType: cover.mimeType, bytes: new Uint8Array(cover.bytes) }
 }
 
 function containerXml(): string {

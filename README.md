@@ -5,14 +5,14 @@
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-582%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-587%20passing-53d889.svg)](#)
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
 - **Application:** BetterTTS v0.23.0 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 582 tests across 97 test files
+- **Tests:** 587 tests across 98 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -61,6 +61,7 @@ Every cloud TTS service gates you behind signups, character limits, and paid tie
 - **Optional desktop RVC voice conversion** — post-process generated audio through a registered local `.pth` model, with optional second-model blending, explicit consent, and provenance recorded on the saved clip
 - **Versioned generation provenance** — saved clips and resumable jobs retain engine/model revisions, voice, synthesis, cleanup, pronunciation, BGM, encoder, source hash, cues, and RVC context; ZIP/project exports and M4B metadata carry the manifest while source text and article URLs remain opt-in
 - **Optional long-form quality checks** — inspect duration, empty/clipped output, repeated tails, cue drift, and local Whisper transcript alignment; retry one bounded time and preserve source-text-free needs-review warnings on generated clips and queue chunks
+- **Interoperable audiobook exports** — EPUB3 Media Overlays carry ordered SMIL/XHTML timing, language, metadata, and optional cover art; M4B and chaptered ZIP fallbacks retain chapter order and pass a local consumer/player conformance lane before download
 - **Text normalization preview** — imported text can show compact rule-grouped before/after changes, toggle cleanup rules, apply or undo them, restore the raw import, and inspect the exact synthesized text snapshot
 - **Narrator mode** — auto-split quoted dialogue and `[speaker:Name]` lines from narration, assign a voice per role, and preserve those assignments through resumable queue and M4B export
 - **54 Kokoro voices** — 28 English voices plus Japanese, Mandarin Chinese, Spanish, French, Hindi, Italian, and Brazilian Portuguese voices
@@ -243,7 +244,7 @@ Piper-plus is a first-class lazy engine: its MIT runtime and multilingual Tsukuy
 | Document Import | Worker-isolated `pdfjs-dist` for PDF text; `fflate` + `linkedom` for EPUB/DOCX |
 | ZIP Packaging | `fflate` |
 | Icons | `lucide-react` |
-| Testing | Vitest (582 tests across 97 files) + Playwright smoke + EPUBCheck |
+| Testing | Vitest (587 tests across 98 files) + Playwright smoke + EPUBCheck |
 | Linting | oxlint |
 | Hosting | GitHub Pages (static, no backend) |
 

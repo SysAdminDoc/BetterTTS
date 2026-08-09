@@ -158,7 +158,7 @@ export async function transcodePcm({ samples, sampleRate, format, bitrate, title
   }
 }
 
-export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudnessTarget, cover, provenanceManifest }) {
+export async function buildM4bAudiobook({ chunks, title, language, narrator, bitrate = 128, loudnessTarget, cover, provenanceManifest }) {
   if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > 500) throw new Error('Native M4B needs between 1 and 500 audio chunks.')
   const total = chunks.reduce((sum, chunk) => sum + (chunk.bytes?.byteLength ?? 0), 0)
   if (total === 0 || total > MAX_PCM_BYTES) throw new Error('Native M4B inputs must total 512 MB or less.')
@@ -199,7 +199,7 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
     await run(concatArgs, 10 * 60 * 1000)
 
     const metadataPath = join(root, 'chapters.ffmeta')
-    await writeFile(metadataPath, buildChapterMetadata(title, chunks, durations, provenanceManifest))
+    await writeFile(metadataPath, buildChapterMetadata(title, chunks, durations, provenanceManifest, language, narrator))
     const output = join(root, 'output.m4b')
     const inputArgs = ['-hide_banner', '-nostdin', '-y', '-i', combined]
     const filter = loudnessTarget ? await measuredLoudnorm(inputArgs, loudnessTarget) : null
@@ -224,10 +224,12 @@ export async function buildM4bAudiobook({ chunks, title, bitrate = 128, loudness
   }
 }
 
-export function buildChapterMetadata(title, chunks, durations, provenanceManifest) {
+export function buildChapterMetadata(title, chunks, durations, provenanceManifest, language, narrator) {
   const escape = (value) => String(value).replaceAll('\\', '\\\\').replace(/([=;#\n])/g, '\\$1')
   let start = 0
   const lines = [';FFMETADATA1', `title=${escape(title)}`]
+  if (narrator) lines.push(`artist=${escape(narrator)}`)
+  if (language) lines.push(`language=${escape(language)}`)
   if (provenanceManifest !== undefined) {
     const json = typeof provenanceManifest === 'string' ? provenanceManifest : JSON.stringify(provenanceManifest)
     if (json) lines.push(`comment=${escape(json.slice(0, 64 * 1024))}`)

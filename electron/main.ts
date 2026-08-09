@@ -1291,6 +1291,8 @@ ipcMain.handle(FFMPEG_CHANNEL, async (event, request: unknown) => {
     loudnessTarget?: number
     cleanupMode?: 'off' | 'denoise' | 'studio'
     chunks?: Array<{ bytes: Uint8Array; title: string }>
+    language?: string
+    narrator?: string
     cover?: { bytes: Uint8Array }
     provenanceManifest?: unknown
   }

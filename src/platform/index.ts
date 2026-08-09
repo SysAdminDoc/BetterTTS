@@ -59,6 +59,8 @@ export type DesktopFfmpegBridge = {
   audiobook: (request: {
     chunks: Array<{ bytes: Uint8Array; title: string }>
     title: string
+    language?: string
+    narrator?: string
     bitrate: number
     loudnessTarget?: number
     cover?: { bytes: Uint8Array }
