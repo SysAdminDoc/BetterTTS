@@ -483,3 +483,142 @@
 - Initial static React app (originally named TTS4FREE).
 - Added in-browser Kokoro 82M generation through `kokoro-js`.
 - Added Web Speech playback fallback, WAV downloads, per-line generation, ZIP export, themes, and GitHub Pages build configuration.
+
+## Roadmap archive — 2026-08-10 — ROADMAP.md
+
+<details>
+<summary>Original roadmap snapshot</summary>
+
+```markdown
+# ROADMAP — BetterTTS
+
+Single task tracker. Incomplete work only. Item IDs: TF-XX (sequential; next free ID: TF-151).
+
+> Recovery note (2026-07-08): this file is gitignored and was deleted by `git clean -fdx` during the gh-pages deploy; restored from session transcripts. Future deploys must exclude md files (see CLAUDE.md gotchas).
+
+## Research-Driven Additions
+
+Added 2026-07-08 from the deep-research pass (see RESEARCH.md for evidence detail).
+
+### P2 — differentiators
+
+### P3 — larger bets
+
+## Research-Driven Additions
+
+Added 2026-07-08 from the v0.7.0 code audit and competitive refresh (see RESEARCH.md).
+
+Note on existing items (2026-07-08 v0.8.0 line-verified audit):
+- TF-35 CONFIRMED — lines now src/App.tsx:358-362; zero `.close()` calls exist codebase-wide; Safari throws after ~4-6 contexts.
+- TF-36 CONFIRMED — lines now src/App.tsx:891,898.
+- TF-39 expanded — preview URLs also skipped by the unmount cleanup at src/App.tsx:254-260 (only `objectUrlsRef` covered).
+- TF-40 confirmed at src/App.tsx:92-99.
+- TF-41 revised fix — prefer memoizing ONE connection promise + `onblocked`/`onversionchange` handlers over close-per-op (openDB at src/lib/library.ts:17-28).
+- TF-42 expanded — also plain substring matching corrupts words ("cat"→"kat" hits "catalog"); use word-boundary regex with escaped keys in the single-pass rewrite.
+- TF-43 confirmed, worse than written — URLs are minted on EVERY re-render including each keystroke in the 5,000-char textarea (2 blobs per result row per render), src/App.tsx:890,897.
+- TF-46 partially superseded — the crash/soft-lock halves are now P0 (see TF-55); this item retains the auto-restart + toast UX.
+- TF-49 expanded — also guard zero-length decoded BGM (`i % 0 = NaN` → silent all-NaN export), see TF-62.
+- TF-52 expanded — cache also grows unboundedly (every deploy's hashed bundles accumulate; un-awaited floating `cache.put`), see TF-67.
+
+### P0 — root-cause reliability
+
+### P1 — reliability and correctness
+
+### P1 — architecture and maintainability
+
+### P2 — features and competitive parity
+
+### P3 — polish and future-proofing
+
+
+## Research-Driven Additions
+
+Added 2026-07-08 from the v0.8.0 line-verified audit (41 findings) + refreshed landscape sweep (see RESEARCH.md; audit finding IDs like P0-1 refer to that pass).
+
+### P0 — shipping-broken functionality
+
+### P1 — root-cause correctness
+
+### P2 — reliability, performance, hardening
+
+### P2 — competitive features
+
+### P3 — polish
+
+## Research-Driven Additions
+
+### P1 — trust, reliability, and architecture
+
+### P2 — product parity and long-form workflows
+
+### P3 — optional engines and future-proofing
+
+## Deep-Audit Deferrals
+
+Added 2026-07-09 from the v0.16.0 deep audit (fixed findings shipped in v0.16.0; these need larger design work or verification).
+
+## Research-Driven Additions
+
+Added 2026-07-09 from the native application research pass (see RESEARCH.md). **Stack decision 2026-07-09: Electron, not Tauri** — the app leans hard on WebCodecs (AAC/M4B), WebGPU, and SharedArrayBuffer/COOP-COEP; shipping a version-locked Chromium removes the "does the system WebView2 support X" risk that is worst on Windows 11 IoT LTSC. Native inference goes through `onnxruntime-node` (DirectML/CUDA/CPU), not a Tauri sidecar.
+
+### P0 — native foundation and trust boundaries
+
+### P1 — desktop production workflows
+
+### P2 — model expansion and creator power
+
+### P3 — future-proofing and parity polish
+
+## Research-Driven Additions
+
+Added 2026-07-09 from the desktop-power research pass (see RESEARCH.md for evidence and licenses). IDs continue the TF-XX scheme; next free ID after this batch: TF-127.
+
+### P1 — desktop runtime foundation and permissive engine wins
+
+### P2 — desktop power features and interop
+
+### P3 — quick permissive engine adds
+
+## Research-Driven Additions
+
+Added 2026-07-09 from the full-product research pass (web UX, reliability, ecosystem, platform, security — see RESEARCH.md). IDs continue the TF-XX scheme; next free ID after this batch: TF-151.
+
+### P1 — root-cause reliability and trust
+
+### P2 — reading experience and long-form differentiators
+
+### P3 — creator polish and platform reach
+
+### P0 — supply-chain and data safety
+
+### P1 — runtime correctness, responsiveness, and verification
+
+### P2 — artifact explainability and retrieval
+
+## Research-Driven Additions
+
+Added 2026-07-29 from the current research refresh (see `RESEARCH.md`).
+
+### P0 — integrity and bounded persistence
+
+### P1 — recovery, verification, and transport
+
+### P2 — traceable artifacts
+
+## Research-Driven Additions
+
+Added 2026-08-08 from the current exhaustive research refresh (see RESEARCH.md). IDs continue from the highest existing roadmap ID, TF-151.
+
+### P0 — trust boundaries and release safety
+
+
+### P1 — runtime correctness, recovery, and interoperability
+
+
+### P2 — quality, maintainability, and platform reach
+
+
+### P3 — measured reach and offline capability
+```
+
+</details>
