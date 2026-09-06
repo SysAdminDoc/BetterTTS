@@ -75,10 +75,9 @@ extraResources:
 
 win:
   icon: build/icon.ico
-  # BetterTTS ships unsigned; never invoke Authenticode even when a machine
-  # happens to have a certificate or signtool available.
+  # BetterTTS ships unsigned, but electron-builder still applies the branded
+  # icon and version metadata before producing the installer.
   signExecutable: false
-  signAndEditExecutable: false
   target:
     - target: nsis
       arch:

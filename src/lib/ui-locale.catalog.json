@@ -31,7 +31,7 @@
         "persistenceUnavailable": "Settings and crash-recovery text cannot be saved by this browser. This session still works, but export or save a project before closing.",
         "generationCancelled": "Generation cancelled.",
         "shareUnavailable": "Share cancelled or unavailable. Use Open to choose a file, or share text or a URL instead.",
-        "articleImportFallback": "Could not read that page — most sites block cross-origin reads. Paste the article text instead.",
+        "articleImportFallback": "Could not read that page. Most sites block cross-origin reads, so paste the article text instead.",
         "articleImportTimeout": "Article import timed out. Paste the text instead.",
         "articleImportCancelled": "Article import cancelled. The current script was kept.",
         "unexpectedInterfaceError": "An unexpected interface error interrupted this session. Reload to recover; saved clips and queued jobs remain on this device."

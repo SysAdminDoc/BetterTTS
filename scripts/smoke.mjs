@@ -19,6 +19,25 @@ const allowedConsole = [
   'WebGPU',
 ]
 
+async function dismissNotification(page) {
+  const dismissButtons = page.getByRole('button', { name: 'Dismiss notification' })
+  let quietCycles = 0
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    let clicked = false
+    for (let index = (await dismissButtons.count()) - 1; index >= 0; index -= 1) {
+      const button = dismissButtons.nth(index)
+      if (!(await button.isVisible().catch(() => false))) continue
+      await button.click()
+      clicked = true
+    }
+    if ((await page.locator('.toast').count()) === 0) quietCycles += 1
+    else quietCycles = 0
+    if (quietCycles >= 5) return
+    await page.waitForTimeout(clicked ? 50 : 100)
+  }
+  throw new Error('Notifications did not clear before the screenshot capture')
+}
+
 function command(name, args) {
   if (process.platform !== 'win32') return { file: name, args }
   return { file: 'cmd.exe', args: ['/d', '/s', '/c', name, ...args] }
@@ -194,9 +213,35 @@ async function seedCompletedQueueJob(page, id) {
     }
 
     const cueSet = [
-      { index: 1, startSec: 0, endSec: 1.5, text: 'Smoke sentence one.' },
-      { index: 2, startSec: 1.5, endSec: 3, text: 'Smoke sentence two.' },
+      { index: 1, startSec: 0, endSec: 1.5, text: 'Privacy should not require a subscription.' },
+      { index: 2, startSec: 1.5, endSec: 3, text: 'Every script stays on your device.' },
     ]
+    const currentProvenance = {
+      schemaVersion: 3,
+      createdAt: new Date().toISOString(),
+      app: { name: 'BetterTTS', version: '0.25.0' },
+      runtime: { target: 'web', label: 'WebAssembly q8', platform: 'Win32' },
+      engine: { id: 'kokoro', modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX', modelRevision: 'smoke-fixture' },
+      voice: {
+        id: 'af_heart',
+        locale: 'en-us',
+        provenanceSchemaVersion: 1,
+        source: 'built-in',
+        consent: { required: false, acknowledged: true },
+        watermark: { status: 'not-applicable' },
+      },
+      synthesis: { speed: 1, pitchSemitones: 0 },
+      cleanup: {
+        text: { citations: true, urls: true, acronyms: true, markdown: true, footnotes: true, pageArtifacts: true, pdfReflow: true, numbers: true, metadata: true },
+        punctuationPauses: { comma: 0, semicolon: 0, colon: 0, period: 0, question: 0, exclamation: 0, ellipsis: 0, emDash: 0 },
+        audioMode: 'off',
+      },
+      pronunciation: { enabled: false, entryCount: 0, phonemeEntryCount: 0, dictionaryHash: '' },
+      backgroundMusic: { enabled: false, volume: 0, duckEnabled: false, duckDepth: 0.65 },
+      encoder: { format: 'wav', container: 'WAV', codec: 'PCM', encoder: 'BetterTTS', bitrate: 0, sampleRate: 24000, loudnessPreset: 'off', loudnessTarget: null },
+      source: { textHash: '1'.repeat(64), kind: 'text', title: 'Product launch voiceover' },
+      cues: { schemaVersion: 1, count: 2, timing: 'sentence' },
+    }
 
     await new Promise((resolve) => {
       const deleteReq = indexedDB.deleteDatabase('bettertts-queue')
@@ -222,7 +267,7 @@ async function seedCompletedQueueJob(page, id) {
     tx.objectStore('jobs').put({
       schemaVersion: 2,
       id: jobId,
-      title: 'Smoke queue',
+      title: 'Private narration demo',
       sourceKind: 'epub',
       createdAt: Date.now(),
       engine: 'kokoro',
@@ -232,8 +277,8 @@ async function seedCompletedQueueJob(page, id) {
       format: 'wav',
       bitrate: 96,
       chunks: [
-        { index: 0, text: 'Smoke chapter one.', status: 'done', chapterTitle: 'One', chapterIndex: 0, duration: '3.0s', cues: cueSet },
-        { index: 1, text: 'Smoke chapter two.', status: 'done', chapterTitle: 'Two', chapterIndex: 1, duration: '3.0s', cues: cueSet },
+        { index: 0, text: 'Privacy should not require a subscription.', status: 'done', chapterTitle: 'The local-first promise', chapterIndex: 0, duration: '3.0s', cues: cueSet },
+        { index: 1, text: 'Every script stays on your device.', status: 'done', chapterTitle: 'A recoverable workflow', chapterIndex: 1, duration: '3.0s', cues: cueSet },
       ],
     })
     tx.objectStore('chunks').put(makeWavBlob(), `${jobId}:0`)
@@ -259,8 +304,8 @@ async function seedCompletedQueueJob(page, id) {
     const libraryClips = [
       {
         id: 'smoke-library',
-        filename: 'smoke-library.wav',
-        label: 'Smoke library clip',
+        filename: 'product-launch.wav',
+        label: 'Product launch voiceover',
         voice: 'af_heart',
         engine: 'kokoro',
         speed: 1,
@@ -268,11 +313,12 @@ async function seedCompletedQueueJob(page, id) {
         size: 48044,
         duration: '3.0s',
         cues: cueSet,
+        generationProvenance: currentProvenance,
       },
       {
         id: 'smoke-library-older',
-        filename: 'older-chapter.wav',
-        label: 'Older chapter',
+        filename: 'chapter-03-local-ai.wav',
+        label: 'Chapter 3: Local AI',
         voice: 'M1',
         engine: 'supertonic',
         speed: 1,
@@ -282,8 +328,8 @@ async function seedCompletedQueueJob(page, id) {
       },
       {
         id: 'smoke-library-uncued',
-        filename: 'uncued-note.wav',
-        label: 'Uncued note',
+        filename: 'podcast-opening.wav',
+        label: 'Podcast opening',
         voice: 'af_bella',
         engine: 'piper',
         speed: 1,
@@ -1228,13 +1274,14 @@ async function runSmoke() {
     await desktop.page.getByRole('tab', { name: /Queue/ }).click()
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
+    await dismissNotification(desktop.page)
     await desktop.page.waitForTimeout(200)
-    await desktop.page.screenshot({ path: join(smokeDir, 'queue-dark.png'), fullPage: false })
+    await queue.screenshot({ path: join(smokeDir, 'queue-dark.png') })
     await desktop.page.getByRole('button', { name: /ZIP/ }).waitFor({ timeout: 20000 })
     const overlayDownloadPromise = desktop.page.waitForEvent('download')
     await queue.getByRole('button', { name: 'EPUB overlays' }).click()
     const overlayDownload = await overlayDownloadPromise
-    if (overlayDownload.suggestedFilename() !== 'smoke-queue-media-overlays.epub') {
+    if (overlayDownload.suggestedFilename() !== 'private-narration-demo-media-overlays.epub') {
       throw new Error(`Unexpected EPUB overlay filename: ${overlayDownload.suggestedFilename()}`)
     }
     const overlayPath = join(smokeDir, 'media-overlays.epub')
@@ -1252,10 +1299,10 @@ async function runSmoke() {
     if (!overlaySmil.includes('clipBegin="0.000s"') || !overlaySmil.includes('#reader-c0-p0-s0')) {
       throw new Error('EPUB overlay SMIL is missing synchronized text timing')
     }
-    const queueChunks = desktop.page.getByLabel('Smoke queue completed chunks')
+    const queueChunks = desktop.page.getByLabel('Private narration demo completed chunks')
     const sentenceRetakes = queueChunks.getByLabel('Sentence retakes for chunk 1')
     await sentenceRetakes.waitFor({ timeout: 20000 })
-    await sentenceRetakes.getByRole('button', { name: '1. Smoke sentence one.' }).click()
+    await sentenceRetakes.getByRole('button', { name: '1. Privacy should not require a subscription.' }).click()
     await sentenceRetakes.getByLabel('Retake text for sentence 1').waitFor({ timeout: 20000 })
     if (await sentenceRetakes.getByRole('button', { name: 'Retake sentence' }).count() !== 1) {
       throw new Error('Sentence retake controls did not load for the completed queue chunk')
@@ -1269,7 +1316,7 @@ async function runSmoke() {
     await companion.goto(baseUrl, { waitUntil: 'domcontentloaded' })
     await companion.locator('button:visible').filter({ hasText: /^Generate audio$/ }).first().waitFor({ timeout: 20000 })
     await companion.getByRole('tab', { name: /Queue/ }).click()
-    await companion.getByLabel('Generation queue').getByText('Smoke queue').waitFor({ timeout: 20000 })
+    await companion.getByLabel('Generation queue').getByText('Private narration demo').waitFor({ timeout: 20000 })
 
     await queueChunks.getByRole('button', { name: 'Play' }).first().click()
     await queueChunks.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
@@ -1318,53 +1365,55 @@ async function runSmoke() {
     await chunkEditor.getByLabel('Segment text').fill('Smoke replacement segment.')
     await chunkEditor.getByRole('button', { name: 'Regenerate' }).waitFor({ timeout: 20000 })
     await chunkEditor.getByRole('button', { name: 'Cancel' }).click()
-    await queue.getByRole('button', { name: 'Remove queue job Smoke queue' }).click()
+    await queue.getByRole('button', { name: 'Remove queue job Private narration demo' }).click()
     await queue.getByText('Queue is empty').waitFor({ timeout: 20000 })
     await companion.getByLabel('Generation queue').getByText('Queue is empty').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
-    await queue.getByText('Smoke queue').waitFor({ timeout: 20000 })
-    await companion.getByLabel('Generation queue').getByText('Smoke queue').waitFor({ timeout: 20000 })
+    await queue.getByText('Private narration demo').waitFor({ timeout: 20000 })
+    await companion.getByLabel('Generation queue').getByText('Private narration demo').waitFor({ timeout: 20000 })
     await companion.close()
 
     console.log('Checking library playback controls...')
+    await desktop.page.getByRole('button', { name: /^Kokoro 82M/ }).click()
     await desktop.page.getByRole('tab', { name: /Library/ }).click()
     const libraryPanel = desktop.page.getByRole('tabpanel', { name: /Clip library/ })
     await libraryPanel.scrollIntoViewIfNeeded()
-    await desktop.page.waitForTimeout(200)
-    await desktop.page.screenshot({ path: join(smokeDir, 'library-dark.png'), fullPage: false })
+    await dismissNotification(desktop.page)
     const librarySearch = libraryPanel.getByLabel('Search saved clips')
     await librarySearch.focus()
-    await librarySearch.fill('Smoke')
+    await librarySearch.fill('Product')
     await libraryPanel.getByText('1 of 3 clips shown').waitFor({ timeout: 20000 })
+    await desktop.page.waitForTimeout(200)
+    await libraryPanel.screenshot({ path: join(smokeDir, 'library-dark.png') })
     await libraryPanel.getByLabel('Sort saved clips').selectOption('size-asc')
     await librarySearch.fill('')
     await libraryPanel.getByLabel('Filter saved clips by voice').selectOption('M1')
-    await libraryPanel.getByText('Older chapter').waitFor({ timeout: 20000 })
+    await libraryPanel.getByText('Chapter 3: Local AI').waitFor({ timeout: 20000 })
     await libraryPanel.getByLabel('Filter saved clips by engine').selectOption('supertonic')
     await libraryPanel.getByLabel('Filter saved clips by cue state').selectOption('without-cues')
     await libraryPanel.getByText('1 of 3 clips shown').waitFor({ timeout: 20000 })
     await libraryPanel.getByLabel('Filter saved clips by voice').selectOption('all')
     await libraryPanel.getByLabel('Filter saved clips by engine').selectOption('all')
     await libraryPanel.getByLabel('Filter saved clips by cue state').selectOption('all')
-    await librarySearch.fill('Smoke')
+    await librarySearch.fill('Product')
     await libraryPanel.getByRole('button', { name: 'Play' }).click()
     await libraryPanel.getByRole('button', { name: /Previous sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: /Next sentence/ }).waitFor({ timeout: 20000 })
     await libraryPanel.getByText(/Resumed at/).waitFor({ timeout: 20000 })
-    await libraryPanel.getByRole('button', { name: 'Remove Smoke library clip' }).click()
+    await libraryPanel.getByRole('button', { name: 'Remove Product launch voiceover' }).click()
     await libraryPanel.getByText('No clips match these filters').waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Clear filters' }).click()
-    await libraryPanel.getByText('Older chapter').waitFor({ timeout: 20000 })
+    await libraryPanel.getByText('Chapter 3: Local AI').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
-    await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
+    await libraryPanel.getByText('Product launch voiceover').waitFor({ timeout: 20000 })
     await libraryPanel.getByRole('button', { name: 'Clear library' }).click()
     await libraryPanel.getByText('No saved clips').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: 'Undo' }).click()
-    await libraryPanel.getByText('Smoke library clip').waitFor({ timeout: 20000 })
+    await libraryPanel.getByText('Product launch voiceover').waitFor({ timeout: 20000 })
     await desktop.page.getByRole('button', { name: /^Kokoro 82M/ }).click()
     await fileInput.setInputFiles(makeEpubUpload())
     const epubImportResult = await Promise.race([
-      desktop.page.getByText(/Imported "worker-book" — 2 chapters/).waitFor({ timeout: 20000 }).then(() => 'ok'),
+      desktop.page.getByText(/Imported "worker-book" with 2 chapters/).waitFor({ timeout: 20000 }).then(() => 'ok'),
       desktop.page.locator('.toast.error').waitFor({ timeout: 20000 }).then(async () => desktop.page.locator('.toast.error').innerText()),
     ])
     if (epubImportResult !== 'ok') throw new Error(`EPUB worker import did not complete: ${epubImportResult}`)
@@ -1392,6 +1441,7 @@ async function runSmoke() {
       document.scrollingElement?.scrollTo(0, 0)
       document.querySelector('.settings-scroll')?.scrollTo(0, 0)
     })
+    await dismissNotification(desktop.page)
     await desktop.page.waitForTimeout(200)
     await desktop.page.screenshot({ path: join(smokeDir, 'desktop.png'), fullPage: false })
     await desktop.page.getByRole('link', { name: 'Models', exact: true }).click()
@@ -1476,6 +1526,7 @@ async function runSmoke() {
       document.scrollingElement?.scrollTo(0, 0)
       document.querySelector('.settings-scroll')?.scrollTo(0, 0)
     })
+    await dismissNotification(mobile.page)
     await mobile.page.waitForTimeout(200)
     await mobile.page.screenshot({ path: join(smokeDir, 'mobile.png'), fullPage: false })
     await mobileContext.close()

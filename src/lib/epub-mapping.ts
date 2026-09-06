@@ -188,8 +188,8 @@ export function splitEpubChapter(
   const second = copyChapter(chapter)
   first.id = `${chapter.id}-a`
   second.id = `${chapter.id}-b`
-  first.title = `${chapter.title} — 1`.slice(0, MAX_EPUB_MAPPING_TITLE_CHARS)
-  second.title = `${chapter.title} — 2`.slice(0, MAX_EPUB_MAPPING_TITLE_CHARS)
+  first.title = `${chapter.title}, part 1`.slice(0, MAX_EPUB_MAPPING_TITLE_CHARS)
+  second.title = `${chapter.title}, part 2`.slice(0, MAX_EPUB_MAPPING_TITLE_CHARS)
   first.text = leftText
   second.text = rightText
   return [...chapters.slice(0, index), first, second, ...chapters.slice(index + 1)].map(copyChapter)

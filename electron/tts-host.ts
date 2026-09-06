@@ -32,11 +32,6 @@ type SherpaGeneratedAudio = {
   sampleRate: number
 }
 
-type SherpaProgress = {
-  samples?: Float32Array
-  progress?: number
-}
-
 type SherpaGenerationConfig = {
   sid: number
   speed: number
@@ -45,12 +40,11 @@ type SherpaGenerationConfig = {
 
 type SherpaTts = {
   sampleRate: number
-  generate: (request: { text: string; generationConfig: SherpaGenerationConfig }) => SherpaGeneratedAudio
-  generateAsync?: (request: {
+  generate: (request: {
     text: string
     generationConfig: SherpaGenerationConfig
-    onProgress?: (info: SherpaProgress) => number
-  }) => Promise<SherpaGeneratedAudio>
+    enableExternalBuffer?: boolean
+  }) => SherpaGeneratedAudio
 }
 
 type SherpaModule = {
@@ -94,7 +88,7 @@ export type HostRequest =
   | { type: 'info' }
 
 export type HostResponse =
-  | { type: 'progress'; info: PackProgress | SherpaProgress | unknown }
+  | { type: 'progress'; info: PackProgress }
   | { type: 'loaded'; key: string; runtime: NativeRuntimeInfo }
   | { type: 'loadError'; message: string; key: string }
   | { type: 'generated'; samples: Float32Array; sampleRate: number; id: number }
@@ -271,17 +265,7 @@ function clearLoadedRuntime(): void {
   loadedSampleRate = 0
 }
 
-function postProgress(info: PackProgress | SherpaProgress | unknown): void {
-  if (info && typeof info === 'object' && 'samples' in info && info.samples instanceof Float32Array) {
-    const samples = validateNativePcm(info.samples, loadedSampleRate)
-    pcmBudget.reserve(samples.bytes)
-    try {
-      port.post({ type: 'progress', info })
-    } finally {
-      pcmBudget.release(samples.bytes)
-    }
-    return
-  }
+function postProgress(info: PackProgress): void {
   port.post({ type: 'progress', info })
 }
 
@@ -380,27 +364,32 @@ async function handleGenerate(msg: Extract<HostRequest, { type: 'generate' }>): 
     })
     const instance = tts
     if (!instance) throw new Error('Native model not loaded')
-    const generated = instance.generateAsync
-      ? await instance.generateAsync({
-        text: msg.text,
-        generationConfig,
-        onProgress: (info) => {
-          postProgress(info)
-          return generationCoordinator.isCancelled(msg.id) ? 0 : 1
-        },
-      })
-      : instance.generate({ text: msg.text, generationConfig })
+    // Inference already runs outside the renderer and main process. Keep the
+    // native call synchronous inside this disposable utility host because the
+    // Sherpa async progress callback crosses native threads and can terminate
+    // Electron's Node utility context. Cancellation remains bounded by the
+    // main-process supervisor, which kills and replaces this host after 1 s.
+    const generated = instance.generate({
+      text: msg.text,
+      generationConfig,
+      // Electron's V8 sandbox rejects N-API external buffers. Ask Sherpa to
+      // copy its native PCM into a V8-managed ArrayBuffer instead.
+      enableExternalBuffer: false,
+    })
     if (watchdogExpired) return
     if (generationCoordinator.isCancelled(msg.id)) {
       port.post({ type: 'generateError', message: 'Generation cancelled.', id: msg.id })
       return
     }
     const audio = validateNativePcm(generated.samples, generated.sampleRate || loadedSampleRate)
-    pcmBudget.reserve(audio.bytes)
+    // Keep the IPC payload detached from Sherpa's return object even though
+    // enableExternalBuffer already requested V8-managed storage.
+    const transportSamples = new Float32Array(audio.samples)
+    pcmBudget.reserve(transportSamples.byteLength)
     try {
-      port.post({ type: 'generated', samples: audio.samples, sampleRate: audio.sampleRate, id: msg.id })
+      port.post({ type: 'generated', samples: transportSamples, sampleRate: audio.sampleRate, id: msg.id })
     } finally {
-      pcmBudget.release(audio.bytes)
+      pcmBudget.release(transportSamples.byteLength)
     }
   } catch (err) {
     if (watchdogExpired) return

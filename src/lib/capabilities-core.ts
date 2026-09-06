@@ -1,6 +1,6 @@
 import type { CapabilityEngineCore } from './capabilities.ts'
 
-export const APP_VERSION = "0.24.0"
+export const APP_VERSION = "0.25.0"
 export const CORE_ENGINES: readonly CapabilityEngineCore[] = [
   {
     "id": "kokoro",

@@ -39,7 +39,7 @@ describe('collectDiagnostics', () => {
     recordDiagnosticEvent('warn', 'AAC unavailable')
 
     const bundle = await collectDiagnostics({
-      appVersion: '0.24.0',
+      appVersion: '0.25.0',
       selection: {
         engine: 'kokoro',
         engineStatus: 'English US - WebAssembly q8',
@@ -109,9 +109,9 @@ describe('collectDiagnostics', () => {
 
     expect(bundle.generatedAt).toBe('2026-07-09T00:00:00.000Z')
     expect(bundle.schemaVersion).toBe(3)
-    expect(bundle.app.version).toBe('0.24.0')
+    expect(bundle.app.version).toBe('0.25.0')
     expect(bundle.sbom).toMatchObject({ format: 'CycloneDX', specVersion: '1.7', distributionRoute: 'github-release' })
-    expect(bundle.sbom.url).toContain('/releases/download/v0.24.0/BetterTTS-0.24.0.cdx.json')
+    expect(bundle.sbom.url).toContain('/releases/download/v0.25.0/BetterTTS-0.25.0.cdx.json')
     expect(bundle.capabilities.product.engines.find((engine) => engine.id === 'piper')?.label).toBe('Piper-plus')
     expect(bundle.capabilities.product.queue.engines).toContain('melo')
     expect(bundle.capabilities.product.runtimeLicenses.packages).toHaveLength(21)
@@ -154,7 +154,7 @@ describe('sanitizeDiagnosticText', () => {
 
 describe('diagnostics SBOM link', () => {
   it('links Pages diagnostics to the same-origin published SBOM', () => {
-    expect(getSbomArtifactLink('0.24.0', 'https://sysadmindoc.github.io/BetterTTS/')).toEqual({
+    expect(getSbomArtifactLink('0.25.0', 'https://sysadmindoc.github.io/BetterTTS/')).toEqual({
       format: 'CycloneDX',
       specVersion: '1.7',
       artifactName: 'bettertts-sbom.cdx.json',
@@ -164,9 +164,9 @@ describe('diagnostics SBOM link', () => {
   })
 
   it('uses a versioned release asset for desktop and local development', () => {
-    const link = getSbomArtifactLink('0.24.0', 'app://bettertts/')
+    const link = getSbomArtifactLink('0.25.0', 'app://bettertts/')
     expect(link.distributionRoute).toBe('github-release')
-    expect(link.url).toContain('/releases/download/v0.24.0/BetterTTS-0.24.0.cdx.json')
+    expect(link.url).toContain('/releases/download/v0.25.0/BetterTTS-0.25.0.cdx.json')
   })
 })
 

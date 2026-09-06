@@ -72,7 +72,7 @@ export function parseEpubFromArrayBuffer(
   // 1. Find the rootfile from META-INF/container.xml
   const metadataFiles = extractPaths(['META-INF/container.xml'], 'EPUB container')
   const containerXml = read(metadataFiles, 'META-INF/container.xml')
-  if (!containerXml) throw new Error('Not a valid EPUB — missing META-INF/container.xml')
+  if (!containerXml) throw new Error('Not a valid EPUB. META-INF/container.xml is missing.')
 
   const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml')
   const rootfilePath = containerDoc.querySelector('rootfile')?.getAttribute('full-path')

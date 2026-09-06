@@ -85,7 +85,7 @@ export function generationReducer(state: GenerationState, event: GenerationEvent
         ...state,
         phase: 'cancelled',
         progress: event.partialOutput ? state.progress : 100,
-        status: event.status ?? (event.partialOutput ? 'Cancelled — partial output kept' : 'Cancelled'),
+        status: event.status ?? (event.partialOutput ? 'Cancelled. The partial output was kept.' : 'Cancelled'),
         stats: event.stats === undefined ? state.stats : event.stats,
         error: null,
         partialOutput: event.partialOutput,

@@ -157,7 +157,7 @@ export function uiPlural(locale: unknown, key: UiPluralKey, count: number): stri
 }
 
 export function formatUiNumber(locale: unknown, value: number, options?: Intl.NumberFormatOptions): string {
-  if (!Number.isFinite(value)) return '—'
+  if (!Number.isFinite(value)) return 'Unavailable'
   const info = localeDescriptor(locale)
   try {
     return new Intl.NumberFormat(info.tag, options).format(value)
@@ -172,7 +172,7 @@ export function formatUiNumber(locale: unknown, value: number, options?: Intl.Nu
 
 export function formatUiDate(locale: unknown, value: Date | number | string, options?: Intl.DateTimeFormatOptions): string {
   const date = value instanceof Date ? value : new Date(value)
-  if (!Number.isFinite(date.getTime())) return '—'
+  if (!Number.isFinite(date.getTime())) return 'Unavailable'
   const resolvedOptions = options ?? { dateStyle: 'medium' }
   const info = localeDescriptor(locale)
   try {

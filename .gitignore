@@ -16,6 +16,8 @@ release
 dist-ssr
 *.local
 *.bak
+build/extension-signing.pem
+build/electron-runtime/
 CLAUDE.md
 CODEX_CHANGELOG.md
 .claude/

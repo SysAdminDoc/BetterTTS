@@ -459,9 +459,9 @@ type PendingEpubMapping = {
 
 type EpubMappingApi = typeof import('./lib/epub-mapping.ts')
 
-const STARTER_TEXT = `Welcome to BetterTTS — private text-to-speech that runs entirely on your device.
+const STARTER_TEXT = `Welcome to BetterTTS, private text-to-speech that runs entirely on your device.
 
-No account, no cloud processing, no usage caps — up to 5,000 characters per run. Your text and audio stay on this device.
+No account. No cloud processing. No usage caps. You can generate up to 5,000 characters per run, with unlimited runs. Your text and audio stay on this device.
 
 Choose an engine and voice in the Voice chain, then select Generate audio. BetterTTS will synthesize your script locally.
 
@@ -983,7 +983,7 @@ function OutputMonitorTransport({ result, sampleRate, theme, onClear, onError, h
             ))}
           </div>
         ) : result?.url && waveformError ? (
-          <span className="waveform-empty">Waveform unavailable — playback remains available.</span>
+          <span className="waveform-empty">Waveform unavailable. Playback remains available.</span>
         ) : result?.url ? (
           <span className="waveform-empty">Loading bounded waveform…</span>
         ) : (
@@ -2054,7 +2054,7 @@ function App() {
       'User-supplied weights',
       'Local',
       shortUiLabel(record.provenance, 72),
-      'Registered — adapter gated',
+      'Registered. Adapter gated',
     ]),
   ], [capabilityDetails, visibleByoModels])
   const modelCached = (cacheRows.find((row) => row.id === 'kokoro')?.entryCount ?? 0) > 0
@@ -2409,7 +2409,7 @@ function App() {
   const trainerRate = listeningTrainerRate(listeningTrainer)
   const trainerNextStepSeconds = listeningTrainerSecondsToNextStep(listeningTrainer)
   const trainerStatus = !listeningTrainer.enabled
-    ? 'Off — playback stays at 1.00x.'
+    ? 'Off. Playback stays at 1.00x.'
     : trainerNextStepSeconds === null
       ? `${trainerRate.toFixed(2)}x cap reached.`
       : `${trainerRate.toFixed(2)}x now · ${formatPlaybackTime(trainerNextStepSeconds)} to the next +5%.`
@@ -2813,7 +2813,7 @@ function App() {
           // Warn before the quota wall, not after saves start failing.
           if (usage / quota > 0.9 && !storagePressureWarnedRef.current) {
             storagePressureWarnedRef.current = true
-            showToast({ tone: 'warn', message: `Storage is ${Math.round((usage / quota) * 100)}% full — new clips will evict the oldest saved ones.` })
+            showToast({ tone: 'warn', message: `Storage is ${Math.round((usage / quota) * 100)}% full. New clips will evict the oldest saved ones.` })
           }
         }
       })
@@ -4336,7 +4336,7 @@ function App() {
       },
       onMissingAudio: (sentence) => {
         if (benchmarkSessionRef.current) benchmarkSessionRef.current.failureCount += 1
-        recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence — it is missing from the output.`, 'synthesis.completeness')
+        recordDiagnosticEvent('warn', `Engine produced no audio for a ${sentence.length}-char sentence. It is missing from the output.`, 'synthesis.completeness')
       },
       onQualityReview: (review) => {
         recordDiagnosticEvent('warn', `${review.scope === 'job' ? 'Long-form output' : 'Segment'} needs review after ${review.attempts} attempt${review.attempts === 1 ? '' : 's'}: ${summarizeQualityIssues(review.issues)}.`, 'synthesis.quality.review')
@@ -4388,7 +4388,7 @@ function App() {
         processed = mixed
         if (bgmEmpty && !warnedBgmEmpty) {
           warnedBgmEmpty = true
-          showToast({ tone: 'warn', message: 'Background music file contained no audio — exported speech only.' })
+          showToast({ tone: 'warn', message: 'Background music file contained no audio. Exported speech only.' })
         }
       }
       const encoded = await encodeOutput(processed, outputSampleRate, audioFormat, mp3Bitrate, job.label, generationAbortRef.current?.signal)
@@ -4455,7 +4455,7 @@ function App() {
             const { evicted } = await freeLibrarySpace(Math.max(blob.size * 2, 32 * 1024 * 1024))
             if (evicted > 0) {
               await saveClip(clipRecord, blob)
-              showToast({ tone: 'warn', message: `Storage was full — freed ${evicted} old clip${evicted === 1 ? '' : 's'} to save this one.` })
+              showToast({ tone: 'warn', message: `Storage was full. Freed ${evicted} old clip${evicted === 1 ? '' : 's'} to save this one.` })
             } else {
               throw err
             }
@@ -4463,7 +4463,7 @@ function App() {
             recordDiagnosticEvent('warn', recoveryErr, 'library.quota-recovery')
             if (!warnedQuota) {
               warnedQuota = true
-              showToast({ tone: 'error', message: 'Storage is full and nothing could be freed — this output is available to export but was not added to the library.' })
+              showToast({ tone: 'error', message: 'Storage is full and nothing could be freed. This output is available to export but was not added to the library.' })
             }
           }
         } else {
@@ -4519,7 +4519,7 @@ function App() {
         navigator.storage?.persist?.()
           .then((granted) => {
             if (granted === false) {
-              recordDiagnosticEvent('warn', 'Persistent storage was declined — cached models and clips may be evicted under storage pressure.', 'storage.persist')
+              recordDiagnosticEvent('warn', 'Persistent storage was declined. Cached models and clips may be evicted under storage pressure.', 'storage.persist')
             }
           })
           .catch((err) => {
@@ -4541,14 +4541,14 @@ function App() {
       benchmarkSessionRef.current.provenance = generatedProvenance[0]
     }
     if (abortRef.current) {
-      setStatus(generated.length > 0 ? 'Cancelled — partial output kept' : 'Cancelled')
+      setStatus(generated.length > 0 ? 'Cancelled. Partial output kept' : 'Cancelled')
       showToast({ tone: 'warn', message: uiText(uiLocale, 'generationCancelled') })
     } else if (dispatchResult.needsReview.length > 0) {
-      setStatus(`Local audio ready — ${dispatchResult.needsReview.length} segment${dispatchResult.needsReview.length === 1 ? '' : 's'} need review`)
+      setStatus(`Local audio ready. ${dispatchResult.needsReview.length} segment${dispatchResult.needsReview.length === 1 ? '' : 's'} need review`)
       showToast({ tone: 'warn', message: uiPlural(uiLocale, 'qualityChecks', dispatchResult.needsReview.length) })
     } else if (flaggedSentences > 0) {
-      setStatus('Local audio ready — completeness check flagged output')
-      showToast({ tone: 'warn', message: `Audio ready, but ${flaggedSentences} sentence${flaggedSentences === 1 ? ' was' : 's were'} flagged as possibly truncated or missing — details in Diagnostics.` })
+      setStatus('Local audio ready. Completeness check flagged output')
+      showToast({ tone: 'warn', message: `Audio ready, but ${flaggedSentences} sentence${flaggedSentences === 1 ? ' was' : 's were'} flagged as possibly truncated or missing. Details are in Diagnostics.` })
     } else {
       setStatus('Local audio ready')
       showToast({ tone: 'ok', message: opts.successMessage ?? 'Audio generated locally on this device.' })
@@ -4759,7 +4759,7 @@ function App() {
     if (overLimit) {
       showToast({
         tone: 'warn',
-        message: `Text exceeds ${MAX_TEXT_CHARS} characters — the last ${text.length - MAX_TEXT_CHARS} characters will be dropped.`,
+        message: `Text exceeds ${MAX_TEXT_CHARS} characters. The last ${text.length - MAX_TEXT_CHARS} characters will be dropped.`,
       })
     }
 
@@ -4881,7 +4881,7 @@ function App() {
       // errors behind a misleading hint.
       recordDiagnosticEvent('warn', err, 'voice.preview')
       const detail = err instanceof Error && err.message ? shortUiLabel(err.message, 90) : ''
-      showToast({ tone: 'warn', message: detail ? `Preview failed: ${detail}` : 'Preview failed — try loading the model with Generate first.' })
+      showToast({ tone: 'warn', message: detail ? `Preview failed: ${detail}` : 'Preview failed. Try loading the model with Generate first.' })
     } finally {
       setPreviewingVoice(null)
     }
@@ -4996,8 +4996,8 @@ function App() {
       setImportUrlValue('')
       showToast(
         truncated
-          ? { tone: 'warn', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''} — review cleanup before synthesis; the editor is trimmed to ${MAX_TEXT_CHARS} characters.` }
-          : { tone: 'ok', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''} — review cleanup before synthesis.` },
+          ? { tone: 'warn', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''}. Review cleanup before synthesis. The editor is trimmed to ${MAX_TEXT_CHARS} characters.` }
+          : { tone: 'ok', message: `Imported "${title}" from ${formatArticleImportDestination(finalUrl)}${redirectCount > 0 ? ` after ${redirectCount} redirect${redirectCount === 1 ? '' : 's'}` : ''}. Review cleanup before synthesis.` },
       )
     } catch (err) {
       // Tell the user what actually failed — timeout, HTTP status, unreadable
@@ -5138,11 +5138,11 @@ function App() {
     try {
       await saveJob(job)
     } catch {
-      showToast({ tone: 'error', message: 'Could not save the job to the queue — storage may be full or blocked.' })
+      showToast({ tone: 'error', message: 'Could not save the job to the queue. Storage may be full or blocked.' })
       return
     }
     setQueueJobs((prev) => [job, ...prev])
-    showToast({ tone: 'ok', message: `Queued "${job.title}" — ${job.chunks.length} chunks.` })
+    showToast({ tone: 'ok', message: `Queued "${job.title}" with ${job.chunks.length} chunks.` })
   }
 
   function updatePendingEpubMapping(update: (api: EpubMappingApi, chapters: readonly EpubMappingChapter[]) => EpubMappingChapter[]) {
@@ -5240,7 +5240,7 @@ function App() {
     try {
       await saveJob(job)
     } catch {
-      showToast({ tone: 'error', message: 'Could not save the EPUB job to the queue — storage may be full or blocked.' })
+      showToast({ tone: 'error', message: 'Could not save the EPUB job to the queue. Storage may be full or blocked.' })
       return false
     }
     setQueueJobs((prev) => [job, ...prev])
@@ -5250,7 +5250,7 @@ function App() {
     const skipped = mapping.filter((chapter) => !chapter.included || !chapter.text.trim()).length
     showToast({
       tone: 'ok',
-      message: `Queued "${shortUiLabel(job.title)}" — ${mappedChapters.length} chapters, ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} excluded or empty.` : ''}`,
+      message: `Queued "${shortUiLabel(job.title)}" with ${mappedChapters.length} chapters and ${job.chunks.length} chunks.${skipped > 0 ? ` ${skipped} excluded or empty.` : ''}`,
     })
     return true
   }
@@ -5412,13 +5412,13 @@ function App() {
       }
 
       if (abortRef.current) {
-        showToast({ tone: 'warn', message: 'Queue paused — resume anytime.' })
+        showToast({ tone: 'warn', message: 'Queue paused. Resume anytime.' })
       } else {
         showToast({ tone: 'ok', message: `Job "${job.title}" complete.` })
       }
     } catch (err) {
       if (abortRef.current || (err instanceof Error && err.name === 'AbortError')) {
-        showToast({ tone: 'warn', message: 'Queue paused — resume anytime.' })
+        showToast({ tone: 'warn', message: 'Queue paused. Resume anytime.' })
       } else {
         showToast({ tone: 'error', message: err instanceof Error ? err.message : 'The queue run failed.' })
       }
@@ -5435,7 +5435,7 @@ function App() {
 
   async function regenerateQueueChunk(jobId: string, chunkIndex: number, nextText: string, nextTitle?: string): Promise<boolean> {
     if (generatingRef.current || regeneratingChunkKey) {
-      showToast({ tone: 'warn', message: 'Another generation is running — your edit is kept, try again when it finishes.' })
+      showToast({ tone: 'warn', message: 'Another generation is running. Your edit is kept, so try again when it finishes.' })
       return false
     }
     const lease = await withJobLease(jobId, (leaseSignal) => regenerateQueueChunkWithLease(jobId, chunkIndex, nextText, nextTitle, leaseSignal))
@@ -5509,7 +5509,7 @@ function App() {
       const voiceBin = await queueVoiceBin(job, chunk, new Map<string, Float32Array>())
       const replacement = await synthesizeQueueChunkBlob(job, cleanText, synthesize, sampleRate, chunk.voice ?? job.voice, voiceBin)
       if (!replacement) {
-        showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
+        showToast({ tone: 'warn', message: `Regeneration cancelled. Chunk ${chunkIndex + 1} kept its previous audio.` })
         return false
       }
       const nextJob = replaceQueueChunk(job, chunkIndex, {
@@ -5535,7 +5535,7 @@ function App() {
       return true
     } catch (err) {
       if (abortRef.current || (err instanceof Error && err.name === 'AbortError')) {
-        showToast({ tone: 'warn', message: `Regeneration cancelled — chunk ${chunkIndex + 1} kept its previous audio.` })
+        showToast({ tone: 'warn', message: `Regeneration cancelled. Chunk ${chunkIndex + 1} kept its previous audio.` })
         return false
       }
       showToast({ tone: 'error', message: err instanceof Error ? `${err.message} Old audio kept.` : 'Regeneration failed. Old audio kept.' })
@@ -5559,7 +5559,7 @@ function App() {
     nextText: string,
   ): Promise<SentenceRetakeAudio | null> {
     if (generatingRef.current || regeneratingChunkKey) {
-      showToast({ tone: 'warn', message: 'Another generation is running — original unchanged.' })
+      showToast({ tone: 'warn', message: 'Another generation is running. The original is unchanged.' })
       return null
     }
     const lease = await withJobLease(jobId, (leaseSignal) => retakeQueueSentenceWithLease(jobId, chunkIndex, cue, nextText, leaseSignal))
@@ -5603,7 +5603,7 @@ function App() {
         isCancelled: () => abortRef.current || leaseSignal.aborted || generationController.signal.aborted,
       }, jobId, chunkIndex, cue, cleanText, generationController.signal)
       if (!audio) {
-        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled — original kept.` })
+        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled. Original kept.` })
         return null
       }
       setProgress(100)
@@ -5611,7 +5611,7 @@ function App() {
       return audio
     } catch (err) {
       if (abortRef.current || leaseSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled — original kept.` })
+        showToast({ tone: 'warn', message: `Retake ${cue.index} cancelled. Original kept.` })
       } else {
         showToast({ tone: 'error', message: err instanceof Error ? `Retake failed: ${err.message}` : 'Retake failed.' })
       }
@@ -5636,7 +5636,7 @@ function App() {
     replacementText: string,
   ): Promise<boolean> {
     if (generatingRef.current || regeneratingChunkKey) {
-      showToast({ tone: 'warn', message: 'Another generation is running — original unchanged.' })
+      showToast({ tone: 'warn', message: 'Another generation is running. The original is unchanged.' })
       return false
     }
     const lease = await withJobLease(jobId, (leaseSignal) => spliceQueueSentenceWithLease(jobId, chunkIndex, cue, take, replacementText, leaseSignal))
@@ -5685,7 +5685,7 @@ function App() {
       return true
     } catch (err) {
       if (abortRef.current || leaseSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-        showToast({ tone: 'warn', message: `Splice ${cue.index} cancelled — original kept.` })
+        showToast({ tone: 'warn', message: `Splice ${cue.index} cancelled. Original kept.` })
       } else {
         showToast({ tone: 'error', message: err instanceof Error ? `Splice failed: ${err.message} Original kept.` : 'Splice failed. Original kept.' })
       }
@@ -6146,7 +6146,7 @@ function App() {
       setReaderOpen(true)
       showToast({
         tone: 'ok',
-        message: `Imported "${shortUiLabel(file.name.replace(/\.epub$/iu, ''))}" — ${chapters.length} chapters. Review the mapping before queueing.`,
+        message: `Imported "${shortUiLabel(file.name.replace(/\.epub$/iu, ''))}" with ${chapters.length} chapters. Review the mapping before queueing.`,
       })
       if (autoQueue) await queueEpubMapping(true, pending)
     } catch (err) {
@@ -6585,7 +6585,7 @@ function App() {
         <header className="topbar">
           <a className="brand" href="#studio" aria-label="BetterTTS home">
             <span className="brand-mark" aria-hidden="true">
-              <Waves size={25} strokeWidth={2.2} />
+              <img src={`${import.meta.env.BASE_URL}brand-mark-header.png`} alt="" />
             </span>
             <span>BetterTTS</span>
           </a>
@@ -7059,7 +7059,7 @@ function App() {
               </section>
               <p className="privacy-note">
                 <Info size={16} aria-hidden="true" />
-                100% private — your text and audio stay on this device. Model files are cached locally after first use.
+                100% private. Your text and audio stay on this device. Model files are cached locally after first use.
               </p>
             </section>
 
@@ -7099,7 +7099,7 @@ function App() {
                             <span>
                               {failedChunks.length === 1
                                 ? `Chunk ${failedChunks[0].index + 1} failed: ${shortUiLabel(failedChunks[0].error ?? 'Unknown error', 120)}`
-                                : `${failedChunks.length} chunks failed — first at chunk ${failedChunks[0].index + 1}: ${shortUiLabel(failedChunks[0].error ?? 'Unknown error', 100)}`}
+                                : `${failedChunks.length} chunks failed. The first failure is chunk ${failedChunks[0].index + 1}: ${shortUiLabel(failedChunks[0].error ?? 'Unknown error', 100)}`}
                               {' '}Resume retries failed chunks.
                             </span>
                           </div>
@@ -7108,7 +7108,7 @@ function App() {
                           <div className="capability-strip warn" role="status">
                             <Info size={15} aria-hidden="true" />
                             <span>
-                              Quality check: chunk {warnedChunks[0].index + 1} — {shortUiLabel(warnedChunks[0].warning ?? '', 110)}
+                              Quality check for chunk {warnedChunks[0].index + 1}: {shortUiLabel(warnedChunks[0].warning ?? '', 110)}
                               {warnedChunks.length > 1 ? ` (+${warnedChunks.length - 1} more)` : ''}. Edit &amp; regenerate the chunk below.
                             </span>
                           </div>
@@ -7684,7 +7684,7 @@ function App() {
                     <small className="openai-endpoint">
                       {openAiTtsStatus?.running && openAiTtsStatus.endpoint
                         ? `Endpoint: ${openAiTtsStatus.endpoint}/v1/audio/speech`
-                        : `Choose ${MIN_OPENAI_TTS_PORT}–${MAX_OPENAI_TTS_PORT}; the listener remains stopped until you start it.`}
+                        : `Choose a port from ${MIN_OPENAI_TTS_PORT} to ${MAX_OPENAI_TTS_PORT}. The listener remains stopped until you start it.`}
                     </small>
                     {openAiTtsStatus?.running && openAiTtsStatus.authToken ? <small className="openai-endpoint">Bearer token: <code>{openAiTtsStatus.authToken}</code> · stopping the server revokes it.</small> : null}
                     {openAiTtsStatus?.lastError ? <small className="openai-error">{shortUiLabel(openAiTtsStatus.lastError, 180)}</small> : null}
@@ -8684,7 +8684,7 @@ function App() {
                         />
                         <span>
                           Native engine (desktop)
-                          <small>Synthesize with Sherpa-ONNX on the CPU — outside browser WASM limits.</small>
+                          <small>Synthesize with Sherpa-ONNX on the CPU, outside browser WASM limits.</small>
                         </span>
                       </label>
                     ) : null}
@@ -8986,7 +8986,7 @@ function App() {
               {genStats && !isGenerating ? (
                 <div className="gen-stats">
                   <span>{genStats.elapsed.toFixed(1)}s elapsed</span>
-                  <span>{genStats.timeToFirstAudioMs != null ? `${(genStats.timeToFirstAudioMs / 1000).toFixed(1)}s first audio` : 'first audio —'}</span>
+                  <span>{genStats.timeToFirstAudioMs != null ? `${(genStats.timeToFirstAudioMs / 1000).toFixed(1)}s first audio` : 'first audio unavailable'}</span>
                   <span>{Math.round(genStats.chars / genStats.elapsed)} chars/s</span>
                   <span>{genStats.audioDuration.toFixed(1)}s audio</span>
                   <span>{(genStats.audioDuration / genStats.elapsed).toFixed(1)}x realtime</span>
@@ -9143,7 +9143,7 @@ function App() {
             <span>BetterTTS v{APP_VERSION}</span>
             <span><span className="status-dot" aria-hidden="true" /> Local only</span>
             <span>{runtimeLabel}</span>
-            <span>{persistenceOutcome.state === 'durable' ? storageEstimate ?? 'Storage ready' : 'Session only — export before closing'}</span>
+            <span>{persistenceOutcome.state === 'durable' ? storageEstimate ?? 'Storage ready' : 'Session only. Export before closing'}</span>
           </div>
           <button
             type="button"

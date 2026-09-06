@@ -45,9 +45,9 @@ describe('UI locale adapter', () => {
     expect(uiPlural('en', 'qualityChecks', 1)).toContain('1 quality check needs review')
     expect(uiPlural('en', 'qualityChecks', 2)).toContain('2 quality checks need review')
     expect(formatUiNumber('en', 1234.5)).toBe('1,234.5')
-    expect(formatUiNumber('en', Number.NaN)).toBe('—')
+    expect(formatUiNumber('en', Number.NaN)).toBe('Unavailable')
     expect(formatUiDate('en', '2026-01-02T00:00:00.000Z', { timeZone: 'UTC', dateStyle: 'medium' })).toContain('Jan')
-    expect(formatUiDate('en', 'not-a-date')).toBe('—')
+    expect(formatUiDate('en', 'not-a-date')).toBe('Unavailable')
   })
 
   it('provides an RTL fixture without adding an unreviewed selectable locale', () => {

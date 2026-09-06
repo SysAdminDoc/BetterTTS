@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.25.0 - 2026-09-06
+
+### Changed
+
+- Replaced the generic waveform with a distinct text-to-voice ribbon identity across the app, PWA, Windows executable, browser extension, README, and social artwork.
+- Rebuilt the GitHub README around the product workflow, real interfaces, safe install paths, privacy boundaries, and release verification.
+- Updated PWA and social metadata with a large product preview and clearer benefit-led copy.
+- Expanded the companion extension icon set for Chromium toolbar and management surfaces.
+- Reserved one additional KiB in the raw shell budget for the new product identity markup. The existing gzip and startup limits remain unchanged.
+- Kept Authenticode disabled while restoring Windows resource editing so the executable and installer carry the branded icon and version metadata.
+- Added a bounded Windows packaging retry that preserves a verified Electron runtime cache when antivirus scanning briefly locks the extracted files.
+- The release gate now checks the browser model and native Sherpa pack against their own pinned sources, revisions, licenses, and hashes.
+- Native cancellation now restarts the isolated speech host, reloads the verified pack, and proves that synthesis still works.
+- Sherpa output now uses Electron-compatible buffers, fixing packaged synthesis while preserving the 512 MiB PCM limit.
+
+### Release
+
+- Refreshed the desktop, queue, library, and mobile screenshots from the v0.25.0 build.
+- Rebuilt the web app, extension archive, Windows installer, update metadata, and CycloneDX SBOM from one synchronized version.
+- Added packaged-app coverage for cancellation, host recovery, real Kokoro synthesis, and decoded WAV duration.
+- Added one SHA-256 manifest covering every published v0.25.0 artifact.
+
 ## v0.24.0 - 2026-08-09
 
 ### Security
@@ -216,7 +238,7 @@
 ### Changed
 - **Storage quota recovery (TF-132).** A full-storage save now evicts the oldest clips and retries once instead of failing silently forever; the storage meter warns at 90% before saves start failing.
 - **Honest error paths (TF-130).** Voice preview reports its real failure instead of always claiming the model isn't loaded; article import distinguishes timeout / HTTP status / unreadable page / invalid URL; storage estimate/persist failures and declined persistence land in diagnostics; queue jobs show per-chunk failure messages inline; non-quota library save errors are recorded.
-- **Queue self-healing (TF-102).** A native-host crash fails only the in-flight chunk — the host respawns, reloads once, and retries before surfacing the failure, so long audiobook runs continue instead of failing every later chunk.
+- **Queue self-healing (TF-102).** A native-host crash fails only the in-flight chunk: the host respawns, reloads once, and retries before surfacing the failure, so long audiobook runs continue instead of failing every later chunk.
 - **Keyboard and screen-reader pass (TF-131).** Escape collapses the Advanced, System & diagnostics, and Pronunciations folds and returns focus to their toggles; a successful generation moves focus to the results panel; results, queue, and library are semantic lists that announce item counts.
 
 ### Tests
@@ -225,7 +247,7 @@
 ## v0.17.0 - 2026-07-09
 
 ### Added
-- Native ONNX Runtime probe (`npm run desktop:probe-ort`, `scripts/probe-native-ort.mjs`) — de-risking groundwork for desktop-native inference (ROADMAP TF-99). On this machine onnxruntime-node 1.27 loads the real Kokoro q8 graph; the CPU execution provider runs a clean forward pass (~276 ms / 12-token seq), while DirectML binds but hits a known quantized-ConvTranspose limitation — so native inference will ship CPU-EP-first with fp32-on-DirectML as the GPU follow-up. No app behavior change yet.
+- Native ONNX Runtime probe (`npm run desktop:probe-ort`, `scripts/probe-native-ort.mjs`): de-risking groundwork for desktop-native inference (ROADMAP TF-99). On this machine onnxruntime-node 1.27 loads the real Kokoro q8 graph; the CPU execution provider runs a clean forward pass (~276 ms / 12-token seq), while DirectML binds but hits a known quantized-ConvTranspose limitation: so native inference will ship CPU-EP-first with fp32-on-DirectML as the GPU follow-up. No app behavior change yet.
 - A Windows installer target (`npm run desktop:dist` → electron-builder NSIS x64); the packaged app was verified to launch and render the studio from its asar.
 - Desktop app scaffold (Electron, Phase 1). `npm run desktop:build` bundles the existing renderer for an Electron shell that serves it over a custom `app://` scheme with COOP/COEP + CSP set in the main process (crossOriginIsolated, no service worker). Security posture: `contextIsolation` on, `nodeIntegration` off, `sandbox` on, and a single narrow `betterttsPlatform` preload bridge. A `src/platform` seam keeps `App.tsx` platform-agnostic and makes the service worker web-only. `npm run desktop:smoke` verifies the studio renders in-shell via a hidden offscreen window (no focus steal). Native ONNX Runtime inference (onnxruntime-node / DirectML) and FFmpeg export land in later phases; see ROADMAP TF-97/99.
 
@@ -245,14 +267,14 @@
 ### Fixed
 - Restored the production Kokoro engine: GitHub Pages ran Jekyll over the deployed branch and silently dropped Vite's `__vite-browser-external-*` chunks (no `.nojekyll`), 404ing the Kokoro and multilingual lazy imports on the live site. Deploys now ship `.nojekyll`, refuse to run without it, and verify the live site serves the index, entry, and underscore assets after every push.
 - Pausing or cancelling a queue run mid-chunk no longer checkpoints a truncated blob as `done` (which silently corrupted that chapter in every later ZIP/M4B export); aborted chunks stay pending and cancelled regenerations keep the previous audio.
-- Opus/WebM exports longer than 32.7 seconds no longer carry overflowed block timestamps — the muxer rolls clusters every 5 seconds (SimpleBlock offsets are signed int16), adopts the encoder's real OpusHead as CodecPrivate with CodecDelay/SeekPreRoll, and declares final-frame padding via DiscardPadding.
+- Opus/WebM exports longer than 32.7 seconds no longer carry overflowed block timestamps: the muxer rolls clusters every 5 seconds (SimpleBlock offsets are signed int16), adopts the encoder's real OpusHead as CodecPrivate with CodecDelay/SeekPreRoll, and declares final-frame padding via DiscardPadding.
 - Audiobook number cleanup no longer corrupts common English: "1 in 10" and "3 in the morning" previously became "1 inches 10" / "3 inches the morning" (the rule is default-on and was persisted into EPUB queue chunks). Ambiguous units (`in`, `m`, `g`) now expand only before punctuation or end of line.
 - EPUB imports resolve URI-encoded manifest/NCX/nav hrefs (encoded filenames silently dropped chapters, up to a whole-book "no readable text" failure) and re-parse non-well-formed XHTML chapters as HTML instead of skipping them.
-- M4B export caps AAC candidate sample rates at 48 kHz — on 88.2/96 kHz audio devices the mp4a sample entry (16.16 fixed-point) made muxing throw after the full decode+encode had already run.
+- M4B export caps AAC candidate sample rates at 48 kHz: on 88.2/96 kHz audio devices the mp4a sample entry (16.16 fixed-point) made muxing throw after the full decode+encode had already run.
 - The queue segment editor no longer silently discards an edited draft when regeneration is refused (busy refusals toast and keep the editor open); queueing a job surfaces storage failures instead of doing nothing.
 - IndexedDB transaction helpers handle commit-time aborts (lazy quota checks) so queue/library writes can no longer hang forever with the quota toast unreachable; blocked-then-successful DB opens close the orphan connection; persisted zombie `generating` chunks demote to `pending` on load instead of showing a perpetual running pill.
 - The v0.15 output-deck tabs actually track the active section now (the active state was hardcoded to Output) with `aria-current`; anchor navigation stops landing under the sticky topbar via scroll margins.
-- Editor toolbar moved above the textarea in DOM order — CSS order reshuffling made keyboard focus jump from the textarea back up to the toolbar (WCAG 2.4.3). The notebook ruling now matches the 26px text pitch and scrolls with the content; the line-number gutter (wrong for soft-wrapped prose) was removed.
+- Editor toolbar moved above the textarea in DOM order: CSS order reshuffling made keyboard focus jump from the textarea back up to the toolbar (WCAG 2.4.3). The notebook ruling now matches the 26px text pitch and scrolls with the content; the line-number gutter (wrong for soft-wrapped prose) was removed.
 - Browser/PWA `theme-color` follows the active theme instead of staying near-black under a light UI; light-theme accent-on-tint text (nav links, "How it works" chip, dialog speaker chips) darkened to clear WCAG AA.
 - Browser-voice runs clear the previous run's stale "Download all ZIP" link; ZIP/M4B exports are guarded against racing an active generation for the shared status/progress channel; stale progress-reset timers no longer wipe the next run's progress bar.
 - Kitten WAV parsing bounds-checks fmt/data chunks (truncated payloads now fail with the parser's own error instead of a raw RangeError); worker model loads are keyed by device:dtype so overlapping loads cannot resolve against the wrong model; the 300-char hard split no longer cuts surrogate pairs; Hindi danda and fullwidth CJK stops count as sentence boundaries.
@@ -339,10 +361,10 @@
 ## v0.10.0 - 2026-07-08
 
 ### Features
-- **Voice blending** — weighted mix of 2-4 Kokoro voices via custom style tensors; blend editor with per-voice weight sliders in the Advanced section (TF-22).
-- **Opus/WebM export** — via WebCodecs AudioEncoder with a hand-crafted minimal Matroska muxer; capability-detected and hidden when unsupported (TF-73).
-- **Persistent job queue** — queue text for batch generation with IndexedDB checkpointing; pause, resume, and ZIP download survive tab close and page reloads (TF-76).
-- **EPUB import** — chapter-aware parsing via fflate with NCX/EPUB3-nav TOC title extraction; chapters are queued for batch generation; empty chapters are reported (TF-24).
+- **Voice blending**: weighted mix of 2-4 Kokoro voices via custom style tensors; blend editor with per-voice weight sliders in the Advanced section (TF-22).
+- **Opus/WebM export**: via WebCodecs AudioEncoder with a hand-crafted minimal Matroska muxer; capability-detected and hidden when unsupported (TF-73).
+- **Persistent job queue**: queue text for batch generation with IndexedDB checkpointing; pause, resume, and ZIP download survive tab close and page reloads (TF-76).
+- **EPUB import**: chapter-aware parsing via fflate with NCX/EPUB3-nav TOC title extraction; chapters are queued for batch generation; empty chapters are reported (TF-24).
 
 ### Tests
 - 87 → 91 assertions across 8 suites (voice-mix, queue, and EPUB parser modules added).
@@ -351,12 +373,12 @@
 
 ### Fixed
 - Per-result save button was dead on every Chromium browser (broken `showSaveFilePicker` cast invoked `window` as a function).
-- Unpunctuated text over ~300 characters was silently truncated by the tokenizer's 512-token cap — long pastes now hard-split on comma/word boundaries.
+- Unpunctuated text over ~300 characters was silently truncated by the tokenizer's 512-token cap: long pastes now hard-split on comma/word boundaries.
 - Worker crash during model load or "Reset session" mid-generation soft-locked the app; all pending promises now reject and the worker restarts lazily.
 - Streamed playback leaked one AudioContext per run (Safari fails after ~4-6); contexts now close after playback, immediately on cancel.
 - Cancel now actually stops sound: scheduled audio halts, Web Speech aborts via `speechSynthesis.cancel()`, cancelled dialog runs no longer report success, and cancelling during the model download acknowledges immediately.
 - SRT/VTT downloads were misnamed `.mp3` for MP3 output; subtitle URLs were re-minted on every keystroke.
-- MP3 bitrate picker offered 192/320 kbps that silently encoded at 160 (MPEG-2 ceiling at 24 kHz) — options are now honest 96/128/160.
+- MP3 bitrate picker offered 192/320 kbps that silently encoded at 160 (MPEG-2 ceiling at 24 kHz): options are now honest 96/128/160.
 - Pitch-shifted exports clipped the final ~100 ms (SoundTouch latency now flushed); subtitle timestamps could emit invalid `,1000` millisecond fields; blank lines inside cues corrupted SRT blocks.
 - Pronunciation rules no longer cascade into each other or corrupt substrings ("cat" → "kat" no longer hits "catalog").
 - Stereo background music kept only the left channel; zero-length BGM produced silent NaN exports.
@@ -364,17 +386,17 @@
 - Double-clicking Generate interleaved two runs; preview during generate bricked the preview buttons; the worker reloaded the model on every click.
 
 ### Added
-- **Follow-along transcript** — click-to-seek sentence highlighting synced to playback, with a native caption track on every result.
-- **Article import by URL** — Readability extraction in-browser, plus Android PWA share-target support.
-- **Text cleanup pipeline** — skip `[12]`-style citations, read URLs as "link", letter-space vowel-less acronyms (SQL → S Q L), strip markdown syntax; each rule toggleable.
-- **CPU mode switch** — persistent WASM fallback for GPUs with corrupted WebGPU output, plus automatic WASM retry when WebGPU session init fails.
-- **Storage management** — persistent-storage request, usage meter on the engine card, 200 MB clip-library cap with oldest-first eviction, quota-full toasts.
-- **Update flow** — per-build service-worker cache versioning, old-cache pruning, "new version ready" toast, first-visit reload loop guard.
+- **Follow-along transcript**: click-to-seek sentence highlighting synced to playback, with a native caption track on every result.
+- **Article import by URL**: Readability extraction in-browser, plus Android PWA share-target support.
+- **Text cleanup pipeline**: skip `[12]`-style citations, read URLs as "link", letter-space vowel-less acronyms (SQL → S Q L), strip markdown syntax; each rule toggleable.
+- **CPU mode switch**: persistent WASM fallback for GPUs with corrupted WebGPU output, plus automatic WASM retry when WebGPU session init fails.
+- **Storage management**: persistent-storage request, usage meter on the engine card, 200 MB clip-library cap with oldest-first eviction, quota-full toasts.
+- **Update flow**: per-build service-worker cache versioning, old-cache pruning, "new version ready" toast, first-visit reload loop guard.
 - Content-Security-Policy baked into production builds; PWA manifest `id`/`scope`; COEP `credentialless` on Chromium for CDN resilience; zero-flash theme boot; absolute social-card URLs.
-- `npm run deploy` — worktree-based gh-pages publish that can never touch (or delete) working-tree files.
+- `npm run deploy`: worktree-based gh-pages publish that can never touch (or delete) working-tree files.
 
 ### Changed
-- `generateKokoro`/`generateDialog` unified into one synthesis loop — dialog mode gains streaming playback, download progress, generation stats, library saves, and indexed collision-free filenames.
+- `generateKokoro`/`generateDialog` unified into one synthesis loop: dialog mode gains streaming playback, download progress, generation stats, library saves, and indexed collision-free filenames.
 - ZIP export switched from jszip to fflate (smaller, maintained, store-level for audio).
 - Strict TypeScript enabled repo-wide (tests now typechecked); lint broadened with react-hooks and jsx-a11y plugins.
 - Tests: 39 → 70 assertions across 5 suites (encode and library modules now covered).
@@ -400,7 +422,7 @@
 
 ### Microcopy
 - Starter text rewritten as welcoming first-run guidance.
-- Privacy note: "100% private — your text and audio never leave this browser."
+- Privacy note: "100% private: your text and audio never leave this browser."
 - Technical note: renamed "How it works" with user-facing model size info.
 - Error boundary: "Something went wrong" with helpful reload button.
 
@@ -422,9 +444,9 @@
 ## v0.7.0 - 2026-07-08
 
 ### Features
-- Web Worker for off-main-thread Kokoro inference — UI stays responsive during generation (TF-20).
+- Web Worker for off-main-thread Kokoro inference: UI stays responsive during generation (TF-20).
 - Pitch control (±4 semitones) via SoundTouch.js post-processing without tempo change (TF-32).
-- Background-music bed mixing — upload audio, loop to speech length, mix at configurable volume (TF-34).
+- Background-music bed mixing: upload audio, loop to speech length, mix at configurable volume (TF-34).
 
 ## v0.5.0 - 2026-07-08
 
@@ -433,20 +455,20 @@
 - MP3 export with bitrate picker (128/192/320 kbps) via browser-side LAME.js encoder (TF-15).
 - Installable offline PWA: 192px/512px PNG icons, service worker for app-shell caching, og/twitter meta tags, apple-touch-icon (TF-19).
 - Media Session lock-screen controls, Web Share for audio files, showSaveFilePicker for native save dialog (TF-27).
-- Pronunciation overrides dictionary persisted in localStorage — word/replacement pairs applied before generation (TF-33).
+- Pronunciation overrides dictionary persisted in localStorage: word/replacement pairs applied before generation (TF-33).
 - COOP/COEP header injection via SW for SharedArrayBuffer threaded WASM on GitHub Pages (TF-28).
 
 ## v0.4.0 - 2026-07-08
 
 ### Features
 - Generation stats: elapsed time, chars/s throughput, audio duration, realtime factor (TF-27 partial).
-- Persistent clip library backed by IndexedDB — clips survive reloads with re-download and delete controls (TF-17).
+- Persistent clip library backed by IndexedDB: clips survive reloads with re-download and delete controls (TF-17).
 
 ## v0.3.0 - 2026-07-08
 
 ### Features
 - Per-voice preview button with session-cached audio (TF-16).
-- Browser-voice picker for Web Speech engine — all system voices selectable (TF-18).
+- Browser-voice picker for Web Speech engine: all system voices selectable (TF-18).
 - SRT/VTT subtitle export from sentence-level timing data (TF-23).
 - Dialog mode with `[speaker:Name]` line prefixes mapped to voices via settings panel (TF-21).
 
@@ -459,7 +481,7 @@
 - Sentence-chunk Kokoro generation to prevent silent truncation at the 510 phoneme token limit (TF-01).
 - Real WebGPU adapter probe with automatic WASM fallback; clear poisoned model promise on failure (TF-02).
 - Mount ErrorBoundary above App in main.tsx; guard all localStorage access for blocked-storage environments (TF-03).
-- Replace fake `[pause]` text insertion with real silence splicing — `[pause Xs]` tags produce actual zero-sample gaps (TF-04).
+- Replace fake `[pause]` text insertion with real silence splicing: `[pause Xs]` tags produce actual zero-sample gaps (TF-04).
 - Web Speech reliability: async voice loading with voiceschanged, chunked utterances, 20s watchdog, interrupted/canceled handling (TF-05).
 
 ### Features
@@ -484,13 +506,13 @@
 - Added in-browser Kokoro 82M generation through `kokoro-js`.
 - Added Web Speech playback fallback, WAV downloads, per-line generation, ZIP export, themes, and GitHub Pages build configuration.
 
-## Roadmap archive — 2026-08-10 — ROADMAP.md
+## Roadmap archive: 2026-08-10: ROADMAP.md
 
 <details>
 <summary>Original roadmap snapshot</summary>
 
 ```markdown
-# ROADMAP — BetterTTS
+# ROADMAP: BetterTTS
 
 Single task tracker. Incomplete work only. Item IDs: TF-XX (sequential; next free ID: TF-151).
 
@@ -500,58 +522,58 @@ Single task tracker. Incomplete work only. Item IDs: TF-XX (sequential; next fre
 
 Added 2026-07-08 from the deep-research pass (see RESEARCH.md for evidence detail).
 
-### P2 — differentiators
+### P2: differentiators
 
-### P3 — larger bets
+### P3: larger bets
 
 ## Research-Driven Additions
 
 Added 2026-07-08 from the v0.7.0 code audit and competitive refresh (see RESEARCH.md).
 
 Note on existing items (2026-07-08 v0.8.0 line-verified audit):
-- TF-35 CONFIRMED — lines now src/App.tsx:358-362; zero `.close()` calls exist codebase-wide; Safari throws after ~4-6 contexts.
-- TF-36 CONFIRMED — lines now src/App.tsx:891,898.
-- TF-39 expanded — preview URLs also skipped by the unmount cleanup at src/App.tsx:254-260 (only `objectUrlsRef` covered).
+- TF-35 CONFIRMED: lines now src/App.tsx:358-362; zero `.close()` calls exist codebase-wide; Safari throws after ~4-6 contexts.
+- TF-36 CONFIRMED: lines now src/App.tsx:891,898.
+- TF-39 expanded: preview URLs also skipped by the unmount cleanup at src/App.tsx:254-260 (only `objectUrlsRef` covered).
 - TF-40 confirmed at src/App.tsx:92-99.
-- TF-41 revised fix — prefer memoizing ONE connection promise + `onblocked`/`onversionchange` handlers over close-per-op (openDB at src/lib/library.ts:17-28).
-- TF-42 expanded — also plain substring matching corrupts words ("cat"→"kat" hits "catalog"); use word-boundary regex with escaped keys in the single-pass rewrite.
-- TF-43 confirmed, worse than written — URLs are minted on EVERY re-render including each keystroke in the 5,000-char textarea (2 blobs per result row per render), src/App.tsx:890,897.
-- TF-46 partially superseded — the crash/soft-lock halves are now P0 (see TF-55); this item retains the auto-restart + toast UX.
-- TF-49 expanded — also guard zero-length decoded BGM (`i % 0 = NaN` → silent all-NaN export), see TF-62.
-- TF-52 expanded — cache also grows unboundedly (every deploy's hashed bundles accumulate; un-awaited floating `cache.put`), see TF-67.
+- TF-41 revised fix: prefer memoizing ONE connection promise + `onblocked`/`onversionchange` handlers over close-per-op (openDB at src/lib/library.ts:17-28).
+- TF-42 expanded: also plain substring matching corrupts words ("cat"→"kat" hits "catalog"); use word-boundary regex with escaped keys in the single-pass rewrite.
+- TF-43 confirmed, worse than written: URLs are minted on EVERY re-render including each keystroke in the 5,000-char textarea (2 blobs per result row per render), src/App.tsx:890,897.
+- TF-46 partially superseded: the crash/soft-lock halves are now P0 (see TF-55); this item retains the auto-restart + toast UX.
+- TF-49 expanded: also guard zero-length decoded BGM (`i % 0 = NaN` → silent all-NaN export), see TF-62.
+- TF-52 expanded: cache also grows unboundedly (every deploy's hashed bundles accumulate; un-awaited floating `cache.put`), see TF-67.
 
-### P0 — root-cause reliability
+### P0: root-cause reliability
 
-### P1 — reliability and correctness
+### P1: reliability and correctness
 
-### P1 — architecture and maintainability
+### P1: architecture and maintainability
 
-### P2 — features and competitive parity
+### P2: features and competitive parity
 
-### P3 — polish and future-proofing
+### P3: polish and future-proofing
 
 
 ## Research-Driven Additions
 
 Added 2026-07-08 from the v0.8.0 line-verified audit (41 findings) + refreshed landscape sweep (see RESEARCH.md; audit finding IDs like P0-1 refer to that pass).
 
-### P0 — shipping-broken functionality
+### P0: shipping-broken functionality
 
-### P1 — root-cause correctness
+### P1: root-cause correctness
 
-### P2 — reliability, performance, hardening
+### P2: reliability, performance, hardening
 
-### P2 — competitive features
+### P2: competitive features
 
-### P3 — polish
+### P3: polish
 
 ## Research-Driven Additions
 
-### P1 — trust, reliability, and architecture
+### P1: trust, reliability, and architecture
 
-### P2 — product parity and long-form workflows
+### P2: product parity and long-form workflows
 
-### P3 — optional engines and future-proofing
+### P3: optional engines and future-proofing
 
 ## Deep-Audit Deferrals
 
@@ -559,66 +581,66 @@ Added 2026-07-09 from the v0.16.0 deep audit (fixed findings shipped in v0.16.0;
 
 ## Research-Driven Additions
 
-Added 2026-07-09 from the native application research pass (see RESEARCH.md). **Stack decision 2026-07-09: Electron, not Tauri** — the app leans hard on WebCodecs (AAC/M4B), WebGPU, and SharedArrayBuffer/COOP-COEP; shipping a version-locked Chromium removes the "does the system WebView2 support X" risk that is worst on Windows 11 IoT LTSC. Native inference goes through `onnxruntime-node` (DirectML/CUDA/CPU), not a Tauri sidecar.
+Added 2026-07-09 from the native application research pass (see RESEARCH.md). **Stack decision 2026-07-09: Electron, not Tauri**: the app leans hard on WebCodecs (AAC/M4B), WebGPU, and SharedArrayBuffer/COOP-COEP; shipping a version-locked Chromium removes the "does the system WebView2 support X" risk that is worst on Windows 11 IoT LTSC. Native inference goes through `onnxruntime-node` (DirectML/CUDA/CPU), not a Tauri sidecar.
 
-### P0 — native foundation and trust boundaries
+### P0: native foundation and trust boundaries
 
-### P1 — desktop production workflows
+### P1: desktop production workflows
 
-### P2 — model expansion and creator power
+### P2: model expansion and creator power
 
-### P3 — future-proofing and parity polish
+### P3: future-proofing and parity polish
 
 ## Research-Driven Additions
 
 Added 2026-07-09 from the desktop-power research pass (see RESEARCH.md for evidence and licenses). IDs continue the TF-XX scheme; next free ID after this batch: TF-127.
 
-### P1 — desktop runtime foundation and permissive engine wins
+### P1: desktop runtime foundation and permissive engine wins
 
-### P2 — desktop power features and interop
+### P2: desktop power features and interop
 
-### P3 — quick permissive engine adds
+### P3: quick permissive engine adds
 
 ## Research-Driven Additions
 
-Added 2026-07-09 from the full-product research pass (web UX, reliability, ecosystem, platform, security — see RESEARCH.md). IDs continue the TF-XX scheme; next free ID after this batch: TF-151.
+Added 2026-07-09 from the full-product research pass (web UX, reliability, ecosystem, platform, security: see RESEARCH.md). IDs continue the TF-XX scheme; next free ID after this batch: TF-151.
 
-### P1 — root-cause reliability and trust
+### P1: root-cause reliability and trust
 
-### P2 — reading experience and long-form differentiators
+### P2: reading experience and long-form differentiators
 
-### P3 — creator polish and platform reach
+### P3: creator polish and platform reach
 
-### P0 — supply-chain and data safety
+### P0: supply-chain and data safety
 
-### P1 — runtime correctness, responsiveness, and verification
+### P1: runtime correctness, responsiveness, and verification
 
-### P2 — artifact explainability and retrieval
+### P2: artifact explainability and retrieval
 
 ## Research-Driven Additions
 
 Added 2026-07-29 from the current research refresh (see `RESEARCH.md`).
 
-### P0 — integrity and bounded persistence
+### P0: integrity and bounded persistence
 
-### P1 — recovery, verification, and transport
+### P1: recovery, verification, and transport
 
-### P2 — traceable artifacts
+### P2: traceable artifacts
 
 ## Research-Driven Additions
 
 Added 2026-08-08 from the current exhaustive research refresh (see RESEARCH.md). IDs continue from the highest existing roadmap ID, TF-151.
 
-### P0 — trust boundaries and release safety
+### P0: trust boundaries and release safety
 
 
-### P1 — runtime correctness, recovery, and interoperability
+### P1: runtime correctness, recovery, and interoperability
 
 
-### P2 — quality, maintainability, and platform reach
+### P2: quality, maintainability, and platform reach
 
 
-### P3 — measured reach and offline capability
+### P3: measured reach and offline capability
 ```
 
 </details>

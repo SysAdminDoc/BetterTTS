@@ -51,7 +51,7 @@ describe('EPUB chapter mapping', () => {
     })
     const split = splitEpubChapter(mapping, mapping[0].id)
     expect(split).toHaveLength(4)
-    expect(split.slice(0, 2).map((chapter) => chapter.title)).toEqual(['First — 1', 'First — 2'])
+    expect(split.slice(0, 2).map((chapter) => chapter.title)).toEqual(['First, part 1', 'First, part 2'])
     expect(split[0].text).toBe('Alpha paragraph.')
     expect(split[1].text).toBe('Beta paragraph.')
     expect(split[0].voiceMix).toEqual(mapping[0].voiceMix)

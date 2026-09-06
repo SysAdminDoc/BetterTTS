@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { validateReleaseEngineReports } from './release-smoke-policy.mjs'
 
 const root = process.cwd()
 const temporaryRoot = mkdtempSync(join(tmpdir(), 'bettertts-release-smoke-'))
@@ -55,17 +56,7 @@ try {
   delete packagedEnv.ELECTRON_RUN_AS_NODE
   run(packagedExecutable, ['--smoke'], packagedEnv)
   const packagedReport = JSON.parse(readFileSync(packagedReportPath, 'utf8'))
-  const modelPack = packagedReport.nativeLoad?.runtime?.modelPack
-  if (
-    !packagedReport.ok
-    || !packagedReport.nativeSynthesis?.ok
-    || !packagedReport.nativeCancellation?.ok
-    || modelPack?.revision !== browserReport.revision
-    || modelPack?.license?.tier !== 'permissive'
-    || modelPack?.verified !== true
-  ) {
-    throw new Error(`Packaged real-engine verification failed: ${JSON.stringify(packagedReport)}`)
-  }
+  validateReleaseEngineReports(browserReport, packagedReport)
 
   const report = {
     schemaVersion: 1,

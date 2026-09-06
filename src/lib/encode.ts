@@ -56,10 +56,10 @@ export function cropAudioToTimeRange(samples: Float32Array, sampleRate: number, 
 export function encodeAudio(samples: Float32Array, sampleRate: number, format: AudioFormat, bitrate = 128, signal?: AbortSignal): Promise<Blob> {
   throwIfAborted(signal, 'Audio encoding was cancelled.')
   if (samples.length === 0) {
-    return Promise.reject(new Error('No audio samples to encode — the export would be an empty file.'))
+    return Promise.reject(new Error('No audio samples to encode. The export would be an empty file.'))
   }
   if (format === 'mp3' && !(MP3_SUPPORTED_RATES as readonly number[]).includes(sampleRate)) {
-    return Promise.reject(new Error(`MP3 cannot encode ${sampleRate} Hz audio — export WAV or Opus instead.`))
+    return Promise.reject(new Error(`MP3 cannot encode ${sampleRate} Hz audio. Export WAV or Opus instead.`))
   }
   if (format === 'mp3') return encodeMp3(samples, sampleRate, bitrate, signal)
   if (format === 'opus') return encodeOpus(samples, sampleRate, bitrate, signal)

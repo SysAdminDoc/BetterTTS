@@ -1400,20 +1400,35 @@ function probeTtsHostLoad(timeoutMs = 180000): Promise<unknown> {
 function probeTtsHostGenerate(text: string, id: number, timeoutMs = 180000): Promise<Float32Array> {
   return new Promise((resolvePromise, rejectPromise) => {
     const host = ensureTtsHost()
-    const timer = setTimeout(() => {
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
       host.removeListener('message', onMessage)
-      rejectPromise(new Error('native host generation timeout'))
-    }, timeoutMs)
+      host.removeListener('exit', onExit)
+    }
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
     const onMessage = (message: unknown) => {
       if (!message || typeof message !== 'object') return
       const response = message as { type?: string; id?: number; samples?: Float32Array; message?: string }
       if (response.id !== id || (response.type !== 'generated' && response.type !== 'generateError')) return
-      clearTimeout(timer)
-      host.removeListener('message', onMessage)
-      if (response.type === 'generated' && response.samples) resolvePromise(new Float32Array(response.samples))
-      else rejectPromise(new Error(response.message ?? 'native host generation failed'))
+      finish(() => {
+        if (response.type === 'generated' && response.samples) resolvePromise(new Float32Array(response.samples))
+        else rejectPromise(new Error(response.message ?? 'native host generation failed'))
+      })
     }
+    const onExit = () => finish(() => rejectPromise(new Error('native host generation stopped before producing audio')))
+    const timer = setTimeout(() => finish(() => {
+      stopTtsHost(host)
+      rejectPromise(new Error('native host generation timeout'))
+    }), timeoutMs)
     host.on('message', onMessage)
+    host.once('exit', onExit)
+    armNativeGeneration(host, id)
     host.postMessage({ type: 'generate', text, voice: 'af_heart', speed: 1, id })
   })
 }
@@ -1541,19 +1556,27 @@ async function probeOpenAiTtsServer(): Promise<unknown> {
   }
 }
 
-async function probeTtsHostCancellation(): Promise<void> {
+async function probeTtsHostCancellation(): Promise<{ hostRestarted: boolean; reloadKey: unknown; modelVerified: boolean }> {
   const id = 91001
+  const originalHost = ensureTtsHost()
   const pending = probeTtsHostGenerate(
     'The packaged cancellation fixture must discard this unfinished output. '.repeat(15),
     id,
   )
   await new Promise((resolve) => setTimeout(resolve, 25))
-  ensureTtsHost().postMessage({ type: 'cancel', id })
+  cancelNativeHost({ type: 'cancel', id })
   try {
     await pending
     throw new Error('cancelled native generation produced output')
   } catch (error) {
-    if (!(error instanceof Error) || !/cancel/i.test(error.message)) throw error
+    if (!(error instanceof Error) || !/cancel|stopped/i.test(error.message)) throw error
+  }
+  const recoveryHost = ensureTtsHost()
+  const reloaded = (await probeTtsHostLoad()) as { key?: unknown; runtime?: { modelPack?: { verified?: unknown } } }
+  return {
+    hostRestarted: recoveryHost !== originalHost,
+    reloadKey: reloaded.key,
+    modelVerified: reloaded.runtime?.modelPack?.verified === true,
   }
 }
 
@@ -2035,8 +2058,8 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
         const nativeLoad = (await probeTtsHostLoad()) as { key?: unknown; runtime?: unknown }
         result.nativeLoad = { key: nativeLoad.key, runtime: nativeLoad.runtime }
         const cancellationStartedAt = performance.now()
-        await probeTtsHostCancellation()
-        result.nativeCancellation = { ok: true, elapsedMs: Math.round(performance.now() - cancellationStartedAt) }
+        const cancellation = await probeTtsHostCancellation()
+        result.nativeCancellation = { ok: true, elapsedMs: Math.round(performance.now() - cancellationStartedAt), ...cancellation }
         const generationStartedAt = performance.now()
         const samples = await probeTtsHostGenerate('Packaged BetterTTS synthesis is working.', 91002)
         const generationMs = performance.now() - generationStartedAt

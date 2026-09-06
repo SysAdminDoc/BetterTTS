@@ -3,7 +3,16 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zipSync } from 'fflate'
 
-export const EXTENSION_FILES = ['manifest.json', 'background.js', 'icon-192.png', 'icon-512.png']
+export const EXTENSION_FILES = [
+  'manifest.json',
+  'background.js',
+  'icon-16.png',
+  'icon-32.png',
+  'icon-48.png',
+  'icon-128.png',
+  'icon-192.png',
+  'icon-512.png',
+]
 
 export function buildExtensionArchive(root = process.cwd(), outputPath = join(root, 'dist', 'bettertts-extension.zip')) {
   const extensionRoot = join(root, 'extension')
