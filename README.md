@@ -181,7 +181,7 @@ Useful commands:
 Each release publishes the Windows installer, update metadata, extension ZIP, CycloneDX SBOM, and a SHA-256 manifest. Compare a downloaded file before running it:
 
 ```powershell
-Get-FileHash '.\BetterTTS Setup 0.25.0.exe' -Algorithm SHA256
+Get-FileHash '.\BetterTTS.Setup.0.25.0.exe' -Algorithm SHA256
 ```
 
 Then compare the value with `BetterTTS-v0.25.0-SHA256SUMS.txt` from the same release. Release notes state whether Authenticode signing was available for that build.
