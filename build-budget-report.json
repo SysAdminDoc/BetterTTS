@@ -1,0 +1,773 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-06T19:07:41.369Z",
+  "shell": {
+    "rawBytes": 623981,
+    "gzipBytes": 177561,
+    "files": [
+      {
+        "file": "index.html",
+        "rawBytes": 2288,
+        "gzipBytes": 854
+      },
+      {
+        "file": "assets/index-B7nvzjFc.js",
+        "rawBytes": 555041,
+        "gzipBytes": 163380
+      },
+      {
+        "file": "assets/rolldown-runtime-aKtaBQYM.js",
+        "rawBytes": 1084,
+        "gzipBytes": 621
+      },
+      {
+        "file": "assets/preload-helper-BGG9q2lN.js",
+        "rawBytes": 1266,
+        "gzipBytes": 716
+      },
+      {
+        "file": "assets/index-BBmVNvFU.css",
+        "rawBytes": 64302,
+        "gzipBytes": 11990
+      }
+    ]
+  },
+  "ownership": {
+    "rawBytes": 107700,
+    "gzipBytes": 35486,
+    "files": [
+      {
+        "file": "assets/benchmark-BgvccSB4.js",
+        "rawBytes": 5822,
+        "gzipBytes": 2172
+      },
+      {
+        "file": "assets/long-form-quality-gate-BE691TBt.js",
+        "rawBytes": 448,
+        "gzipBytes": 329
+      },
+      {
+        "file": "assets/offline-model-pack-B0roAMbN.js",
+        "rawBytes": 20641,
+        "gzipBytes": 5924
+      },
+      {
+        "file": "assets/ort.wasm.bundle.min-DOZ6lr4R.js",
+        "rawBytes": 70619,
+        "gzipBytes": 23269
+      },
+      {
+        "file": "assets/PortableModelPackPanel-OFFc1I40.js",
+        "rawBytes": 6721,
+        "gzipBytes": 2304
+      },
+      {
+        "file": "assets/share-target-rym_gpZG.js",
+        "rawBytes": 3449,
+        "gzipBytes": 1488
+      }
+    ],
+    "boundaries": {
+      "initial-shell": {
+        "rawBytes": 619343,
+        "gzipBytes": 175370,
+        "files": [
+          {
+            "file": "assets/index-B7nvzjFc.js",
+            "rawBytes": 555041,
+            "gzipBytes": 163380
+          },
+          {
+            "file": "assets/index-BBmVNvFU.css",
+            "rawBytes": 64302,
+            "gzipBytes": 11990
+          }
+        ]
+      },
+      "shared-runtime": {
+        "rawBytes": 91593,
+        "gzipBytes": 30563,
+        "files": [
+          {
+            "file": "assets/preload-helper-BGG9q2lN.js",
+            "rawBytes": 1266,
+            "gzipBytes": 716
+          },
+          {
+            "file": "assets/rolldown-runtime-aKtaBQYM.js",
+            "rawBytes": 1084,
+            "gzipBytes": 621
+          },
+          {
+            "file": "assets/src-fr6qCbba.js",
+            "rawBytes": 89243,
+            "gzipBytes": 29226
+          }
+        ]
+      },
+      "document-parsers": {
+        "rawBytes": 3601940,
+        "gzipBytes": 882908,
+        "files": [
+          {
+            "file": "assets/document-import-B6FLIdzZ.js",
+            "rawBytes": 5738,
+            "gzipBytes": 2640
+          },
+          {
+            "file": "assets/document-worker-DZDqc6oU.js",
+            "rawBytes": 2636,
+            "gzipBytes": 1266
+          },
+          {
+            "file": "assets/document.worker-CVol8sk2.js",
+            "rawBytes": 205400,
+            "gzipBytes": 71947
+          },
+          {
+            "file": "assets/epub-CTu7vAvr.js",
+            "rawBytes": 3495,
+            "gzipBytes": 1540
+          },
+          {
+            "file": "assets/epub-mapping-A4fc-f8V.js",
+            "rawBytes": 3508,
+            "gzipBytes": 1292
+          },
+          {
+            "file": "assets/pdf-B7qtjGVF.js",
+            "rawBytes": 482535,
+            "gzipBytes": 144244
+          },
+          {
+            "file": "assets/pdf-HjiW4khr.js",
+            "rawBytes": 481335,
+            "gzipBytes": 143840
+          },
+          {
+            "file": "assets/pdf.worker-Dg_VPFYK.mjs",
+            "rawBytes": 2383409,
+            "gzipBytes": 504940
+          },
+          {
+            "file": "assets/readability-DqL9MQMa.js",
+            "rawBytes": 33884,
+            "gzipBytes": 11199
+          }
+        ]
+      },
+      "kokoro-runtime": {
+        "rawBytes": 1477986,
+        "gzipBytes": 724068,
+        "files": [
+          {
+            "file": "assets/dist-lib-Dcl7M6pA.js",
+            "rawBytes": 1441720,
+            "gzipBytes": 708873
+          },
+          {
+            "file": "assets/kokoro-BaJFgIpx.js",
+            "rawBytes": 10656,
+            "gzipBytes": 4138
+          },
+          {
+            "file": "assets/kokoro-CS_atSEJ.js",
+            "rawBytes": 10831,
+            "gzipBytes": 4203
+          },
+          {
+            "file": "assets/kokoro-fetch-CmmXfmRY.js",
+            "rawBytes": 1110,
+            "gzipBytes": 574
+          },
+          {
+            "file": "assets/kokoro-fetch-DBsMppFM.js",
+            "rawBytes": 1112,
+            "gzipBytes": 580
+          },
+          {
+            "file": "assets/kokoro-integrity-D3a4NDQ-.js",
+            "rawBytes": 5131,
+            "gzipBytes": 2377
+          },
+          {
+            "file": "assets/kokoro-multilingual-aahXMZ2C.js",
+            "rawBytes": 3242,
+            "gzipBytes": 1387
+          },
+          {
+            "file": "assets/kokoro-multilingual-FgFLnWts.js",
+            "rawBytes": 4184,
+            "gzipBytes": 1936
+          }
+        ]
+      },
+      "multilingual-g2p": {
+        "rawBytes": 46082458,
+        "gzipBytes": 34032957,
+        "files": [
+          {
+            "file": "assets/all-BXgNu8o0.js",
+            "rawBytes": 17864343,
+            "gzipBytes": 13614364
+          },
+          {
+            "file": "assets/all-CQVNe8k_.js",
+            "rawBytes": 17864350,
+            "gzipBytes": 13614227
+          },
+          {
+            "file": "assets/en-us-BABgn7VW.js",
+            "rawBytes": 321466,
+            "gzipBytes": 248498
+          },
+          {
+            "file": "assets/en-us-LiA9lMvw.js",
+            "rawBytes": 321468,
+            "gzipBytes": 248459
+          },
+          {
+            "file": "assets/ephone-BdBg0FYv.js",
+            "rawBytes": 474586,
+            "gzipBytes": 135980
+          },
+          {
+            "file": "assets/ephone-gYwwg4I1.js",
+            "rawBytes": 474384,
+            "gzipBytes": 135992
+          },
+          {
+            "file": "assets/jpx-B0b4UPo4.js",
+            "rawBytes": 360141,
+            "gzipBytes": 275272
+          },
+          {
+            "file": "assets/jpx-IOY-lV8Z.js",
+            "rawBytes": 360148,
+            "gzipBytes": 275221
+          },
+          {
+            "file": "assets/phonemizer-D0oeX8g1.js",
+            "rawBytes": 1329001,
+            "gzipBytes": 681930
+          },
+          {
+            "file": "assets/phonemizer-DsDfV4re.js",
+            "rawBytes": 1329003,
+            "gzipBytes": 681931
+          },
+          {
+            "file": "assets/roa-5piiJyz6.js",
+            "rawBytes": 688874,
+            "gzipBytes": 530210
+          },
+          {
+            "file": "assets/roa-DuAsy3h-.js",
+            "rawBytes": 688881,
+            "gzipBytes": 530205
+          },
+          {
+            "file": "assets/sit-CHAeWlkX.js",
+            "rawBytes": 2002910,
+            "gzipBytes": 1530297
+          },
+          {
+            "file": "assets/sit-CvezjL6o.js",
+            "rawBytes": 2002903,
+            "gzipBytes": 1530371
+          }
+        ]
+      },
+      "transformers-runtime": {
+        "rawBytes": 1574907,
+        "gzipBytes": 448623,
+        "files": [
+          {
+            "file": "assets/chatterbox.worker--RLfXXL8.js",
+            "rawBytes": 22893,
+            "gzipBytes": 6980
+          },
+          {
+            "file": "assets/transformers.web-BavHBFpF.js",
+            "rawBytes": 513711,
+            "gzipBytes": 145988
+          },
+          {
+            "file": "assets/transformers.web-BwSDCNTe.js",
+            "rawBytes": 516188,
+            "gzipBytes": 146755
+          },
+          {
+            "file": "assets/transformers.web-CZjfMF4e.js",
+            "rawBytes": 514295,
+            "gzipBytes": 146344
+          },
+          {
+            "file": "assets/tts.worker-DCUb6ySP.js",
+            "rawBytes": 7820,
+            "gzipBytes": 2556
+          }
+        ]
+      },
+      "piper-runtime": {
+        "rawBytes": 59968762,
+        "gzipBytes": 21430016,
+        "files": [
+          {
+            "file": "assets/piper_plus_wasm-BFiIKUoB.js",
+            "rawBytes": 7124,
+            "gzipBytes": 2553
+          },
+          {
+            "file": "assets/piper_plus_wasm_bg-XgbeTk35.wasm",
+            "rawBytes": 59961638,
+            "gzipBytes": 21427463
+          }
+        ]
+      },
+      "onnx-web-runtime": {
+        "rawBytes": 37058466,
+        "gzipBytes": 9157942,
+        "files": [
+          {
+            "file": "assets/article-import-u7xta8cJ.js",
+            "rawBytes": 5700,
+            "gzipBytes": 2391
+          },
+          {
+            "file": "assets/document-import-B6FLIdzZ.js",
+            "rawBytes": 5738,
+            "gzipBytes": 2640
+          },
+          {
+            "file": "assets/ort-wasm-simd-threaded-Cpm-ox6i.wasm",
+            "rawBytes": 13479978,
+            "gzipBytes": 3453562
+          },
+          {
+            "file": "assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm",
+            "rawBytes": 23567050,
+            "gzipBytes": 5699349
+          }
+        ]
+      },
+      "audio-runtime": {
+        "rawBytes": 266787,
+        "gzipBytes": 102266,
+        "files": [
+          {
+            "file": "assets/audio-peaks-BZFe9yfA.js",
+            "rawBytes": 1695,
+            "gzipBytes": 802
+          },
+          {
+            "file": "assets/audio-stream-scheduler-DvhT3sZz.js",
+            "rawBytes": 2672,
+            "gzipBytes": 1065
+          },
+          {
+            "file": "assets/lamejs-vPs_I_uk.js",
+            "rawBytes": 163220,
+            "gzipBytes": 56638
+          },
+          {
+            "file": "assets/SignalsmithStretch-oRg7r08Z.js",
+            "rawBytes": 99200,
+            "gzipBytes": 43761
+          }
+        ]
+      },
+      "optional-ui-and-artifacts": {
+        "rawBytes": 188245,
+        "gzipBytes": 69000,
+        "files": [
+          {
+            "file": "assets/archive-budget-BZmEojiM.js",
+            "rawBytes": 2216,
+            "gzipBytes": 888
+          },
+          {
+            "file": "assets/audiobook-interoperability-BVBmrp0j.js",
+            "rawBytes": 16648,
+            "gzipBytes": 6114
+          },
+          {
+            "file": "assets/AudioOutputPicker-Cq_3yGV3.js",
+            "rawBytes": 1493,
+            "gzipBytes": 783
+          },
+          {
+            "file": "assets/backup-CrpamDt-.js",
+            "rawBytes": 14561,
+            "gzipBytes": 4895
+          },
+          {
+            "file": "assets/browser-BPzT_zj1.js",
+            "rawBytes": 15368,
+            "gzipBytes": 7382
+          },
+          {
+            "file": "assets/browser-node-module-shim-DkpC0cls.js",
+            "rawBytes": 115,
+            "gzipBytes": 117
+          },
+          {
+            "file": "assets/capabilities-BAUNgM2t.js",
+            "rawBytes": 19094,
+            "gzipBytes": 5518
+          },
+          {
+            "file": "assets/DesktopIntegrationsPanel-BDdxpqpG.js",
+            "rawBytes": 4092,
+            "gzipBytes": 1229
+          },
+          {
+            "file": "assets/EpubMappingPanel-e8viktJq.css",
+            "rawBytes": 4338,
+            "gzipBytes": 1198
+          },
+          {
+            "file": "assets/EpubMappingPanel-RpCCWwkS.js",
+            "rawBytes": 4883,
+            "gzipBytes": 1572
+          },
+          {
+            "file": "assets/generation-dispatcher-quality-BKTQkq2F.js",
+            "rawBytes": 6259,
+            "gzipBytes": 2712
+          },
+          {
+            "file": "assets/KokoroWebGpuDtypeControl-C7w9Osc2.js",
+            "rawBytes": 514,
+            "gzipBytes": 364
+          },
+          {
+            "file": "assets/LibraryPanel-s8AnjpTm.js",
+            "rawBytes": 11465,
+            "gzipBytes": 3690
+          },
+          {
+            "file": "assets/LongFormQualityControl-n91e-YeG.js",
+            "rawBytes": 539,
+            "gzipBytes": 362
+          },
+          {
+            "file": "assets/m4b-saZpnqQ8.js",
+            "rawBytes": 13472,
+            "gzipBytes": 5056
+          },
+          {
+            "file": "assets/media-overlays-DUrWrLeG.js",
+            "rawBytes": 10937,
+            "gzipBytes": 4506
+          },
+          {
+            "file": "assets/MiniPlayer-BAfaQwhH.css",
+            "rawBytes": 1805,
+            "gzipBytes": 693
+          },
+          {
+            "file": "assets/MiniPlayer-Bwch4HAg.js",
+            "rawBytes": 4062,
+            "gzipBytes": 1673
+          },
+          {
+            "file": "assets/model-cache-BdrA0BvX.js",
+            "rawBytes": 11803,
+            "gzipBytes": 4097
+          },
+          {
+            "file": "assets/NormalizationPreview-CZulJCl2.js",
+            "rawBytes": 3715,
+            "gzipBytes": 1430
+          },
+          {
+            "file": "assets/provenance-CIzcU1CD.js",
+            "rawBytes": 17677,
+            "gzipBytes": 5445
+          },
+          {
+            "file": "assets/QualityReviewNotice-DYAKf17g.js",
+            "rawBytes": 401,
+            "gzipBytes": 307
+          },
+          {
+            "file": "assets/queue-sentence-retakes-DnQjmKOg.js",
+            "rawBytes": 4360,
+            "gzipBytes": 1837
+          },
+          {
+            "file": "assets/ReaderView-CJxXq91f.js",
+            "rawBytes": 10038,
+            "gzipBytes": 3678
+          },
+          {
+            "file": "assets/SentenceRetakePanel-D0rIhFBI.css",
+            "rawBytes": 2094,
+            "gzipBytes": 689
+          },
+          {
+            "file": "assets/SentenceRetakePanel-K8AsSsBM.js",
+            "rawBytes": 3636,
+            "gzipBytes": 1437
+          },
+          {
+            "file": "assets/text-normalization-preview-DSTOvAnm.js",
+            "rawBytes": 955,
+            "gzipBytes": 540
+          },
+          {
+            "file": "assets/WebGpuDiagnosticsPanel-DvgjsTxC.js",
+            "rawBytes": 1705,
+            "gzipBytes": 788
+          }
+        ]
+      }
+    }
+  },
+  "lazyBoundaries": {
+    "document-parsers": {
+      "rawBytes": 3568056,
+      "gzipBytes": 871709,
+      "files": [
+        {
+          "file": "assets/document-import-B6FLIdzZ.js",
+          "rawBytes": 5738,
+          "gzipBytes": 2640
+        },
+        {
+          "file": "assets/document-worker-DZDqc6oU.js",
+          "rawBytes": 2636,
+          "gzipBytes": 1266
+        },
+        {
+          "file": "assets/document.worker-CVol8sk2.js",
+          "rawBytes": 205400,
+          "gzipBytes": 71947
+        },
+        {
+          "file": "assets/epub-CTu7vAvr.js",
+          "rawBytes": 3495,
+          "gzipBytes": 1540
+        },
+        {
+          "file": "assets/epub-mapping-A4fc-f8V.js",
+          "rawBytes": 3508,
+          "gzipBytes": 1292
+        },
+        {
+          "file": "assets/pdf-B7qtjGVF.js",
+          "rawBytes": 482535,
+          "gzipBytes": 144244
+        },
+        {
+          "file": "assets/pdf-HjiW4khr.js",
+          "rawBytes": 481335,
+          "gzipBytes": 143840
+        },
+        {
+          "file": "assets/pdf.worker-Dg_VPFYK.mjs",
+          "rawBytes": 2383409,
+          "gzipBytes": 504940
+        }
+      ]
+    },
+    "kokoro-runtime": {
+      "rawBytes": 1477986,
+      "gzipBytes": 724068,
+      "files": [
+        {
+          "file": "assets/dist-lib-Dcl7M6pA.js",
+          "rawBytes": 1441720,
+          "gzipBytes": 708873
+        },
+        {
+          "file": "assets/kokoro-BaJFgIpx.js",
+          "rawBytes": 10656,
+          "gzipBytes": 4138
+        },
+        {
+          "file": "assets/kokoro-CS_atSEJ.js",
+          "rawBytes": 10831,
+          "gzipBytes": 4203
+        },
+        {
+          "file": "assets/kokoro-fetch-CmmXfmRY.js",
+          "rawBytes": 1110,
+          "gzipBytes": 574
+        },
+        {
+          "file": "assets/kokoro-fetch-DBsMppFM.js",
+          "rawBytes": 1112,
+          "gzipBytes": 580
+        },
+        {
+          "file": "assets/kokoro-integrity-D3a4NDQ-.js",
+          "rawBytes": 5131,
+          "gzipBytes": 2377
+        },
+        {
+          "file": "assets/kokoro-multilingual-aahXMZ2C.js",
+          "rawBytes": 3242,
+          "gzipBytes": 1387
+        },
+        {
+          "file": "assets/kokoro-multilingual-FgFLnWts.js",
+          "rawBytes": 4184,
+          "gzipBytes": 1936
+        }
+      ]
+    },
+    "multilingual-g2p": {
+      "rawBytes": 46082458,
+      "gzipBytes": 34032957,
+      "files": [
+        {
+          "file": "assets/all-BXgNu8o0.js",
+          "rawBytes": 17864343,
+          "gzipBytes": 13614364
+        },
+        {
+          "file": "assets/all-CQVNe8k_.js",
+          "rawBytes": 17864350,
+          "gzipBytes": 13614227
+        },
+        {
+          "file": "assets/en-us-BABgn7VW.js",
+          "rawBytes": 321466,
+          "gzipBytes": 248498
+        },
+        {
+          "file": "assets/en-us-LiA9lMvw.js",
+          "rawBytes": 321468,
+          "gzipBytes": 248459
+        },
+        {
+          "file": "assets/ephone-BdBg0FYv.js",
+          "rawBytes": 474586,
+          "gzipBytes": 135980
+        },
+        {
+          "file": "assets/ephone-gYwwg4I1.js",
+          "rawBytes": 474384,
+          "gzipBytes": 135992
+        },
+        {
+          "file": "assets/jpx-B0b4UPo4.js",
+          "rawBytes": 360141,
+          "gzipBytes": 275272
+        },
+        {
+          "file": "assets/jpx-IOY-lV8Z.js",
+          "rawBytes": 360148,
+          "gzipBytes": 275221
+        },
+        {
+          "file": "assets/phonemizer-D0oeX8g1.js",
+          "rawBytes": 1329001,
+          "gzipBytes": 681930
+        },
+        {
+          "file": "assets/phonemizer-DsDfV4re.js",
+          "rawBytes": 1329003,
+          "gzipBytes": 681931
+        },
+        {
+          "file": "assets/roa-5piiJyz6.js",
+          "rawBytes": 688874,
+          "gzipBytes": 530210
+        },
+        {
+          "file": "assets/roa-DuAsy3h-.js",
+          "rawBytes": 688881,
+          "gzipBytes": 530205
+        },
+        {
+          "file": "assets/sit-CHAeWlkX.js",
+          "rawBytes": 2002910,
+          "gzipBytes": 1530297
+        },
+        {
+          "file": "assets/sit-CvezjL6o.js",
+          "rawBytes": 2002903,
+          "gzipBytes": 1530371
+        }
+      ]
+    },
+    "transformers-runtime": {
+      "rawBytes": 1544194,
+      "gzipBytes": 439087,
+      "files": [
+        {
+          "file": "assets/transformers.web-BavHBFpF.js",
+          "rawBytes": 513711,
+          "gzipBytes": 145988
+        },
+        {
+          "file": "assets/transformers.web-BwSDCNTe.js",
+          "rawBytes": 516188,
+          "gzipBytes": 146755
+        },
+        {
+          "file": "assets/transformers.web-CZjfMF4e.js",
+          "rawBytes": 514295,
+          "gzipBytes": 146344
+        }
+      ]
+    },
+    "piper-runtime": {
+      "rawBytes": 59968762,
+      "gzipBytes": 21430016,
+      "files": [
+        {
+          "file": "assets/piper_plus_wasm-BFiIKUoB.js",
+          "rawBytes": 7124,
+          "gzipBytes": 2553
+        },
+        {
+          "file": "assets/piper_plus_wasm_bg-XgbeTk35.wasm",
+          "rawBytes": 59961638,
+          "gzipBytes": 21427463
+        }
+      ]
+    },
+    "onnx-web-runtime": {
+      "rawBytes": 37047028,
+      "gzipBytes": 9152911,
+      "files": [
+        {
+          "file": "assets/ort-wasm-simd-threaded-Cpm-ox6i.wasm",
+          "rawBytes": 13479978,
+          "gzipBytes": 3453562
+        },
+        {
+          "file": "assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm",
+          "rawBytes": 23567050,
+          "gzipBytes": 5699349
+        }
+      ]
+    },
+    "mp3-encoder": {
+      "rawBytes": 163220,
+      "gzipBytes": 56638,
+      "files": [
+        {
+          "file": "assets/lamejs-vPs_I_uk.js",
+          "rawBytes": 163220,
+          "gzipBytes": 56638
+        }
+      ]
+    },
+    "pitch-processor": {
+      "rawBytes": 99200,
+      "gzipBytes": 43761,
+      "files": [
+        {
+          "file": "assets/SignalsmithStretch-oRg7r08Z.js",
+          "rawBytes": 99200,
+          "gzipBytes": 43761
+        }
+      ]
+    }
+  }
+}
