@@ -12,7 +12,7 @@
   <a href="https://github.com/SysAdminDoc/BetterTTS/releases/latest"><strong>Get the Windows app</strong></a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-0.25.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.25.1-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
@@ -31,7 +31,7 @@ BetterTTS is a private speech-production workspace for short clips, narration, p
 | You can inspect the evidence | Saved clips and exports carry engine, model, voice-source, cleanup, encoder, and quality provenance. |
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
-- **Application:** BetterTTS v0.25.0 · Web + Windows
+- **Application:** BetterTTS v0.25.1 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
@@ -56,7 +56,7 @@ The current Windows build is unsigned. Windows may show a SmartScreen warning. E
 
 The optional MV3 extension sends selected text or the current page to BetterTTS. It requests temporary active-tab access and does not declare broad host permissions.
 
-1. Download `bettertts-extension-v0.25.0.zip` from the latest release.
+1. Download `bettertts-extension-v0.25.1.zip` from the latest release.
 2. Extract it to a folder you plan to keep.
 3. Open your browser's extensions page and enable Developer mode.
 4. Choose **Load unpacked**, then select the extracted folder.
@@ -181,10 +181,10 @@ Useful commands:
 Each release publishes the Windows installer, update metadata, extension ZIP, CycloneDX SBOM, and a SHA-256 manifest. Compare a downloaded file before running it:
 
 ```powershell
-Get-FileHash '.\BetterTTS.Setup.0.25.0.exe' -Algorithm SHA256
+Get-FileHash '.\BetterTTS.Setup.0.25.1.exe' -Algorithm SHA256
 ```
 
-Then compare the value with `BetterTTS-v0.25.0-SHA256SUMS.txt` from the same release. Release notes state whether Authenticode signing was available for that build.
+Then compare the value with `BetterTTS-v0.25.1-SHA256SUMS.txt` from the same release. Release notes state whether Authenticode signing was available for that build.
 
 ## Runtime licenses
 
@@ -215,6 +215,10 @@ Application code is MIT. Models and runtime packages keep their own licenses. Th
 | `sherpa-onnx-win-x64` | Apache-2.0 |
 
 Run `npm run license:runtime` to compare this reviewed inventory with the installed package metadata.
+
+## Brand assets
+
+The ribbon-wave mark remains the selected identity. The [concept archive](assets/brand/concepts) keeps all five original directions, and [selection.json](assets/brand/concepts/selection.json) identifies the approved artwork. Keep the [selected master](assets/brand/bettertts-selected-master.png) unchanged. Use the production-ready files in [assets/brand](assets/brand) for the app and documentation.
 
 ## Contributing
 

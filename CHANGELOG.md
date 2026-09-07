@@ -1,6 +1,19 @@
 # Changelog
 
-## v0.25.0 - 2026-09-06
+## v0.25.1 (2026-09-07)
+
+### Changed
+
+- Archived all five original BetterTTS visual directions under `assets/brand/concepts/`.
+- Preserved the approved ribbon-wave source as an untouched master and added a machine-readable selection record.
+- Kept the production logo family and interface unchanged after a same-viewport comparison confirmed that they already follow the approved direction.
+- Standardized changelog version headings with parenthesized dates and kept the release identity parser compatible with older headings.
+
+### Release
+
+- Rebuilt the web app, companion extension, Windows installer, update metadata, and CycloneDX SBOM from the synchronized v0.25.1 sources.
+
+## v0.25.0 (2026-09-06)
 
 ### Changed
 
@@ -22,7 +35,7 @@
 - Added packaged-app coverage for cancellation, host recovery, real Kokoro synthesis, and decoded WAV duration.
 - Added one SHA-256 manifest covering every published v0.25.0 artifact.
 
-## v0.24.0 - 2026-08-09
+## v0.24.0 (2026-08-09)
 
 ### Security
 - Remediated the current npm audit findings by upgrading PDF.js and vulnerable transitive dependencies, added a production audit gate to the build, and rejected PDF files containing JavaScript actions before local text extraction.
@@ -55,12 +68,12 @@
 - Added a versioned mobile listening contract covering foreground/offline shell and model readiness, interrupted direct versus durable-queue synthesis recovery, persisted reader/playback positions, 44px touch-safe queue actions, and POST/Open/GET/paste share-import fallbacks; the PWA exposes lifecycle markers for acceptance checks without telemetry.
 - Added a versioned portable offline model-pack ZIP contract with reviewed engine/model/license/source/revision metadata, exact asset sizes and SHA-256 digests, bounded archive inspection, explicit license confirmation, staged Cache API promotion, verified repair, and lazy Kokoro export/import controls. Corrupt or incomplete bytes remain staged and are never advertised as ready.
 
-## v0.23.0 - 2026-08-03
+## v0.23.0 (2026-08-03)
 
 ### Added
 - Completed the roadmap release drain with native diagnostics and accessibility smoke coverage, resilient PWA/CSP handling, generation provenance, reversible normalization, searchable clip-library views, generated capability facts, a deterministic CycloneDX SBOM, and a reviewed-English UI locale boundary that keeps synthesis languages engine-specific (542 tests across 94 files).
 
-## v0.22.0 - 2026-07-29
+## v0.22.0 (2026-07-29)
 
 ### Security
 - Hardened untrusted desktop and archive boundaries: native inference IPC now validates every renderer message, `app://` navigation no longer serves the shell for missing script/model assets, and portable backups reject duplicate, dangling, inconsistent, or excessive records before replacing local data.
@@ -169,13 +182,13 @@
 - Added extension permission/archive coverage and browser smoke validation for literal selection/page handoff text (489 tests across 83 files).
 - Added shared model-manifest, sync-integrity, runtime checksum, and poisoned-cache coverage (496 tests across 84 files).
 
-## v0.21.0 - 2026-07-29
+## v0.21.0 (2026-07-29)
 
 ### Security
 - Native desktop inference now re-hashes every installed model file before creating an ONNX session, validates immutable revisions and safe manifest paths, and fails closed on integrity or license errors. Missing/offline packs are reported separately; mutable model fallback is development-only and is disabled in packaged builds.
 - ZIP-backed backups, EPUBs, and DOCX files now enforce format-specific compressed, expanded, entry-count, and compression-ratio budgets before extraction. EPUB import inflates only referenced reading-order assets, rejects excessive chapter/text/chunk counts without silent truncation, and backup restore commits each queue job with its audio blobs in one transaction.
 
-## v0.20.0 - 2026-07-25
+## v0.20.0 (2026-07-25)
 
 ### Security
 - Patched the production Transformers/ONNX dependency graph to adm-zip 0.6.0 and sharp 0.35.0, and added runtime plus packaged-asar security gates with expiring, owner-labelled exception support.
@@ -209,7 +222,7 @@
 - Browser smoke now enforces landmarks, heading order, skip-link and focus behavior, reduced-motion and forced-colors rendering, dark/light contrast tokens, and mobile layout.
 - `npm run release:smoke` now rebuilds the installer and verifies real synthesis through both browser Worker and packaged Electron utility-process paths while the default smoke stays fast and model-free.
 
-## v0.19.0 - 2026-07-09
+## v0.19.0 (2026-07-09)
 
 ### Added
 - **Recoverable destructive actions.** Removing a queue job or saved clip, and clearing the clip library, now offers an Undo action backed by complete IndexedDB snapshots; queue chunk audio and clip blobs are restored atomically.
@@ -226,7 +239,7 @@
 - 234 -> 238 tests across 29 files, with regression coverage for queue/library snapshot restoration and damaged clip records.
 - Playwright smoke coverage now verifies keyboard tabs, mobile navigation, update actions, Queue/Library empty states and Undo flows, and eight rendered views across both themes; failure teardown reliably closes Chromium and the local server.
 
-## v0.18.0 - 2026-07-09
+## v0.18.0 (2026-07-09)
 
 ### Added
 - **Native desktop inference (TF-99).** The Electron app can now synthesize Kokoro through native ONNX Runtime: an Electron `utilityProcess` hosts kokoro-js on onnxruntime-node's CPU execution provider (DirectML fails Kokoro's ConvTranspose at op level regardless of dtype), mirroring the browser worker protocol over the platform bridge. Desktop settings gain a "Native engine" toggle; blended and multilingual voices transparently fall back to the browser runtime. Measured on this machine: ~1.0-1.2x realtime on CPU, above the browser WASM path. `npm run desktop:probe-host` runs a real end-to-end synthesis probe without a GUI, and the desktop smoke check now proves the host spawns and reports its EP + runtime versions.
@@ -244,7 +257,7 @@
 ### Tests
 - 191 → 234 tests across 30 suites (native TTS client protocol, model-pack downloader, codec matrix, completeness heuristic, splitter regression, library eviction).
 
-## v0.17.0 - 2026-07-09
+## v0.17.0 (2026-07-09)
 
 ### Added
 - Native ONNX Runtime probe (`npm run desktop:probe-ort`, `scripts/probe-native-ort.mjs`): de-risking groundwork for desktop-native inference (ROADMAP TF-99). On this machine onnxruntime-node 1.27 loads the real Kokoro q8 graph; the CPU execution provider runs a clean forward pass (~276 ms / 12-token seq), while DirectML binds but hits a known quantized-ConvTranspose limitation: so native inference will ship CPU-EP-first with fp32-on-DirectML as the GPU follow-up. No app behavior change yet.
@@ -262,7 +275,7 @@
 - Mobile editor input no longer collapses into a 42px grid track; the toolbar now uses a two-column command grid and the render tabs reflow without overlapping their status heading.
 - Smoke coverage now exercises real workspace tabs and the collapsed diagnostics surface, captures stable dark/light/mobile screenshots after theme transitions settle, and validates the redesigned Electron rail rather than removed summary cards.
 
-## v0.16.0 - 2026-07-09
+## v0.16.0 (2026-07-09)
 
 ### Fixed
 - Restored the production Kokoro engine: GitHub Pages ran Jekyll over the deployed branch and silently dropped Vite's `__vite-browser-external-*` chunks (no `.nojekyll`), 404ing the Kokoro and multilingual lazy imports on the live site. Deploys now ship `.nojekyll`, refuse to run without it, and verify the live site serves the index, entry, and underscore assets after every push.
@@ -286,7 +299,7 @@
 - `deleteJob` uses an IndexedDB key-range delete instead of materializing every stored audio blob to prefix-match keys.
 - Tests 177 → 191 (WebM cluster rolling, Opus header adoption, unit-word regressions, unicode chunk boundaries, encoded EPUB hrefs, malformed-XHTML fallback, truncated WAV payloads, queue zombie-status migration).
 
-## v0.15.0 - 2026-07-09
+## v0.15.0 (2026-07-09)
 
 ### Changed
 - Reworked the studio shell into a more professional workstation layout with a six-tile command summary, side-by-side script/output workbench, tabbed waveform-style output deck, denser queue/library treatment, refreshed control-console modules, and responsive dark/light polish.
@@ -294,7 +307,7 @@
 ### Fixed
 - Updated the rendered smoke check to follow the current Script surface label after the interface copy refresh.
 
-## v0.14.0 - 2026-07-09
+## v0.14.0 (2026-07-09)
 
 ### Fixed
 - Added guardrails and visible recovery messages for slow article imports, oversized files, missing queue/library blobs, failed ZIP exports, and failed clip/library delete actions.
@@ -306,7 +319,7 @@
 - Rejected corrupt cached Kokoro voice-bin payloads unless they match the exact style tensor size, and blocked oversized or non-audio background music files before decode.
 - Added queue export size preflights so ZIP and M4B exports reject oversized batches before materializing every chunk in memory.
 
-## v0.13.0 - 2026-07-09
+## v0.13.0 (2026-07-09)
 
 ### Added
 - Added an offline pack manager in the control console with per-engine cache status, app-shell separation, Kokoro q8 prefetch, and selective cache clearing.
@@ -331,7 +344,7 @@
 ### Tests
 - 114 -> 159 assertions across 22 suites, adding coverage for offline cache management, runtime readiness diagnostics, document imports, playback resume, queue segment editing, engine registry behavior, and Piper-plus metadata/audio conversion.
 
-## v0.12.0 - 2026-07-09
+## v0.12.0 (2026-07-09)
 
 ### Changed
 - Reworked the main studio into a premium workstation interface with compact top chrome, runtime status, editor toolbar, output deck tabs, persistent queue/library empty states, inspector-style engine controls, a clearer generation module, and a bottom system rail.
@@ -340,7 +353,7 @@
 ### Fixed
 - Added an explicit captions track fallback for generated audio elements so local lint is clean and result playback keeps an accessibility-compatible media structure.
 
-## v0.11.0 - 2026-07-09
+## v0.11.0 (2026-07-09)
 
 ### Added
 - Migrated the shared `@huggingface/transformers` runtime to 4.2.0 with a root npm override so `kokoro-js`, Supertonic, timestamped Kokoro, and direct tensor paths all resolve to v4; Kokoro WASM q8 and WebGPU fp32 generation were verified in-browser (TF-31).
@@ -358,7 +371,7 @@
 ### Tests
 - 91 -> 114 assertions across 15 suites, adding coverage for M4B muxing, Kokoro timestamps, multilingual Kokoro, KittenTTS metadata/WAV parsing, and Transformers.js v4 ModelRegistry APIs.
 
-## v0.10.0 - 2026-07-08
+## v0.10.0 (2026-07-08)
 
 ### Features
 - **Voice blending**: weighted mix of 2-4 Kokoro voices via custom style tensors; blend editor with per-voice weight sliders in the Advanced section (TF-22).
@@ -369,7 +382,7 @@
 ### Tests
 - 87 → 91 assertions across 8 suites (voice-mix, queue, and EPUB parser modules added).
 
-## v0.9.0 - 2026-07-08
+## v0.9.0 (2026-07-08)
 
 ### Fixed
 - Per-result save button was dead on every Chromium browser (broken `showSaveFilePicker` cast invoked `window` as a function).
@@ -401,7 +414,7 @@
 - Strict TypeScript enabled repo-wide (tests now typechecked); lint broadened with react-hooks and jsx-a11y plugins.
 - Tests: 39 → 70 assertions across 5 suites (encode and library modules now covered).
 
-## v0.8.0 - 2026-07-08
+## v0.8.0 (2026-07-08)
 
 ### UI Polish
 - System-level interaction states: hover, focus-visible, active/pressed on all buttons, selects, engine cards, voice previews, and result rows.
@@ -441,14 +454,14 @@
 - Project renamed from TTS4FREE to BetterTTS.
 - New design tokens: --shadow-sm, --ring (both themes).
 
-## v0.7.0 - 2026-07-08
+## v0.7.0 (2026-07-08)
 
 ### Features
 - Web Worker for off-main-thread Kokoro inference: UI stays responsive during generation (TF-20).
 - Pitch control (±4 semitones) via SoundTouch.js post-processing without tempo change (TF-32).
 - Background-music bed mixing: upload audio, loop to speech length, mix at configurable volume (TF-34).
 
-## v0.5.0 - 2026-07-08
+## v0.5.0 (2026-07-08)
 
 ### Features
 - Streaming playback: audio plays as each sentence generates via Web Audio scheduling (TF-14).
@@ -458,13 +471,13 @@
 - Pronunciation overrides dictionary persisted in localStorage: word/replacement pairs applied before generation (TF-33).
 - COOP/COEP header injection via SW for SharedArrayBuffer threaded WASM on GitHub Pages (TF-28).
 
-## v0.4.0 - 2026-07-08
+## v0.4.0 (2026-07-08)
 
 ### Features
 - Generation stats: elapsed time, chars/s throughput, audio duration, realtime factor (TF-27 partial).
 - Persistent clip library backed by IndexedDB: clips survive reloads with re-download and delete controls (TF-17).
 
-## v0.3.0 - 2026-07-08
+## v0.3.0 (2026-07-08)
 
 ### Features
 - Per-voice preview button with session-cached audio (TF-16).
@@ -475,7 +488,7 @@
 ### Tests
 - 39 test assertions across 3 suites (wav, text, subtitles).
 
-## v0.2.0 - 2026-07-08
+## v0.2.0 (2026-07-08)
 
 ### Correctness
 - Sentence-chunk Kokoro generation to prevent silent truncation at the 510 phoneme token limit (TF-01).
@@ -500,7 +513,7 @@
 - Typed VoiceId union replaces `as never` cast on voice parameter.
 - Vitest harness with 24 assertions across WAV encoding, text chunking, pause parsing, and slug generation (TF-12).
 
-## v0.1.0 - 2026-07-08
+## v0.1.0 (2026-07-08)
 
 - Initial static React app (originally named TTS4FREE).
 - Added in-browser Kokoro 82M generation through `kokoro-js`.

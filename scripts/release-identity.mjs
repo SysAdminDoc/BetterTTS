@@ -61,7 +61,9 @@ export function assertVersionMetadata(repoRoot) {
   }
 
   const changelog = readText(join(repoRoot, 'CHANGELOG.md'), 'CHANGELOG.md')
-  const changelogVersion = changelog.match(/^## v([^\s]+)\s+-\s+\d{4}-\d{2}-\d{2}/m)?.[1]
+  const changelogVersion = changelog.match(
+    /^## v([^\s]+)(?:\s+\(\d{4}-\d{2}-\d{2}\)|\s+-\s+\d{4}-\d{2}-\d{2})/m,
+  )?.[1]
   if (changelogVersion !== version) {
     throw new Error(`CHANGELOG.md latest version ${changelogVersion ?? 'missing'} does not match package ${version}.`)
   }

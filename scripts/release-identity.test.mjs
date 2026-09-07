@@ -22,7 +22,7 @@ function createFixture(version = '1.2.3') {
     packages: { '': { name: 'bettertts', version } },
   }))
   writeFileSync(join(root, 'README.md'), `[![Version](https://img.shields.io/badge/version-${version}-blue.svg)](#)\n`)
-  writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## v${version} - 2026-08-03\n`)
+  writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## v${version} (2026-08-03)\n`)
   writeFileSync(join(root, 'capabilities.json'), JSON.stringify({ schemaVersion: 1, app: { name: 'BetterTTS', version } }))
   return root
 }

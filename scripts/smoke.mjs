@@ -219,7 +219,7 @@ async function seedCompletedQueueJob(page, id) {
     const currentProvenance = {
       schemaVersion: 3,
       createdAt: new Date().toISOString(),
-      app: { name: 'BetterTTS', version: '0.25.0' },
+      app: { name: 'BetterTTS', version: '0.25.1' },
       runtime: { target: 'web', label: 'WebAssembly q8', platform: 'Win32' },
       engine: { id: 'kokoro', modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX', modelRevision: 'smoke-fixture' },
       voice: {
