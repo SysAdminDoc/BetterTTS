@@ -1,7 +1,7 @@
 {
   "name": "bettertts",
   "private": true,
-  "version": "0.25.1",
+  "version": "0.25.2",
   "description": "Private local text-to-speech studio for web and Windows.",
   "author": "SysAdminDoc <matt_parker@outlook.com>",
   "type": "module",
@@ -70,7 +70,8 @@
   "overrides": {
     "@huggingface/transformers": "$@huggingface/transformers",
     "adm-zip": "0.6.0",
-    "sharp": "0.35.0"
+    "js-yaml": "4.3.2",
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

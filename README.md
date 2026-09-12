@@ -1,8 +1,6 @@
-# BetterTTS
+![BetterTTS private speech studio for local voice generation](assets/marketing/social-preview.png)
 
-<p align="center">
-  <img src="assets/brand/bettertts-app-1024.png" width="144" alt="BetterTTS logo">
-</p>
+# BetterTTS
 
 <p align="center"><strong>Turn scripts, articles, and books into natural speech without sending your words away.</strong></p>
 
@@ -12,12 +10,12 @@
   <a href="https://github.com/SysAdminDoc/BetterTTS/releases/latest"><strong>Get the Windows app</strong></a>
 </p>
 
-[![Version](https://img.shields.io/badge/version-0.25.1-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.25.2-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Web%20%7C%20Windows-24292f.svg)](https://sysadmindoc.github.io/BetterTTS/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6.svg)](#)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
-[![Tests](https://img.shields.io/badge/tests-648%20passing-53d889.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-650%20passing-53d889.svg)](#)
 
 ![BetterTTS private speech studio](public/screenshots/desktop.png)
 
@@ -31,11 +29,11 @@ BetterTTS is a private speech-production workspace for short clips, narration, p
 | You can inspect the evidence | Saved clips and exports carry engine, model, voice-source, cleanup, encoder, and quality provenance. |
 
 <!-- BEGIN BETTERTTS CAPABILITIES -->
-- **Application:** BetterTTS v0.25.1 · Web + Windows
+- **Application:** BetterTTS v0.25.2 · Web + Windows
 - **Engines:** Kokoro local, Supertonic, KittenTTS, Chatterbox (experimental), Piper-plus, MeloTTS, Qwen3-TTS (experimental), Browser
 - **Queue:** resumable jobs for Kokoro local, Supertonic, KittenTTS, Piper-plus, MeloTTS
 - **Exports:** WAV, MP3, OPUS, FLAC, M4B audio · SRT, VTT, ASS captions
-- **Tests:** 648 tests across 109 test files
+- **Tests:** 650 tests across 110 test files
 - **Runtime licenses:** 21 direct package rows validated by `npm run license:runtime`
 - **Model licenses:** Kokoro 82M (Apache-2.0); Sherpa Kokoro int8 pack (Apache-2.0); Supertonic ONNX model (OpenRAIL); KittenTTS model (Apache-2.0); Chatterbox ONNX models (MIT); Chatterbox multilingual ONNX model (MIT); Piper-plus Tsukuyomi-chan (MIT); Sherpa Piper Cori pack (Public-Domain); MeloTTS model (MIT); Sherpa MeloTTS pack (MIT); Qwen3-TTS model (Apache-2.0); Browser voices (Device-managed)
 <!-- END BETTERTTS CAPABILITIES -->
@@ -56,7 +54,7 @@ The current Windows build is unsigned. Windows may show a SmartScreen warning. E
 
 The optional MV3 extension sends selected text or the current page to BetterTTS. It requests temporary active-tab access and does not declare broad host permissions.
 
-1. Download `bettertts-extension-v0.25.1.zip` from the latest release.
+1. Download `bettertts-extension-v0.25.2.zip` from the latest release.
 2. Extract it to a folder you plan to keep.
 3. Open your browser's extensions page and enable Developer mode.
 4. Choose **Load unpacked**, then select the extracted folder.
@@ -181,10 +179,10 @@ Useful commands:
 Each release publishes the Windows installer, update metadata, extension ZIP, CycloneDX SBOM, and a SHA-256 manifest. Compare a downloaded file before running it:
 
 ```powershell
-Get-FileHash '.\BetterTTS.Setup.0.25.1.exe' -Algorithm SHA256
+Get-FileHash '.\BetterTTS.Setup.0.25.2.exe' -Algorithm SHA256
 ```
 
-Then compare the value with `BetterTTS-v0.25.1-SHA256SUMS.txt` from the same release. Release notes state whether Authenticode signing was available for that build.
+Then compare the value with `BetterTTS-v0.25.2-SHA256SUMS.txt` from the same release. Release notes state whether Authenticode signing was available for that build.
 
 ## Runtime licenses
 

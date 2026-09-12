@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.25.2 (2026-09-12)
+
+### Changed
+
+- Put the approved marketing hero at the top of the README so visitors see the product promise and real interface immediately.
+- Removed the stale release label from the hero without changing its layout, brand artwork, copy, or product screenshot.
+- Added a visual decision archive with both rejected edit attempts, the untouched source, the repair patch, and the selected final image.
+- Added regression coverage that requires one README hero reference and keeps the repository and web copies identical.
+- Updated the pinned image and YAML packages after the local release gate found current high-severity advisories.
+
+### Release
+
+- Rebuilt the web app, browser companion, Windows installer, update metadata, and CycloneDX SBOM from the synchronized v0.25.2 sources.
+
 ## v0.25.1 (2026-09-07)
 
 ### Changed

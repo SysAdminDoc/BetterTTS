@@ -2,15 +2,15 @@
   "schemaVersion": 2,
   "app": {
     "name": "BetterTTS",
-    "version": "0.25.1",
+    "version": "0.25.2",
     "supportedPlatforms": [
       "web",
       "windows"
     ]
   },
   "testMetrics": {
-    "testFiles": 109,
-    "tests": 648
+    "testFiles": 110,
+    "tests": 650
   },
   "queue": {
     "resumable": true,

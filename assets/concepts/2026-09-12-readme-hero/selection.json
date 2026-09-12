@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "selected": "final-selected.png",
+  "productionCopies": [
+    "../../marketing/social-preview.png",
+    "../../../public/social-preview.png"
+  ],
+  "dimensions": {
+    "width": 1280,
+    "height": 640
+  },
+  "containsReleaseVersion": false,
+  "source": "original-version-bearing.png",
+  "sourceSha256": "197d9788a6b3c40fe17ea16736080cc7cf8691a73ac6aab010aed94b481524ce",
+  "selectedSha256": "881183c6426f229763d9b776031479222f16841a39e6a91aea1afb311121b7c8",
+  "changedBounds": {
+    "x": 1199,
+    "y": 119,
+    "width": 37,
+    "height": 18
+  },
+  "reviewedOn": "2026-09-12"
+}
