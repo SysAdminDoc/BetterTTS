@@ -38,6 +38,14 @@ async function dismissNotification(page) {
   throw new Error('Notifications did not clear before the screenshot capture')
 }
 
+async function waitForSelectedTab(page, tab, label) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (await tab.getAttribute('aria-selected') === 'true') return
+    await page.waitForTimeout(20)
+  }
+  throw new Error(`${label} did not become the selected render workspace tab`)
+}
+
 function command(name, args) {
   if (process.platform !== 'win32') return { file: name, args }
   return { file: 'cmd.exe', args: ['/d', '/s', '/c', name, ...args] }
@@ -1262,16 +1270,14 @@ async function runSmoke() {
 
     console.log('Checking queue playback controls...')
     const outputTab = desktop.page.getByRole('tab', { name: /Output/ })
+    const queueTab = desktop.page.getByRole('tab', { name: /Queue/ })
     await outputTab.focus()
     await outputTab.press('ArrowRight')
-    if (await desktop.page.getByRole('tab', { name: /Queue/ }).getAttribute('aria-selected') !== 'true') {
-      throw new Error('ArrowRight did not select the next render workspace tab')
-    }
-    await desktop.page.getByRole('tab', { name: /Queue/ }).press('ArrowLeft')
-    if (await outputTab.getAttribute('aria-selected') !== 'true') {
-      throw new Error('ArrowLeft did not restore the previous render workspace tab')
-    }
-    await desktop.page.getByRole('tab', { name: /Queue/ }).click()
+    await waitForSelectedTab(desktop.page, queueTab, 'Queue')
+    await queueTab.focus()
+    await queueTab.press('ArrowLeft')
+    await waitForSelectedTab(desktop.page, outputTab, 'Output')
+    await queueTab.click()
     const queue = desktop.page.getByLabel('Generation queue')
     await queue.scrollIntoViewIfNeeded()
     await dismissNotification(desktop.page)
