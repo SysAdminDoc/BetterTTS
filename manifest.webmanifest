@@ -1,0 +1,72 @@
+{
+  "name": "BetterTTS",
+  "short_name": "BetterTTS",
+  "description": "Private local text-to-speech studio for scripts, articles, and audiobooks.",
+  "id": "/BetterTTS/",
+  "scope": "/BetterTTS/",
+  "start_url": "./",
+  "share_target": {
+    "action": "./",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            ".txt",
+            ".epub",
+            ".pdf",
+            ".docx",
+            "text/plain",
+            "application/epub+zip",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ]
+        }
+      ]
+    }
+  },
+  "display": "standalone",
+  "theme_color": "#05080d",
+  "background_color": "#05080d",
+  "screenshots": [
+    {
+      "src": "screenshots/desktop.png",
+      "sizes": "1440x950",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "BetterTTS desktop studio"
+    },
+    {
+      "src": "screenshots/mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "BetterTTS mobile studio"
+    }
+  ],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
