@@ -10,6 +10,7 @@
 - Added regression coverage that requires one README hero reference and keeps the repository and web copies identical.
 - Updated the pinned image and YAML packages after the local release gate found current high-severity advisories.
 - Made the accessibility smoke wait for render-tab state transitions before asserting, removing a timing-only failure from release verification.
+- Refreshed the verified Kokoro archive size and SHA-256 after the upstream release asset was replaced.
 
 ### Release
 

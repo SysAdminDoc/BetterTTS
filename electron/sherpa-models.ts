@@ -79,8 +79,8 @@ export const SHERPA_KOKORO_PACK: SherpaModelPack = {
   archive: {
     fileName: 'kokoro-int8-multi-lang-v1_0.tar.bz2',
     url: `${SHERPA_RELEASE_BASE}/kokoro-int8-multi-lang-v1_0.tar.bz2`,
-    size: 131_839_838,
-    sha256: '75654a84864be26f345f020f4070c2c019e96dd1b7f9bf6e2ffd59efac6aa5a3',
+    size: 132_303_094,
+    sha256: '4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e',
   },
   layout: {
     rootDir: 'kokoro-int8-multi-lang-v1_0',

@@ -469,8 +469,8 @@
       "artifacts": [
         {
           "path": "kokoro-int8-multi-lang-v1_0.tar.bz2",
-          "sizeBytes": 131839838,
-          "sha256": "75654a84864be26f345f020f4070c2c019e96dd1b7f9bf6e2ffd59efac6aa5a3",
+          "sizeBytes": 132303094,
+          "sha256": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
           "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
         }
       ],
