@@ -17,6 +17,16 @@
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](#)
 [![Tests](https://img.shields.io/badge/tests-650%20passing-53d889.svg)](#)
 
+<p align="center">
+  <a href="https://ko-fi.com/X8K126YVER">
+    <img height="42" src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy me a coffee on Ko-fi" />
+  </a>
+</p>
+
+<p align="center">
+  <sub><em>If this project helps you, a coffee helps me keep working on it.</em></sub>
+</p>
+
 ![BetterTTS private speech studio](public/screenshots/desktop.png)
 
 BetterTTS is a private speech-production workspace for short clips, narration, podcasts, and audiobooks. It runs neural voice engines in the browser or in the Windows desktop app. There is no account, cloud render queue, or metered character plan. Model files download only when you choose an engine, then stay on your device for reuse.
