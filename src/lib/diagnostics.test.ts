@@ -82,7 +82,7 @@ describe('collectDiagnostics', () => {
       crossOriginStorage: () => ({
         api: 'navigator.crossOriginStorage',
         exposed: false,
-        requestFileHandle: false,
+        getFileHandle: false,
         secureContext: true,
         usable: false,
         defaultBehavior: 'disabled',
