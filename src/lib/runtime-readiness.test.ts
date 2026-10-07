@@ -70,12 +70,12 @@ describe('Cross-Origin Storage detection', () => {
     expect(status.message).toContain('per-origin Cache API')
   })
 
-  it('recognizes the proposed requestFileHandle surface without invoking it', () => {
+  it('recognizes the proposed getFileHandle surface without invoking it', () => {
     let called = false
     const status = detectCrossOriginStorage({
       navigator: {
         crossOriginStorage: {
-          requestFileHandle: () => {
+          getFileHandle: () => {
             called = true
           },
         },
@@ -84,7 +84,7 @@ describe('Cross-Origin Storage detection', () => {
     })
 
     expect(status.usable).toBe(true)
-    expect(status.requestFileHandle).toBe(true)
+    expect(status.getFileHandle).toBe(true)
     expect(status.defaultBehavior).toBe('disabled')
     expect(called).toBe(false)
   })

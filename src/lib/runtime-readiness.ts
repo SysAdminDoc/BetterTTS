@@ -155,7 +155,7 @@ export function clearWebGpuAdapterDenylist(adapterKey?: string): void {
 export type CrossOriginStorageStatus = {
   api: 'navigator.crossOriginStorage'
   exposed: boolean
-  requestFileHandle: boolean
+  getFileHandle: boolean
   secureContext: boolean | null
   usable: boolean
   defaultBehavior: 'disabled'
@@ -191,7 +191,7 @@ type TransformersReadinessInput = {
 }
 
 type CrossOriginStorageManagerLike = {
-  requestFileHandle?: unknown
+  getFileHandle?: unknown
 }
 
 export function detectCrossOriginStorage(probe: CrossOriginStorageProbe = {}): CrossOriginStorageStatus {
@@ -199,20 +199,20 @@ export function detectCrossOriginStorage(probe: CrossOriginStorageProbe = {}): C
   const secureContext = probe.secureContext ?? (typeof isSecureContext === 'boolean' ? isSecureContext : null)
   const manager = navigatorLike?.crossOriginStorage as CrossOriginStorageManagerLike | undefined
   const exposed = manager != null && typeof manager === 'object'
-  const requestFileHandle = typeof manager?.requestFileHandle === 'function'
-  const usable = exposed && requestFileHandle && secureContext !== false
+  const getFileHandle = typeof manager?.getFileHandle === 'function'
+  const usable = exposed && getFileHandle && secureContext !== false
 
   return {
     api: 'navigator.crossOriginStorage',
     exposed,
-    requestFileHandle,
+    getFileHandle,
     secureContext,
     usable,
     defaultBehavior: 'disabled',
     message: usable
       ? 'Experimental Cross-Origin Storage API detected; BetterTTS still uses the per-origin Cache API by default.'
       : exposed
-        ? 'Experimental Cross-Origin Storage is exposed but does not provide the expected requestFileHandle() method.'
+        ? 'Experimental Cross-Origin Storage is exposed but does not provide the expected getFileHandle() method.'
         : 'Cross-Origin Storage is not exposed; BetterTTS uses the per-origin Cache API by default.',
   }
 }

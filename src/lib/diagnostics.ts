@@ -271,7 +271,7 @@ export async function collectDiagnostics(
     {
       api: 'navigator.crossOriginStorage',
       exposed: false,
-      requestFileHandle: false,
+      getFileHandle: false,
       secureContext: null,
       usable: false,
       defaultBehavior: 'disabled',
